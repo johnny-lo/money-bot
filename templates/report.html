@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>記帳報表</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #f0f2f5;
+            color: #333;
+            padding: 16px;
+        }
+        h1 {
+            text-align: center;
+            font-size: 1.4rem;
+            margin-bottom: 12px;
+            color: #1a1a2e;
+        }
+        .month-picker {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        .month-picker button {
+            background: #4a6cf7;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 8px 16px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .month-picker button:hover { background: #3451c7; }
+        .month-picker button.active {
+            background: #e74c3c;
+        }
+        .month-picker button.active:hover { background: #c0392b; }
+        .month-picker span {
+            font-size: 1.1rem;
+            font-weight: 600;
+            min-width: 120px;
+            text-align: center;
+        }
+        .nav-arrows {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            padding: 16px;
+            margin-bottom: 20px;
+        }
+        .card h2 {
+            font-size: 1rem;
+            color: #555;
+            margin-bottom: 8px;
+        }
+        .chart-container {
+            width: 100%;
+            height: 320px;
+        }
+        .summary-cards {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .summary-item {
+            background: #fff;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            padding: 16px;
+            text-align: center;
+        }
+        .summary-item .label { font-size: 0.85rem; color: #888; }
+        .summary-item .value { font-size: 1.4rem; font-weight: 700; margin-top: 4px; }
+        .summary-item .value.expense { color: #e74c3c; }
+        .summary-item .value.income { color: #27ae60; }
+        .summary-item .value.net { color: #4a6cf7; }
+        .ledger-card { margin-bottom: 20px; }
+        .ledger-card h2 { display: flex; justify-content: space-between; align-items: center; }
+        .ledger-filter {
+            display: flex; gap: 6px; flex-wrap: wrap;
+        }
+        .ledger-filter button {
+            background: #eee; border: none; border-radius: 6px;
+            padding: 4px 12px; font-size: 0.8rem; cursor: pointer;
+        }
+        .ledger-filter button.active { background: #4a6cf7; color: #fff; }
+        .ledger-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            margin-top: 8px;
+        }
+        .ledger-table th {
+            background: #f5f6fa;
+            text-align: left;
+            padding: 8px 10px;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid #e0e0e0;
+            white-space: nowrap;
+        }
+        .ledger-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .ledger-table tr:hover { background: #f9f9fb; }
+        .ledger-table .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .tag-expense { background: #fdecea; color: #e74c3c; }
+        .tag-income { background: #e8f8ef; color: #27ae60; }
+        .ledger-empty {
+            text-align: center; color: #aaa; padding: 32px 0;
+        }
+        .btn-add {
+            background: #27ae60; color: #fff; border: none; border-radius: 8px;
+            padding: 6px 14px; font-size: 0.85rem; cursor: pointer; transition: background 0.2s;
+        }
+        .btn-add:hover { background: #219a52; }
+        .btn-action {
+            border: none; border-radius: 4px; padding: 3px 8px;
+            font-size: 0.75rem; cursor: pointer; margin-right: 4px; transition: background 0.2s;
+        }
+        .btn-edit { background: #f0ad4e; color: #fff; }
+        .btn-edit:hover { background: #ec971f; }
+        .btn-delete { background: #e74c3c; color: #fff; }
+        .btn-delete:hover { background: #c0392b; }
+        .modal-overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.4); z-index: 1000;
+            justify-content: center; align-items: center;
+        }
+        .modal-overlay.show { display: flex; }
+        .modal-box {
+            background: #fff; border-radius: 12px; padding: 24px; width: 90%; max-width: 400px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+        }
+        .modal-box h3 { margin-bottom: 16px; font-size: 1.1rem; color: #333; }
+        .modal-box label { display: block; font-size: 0.85rem; color: #555; margin-bottom: 4px; margin-top: 12px; }
+        .modal-box input, .modal-box select {
+            width: 100%; padding: 8px 10px; border: 1px solid #ddd; border-radius: 8px;
+            font-size: 0.9rem; outline: none; transition: border 0.2s;
+        }
+        .modal-box input:focus, .modal-box select:focus { border-color: #4a6cf7; }
+        .modal-actions {
+            display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;
+        }
+        .modal-actions button {
+            padding: 8px 20px; border: none; border-radius: 8px; font-size: 0.9rem; cursor: pointer;
+        }
+        .btn-cancel { background: #eee; color: #555; }
+        .btn-cancel:hover { background: #ddd; }
+        .btn-save { background: #4a6cf7; color: #fff; }
+        .btn-save:hover { background: #3451c7; }
+        @media (max-width: 480px) {
+            .summary-cards { grid-template-columns: 1fr; }
+            .chart-container { height: 280px; }
+            .ledger-table { font-size: 0.78rem; }
+            .ledger-table th, .ledger-table td { padding: 6px 6px; }
+        }
+    </style>
+</head>
+<body>
+    <h1>記帳報表</h1>
+
+    <div class="month-picker">
+        <div class="nav-arrows">
+            <button id="btnPrev" onclick="changeMonth(-1)">&larr; 上月</button>
+            <span id="monthLabel"></span>
+            <button id="btnNext" onclick="changeMonth(1)">下月 &rarr;</button>
+        </div>
+        <button id="btnAll" onclick="toggleAll()">全部月份</button>
+    </div>
+
+    <div class="summary-cards">
+        <div class="summary-item">
+            <div class="label" id="expenseLabel">本月支出</div>
+            <div class="value expense" id="totalExpense">-</div>
+        </div>
+        <div class="summary-item">
+            <div class="label" id="incomeLabel">本月收入</div>
+            <div class="value income" id="totalIncome">-</div>
+        </div>
+        <div class="summary-item">
+            <div class="label">淨支出</div>
+            <div class="value net" id="totalNet">-</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2 id="pieTitle">支出分類佔比</h2>
+        <div class="chart-container" id="chartPie"></div>
+    </div>
+
+    <div class="card">
+        <h2 id="lineTitle">每日收支趨勢</h2>
+        <div class="chart-container" id="chartLine"></div>
+    </div>
+
+    <div class="card">
+        <h2 id="barTitle">近 6 個月收支對比</h2>
+        <div class="chart-container" id="chartBar"></div>
+    </div>
+
+    <div class="card ledger-card">
+        <h2>
+            <span id="ledgerTitle">流水帳明細</span>
+            <div class="ledger-filter">
+                <button class="btn-add" onclick="openModal()">+ 新增</button>
+                <button class="active" onclick="setLedgerFilter('all')">全部</button>
+                <button onclick="setLedgerFilter('expense')">支出</button>
+                <button onclick="setLedgerFilter('income')">收入</button>
+            </div>
+        </h2>
+        <table class="ledger-table">
+            <thead>
+                <tr>
+                    <th>日期</th>
+                    <th>類型</th>
+                    <th>項目</th>
+                    <th>分類</th>
+                    <th style="text-align:right">金額</th>
+                    <th style="text-align:center">操作</th>
+                </tr>
+            </thead>
+            <tbody id="ledgerBody">
+                <tr><td colspan="6" class="ledger-empty">載入中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 新增/編輯 Modal -->
+    <div class="modal-overlay" id="recordModal">
+        <div class="modal-box">
+            <h3 id="modalTitle">新增紀錄</h3>
+            <label>類型</label>
+            <select id="modalType">
+                <option value="expense">支出</option>
+                <option value="income">收入</option>
+            </select>
+            <label>項目名稱</label>
+            <input type="text" id="modalItem" placeholder="例如：午餐">
+            <label>金額</label>
+            <input type="number" id="modalAmount" placeholder="例如：150" min="0">
+            <label>分類（可留空）</label>
+            <input type="text" id="modalCategory" placeholder="例如：飲食">
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="closeModal()">取消</button>
+                <button class="btn-save" onclick="saveRecord()">儲存</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+const TOKEN = new URLSearchParams(window.location.search).get('token') || '';
+function withToken(url) {
+    const sep = url.includes('?') ? '&' : '?';
+    return url + sep + 'token=' + encodeURIComponent(TOKEN);
+}
+
+const now = new Date();
+let currentYear = now.getFullYear();
+let currentMonth = now.getMonth() + 1;
+let isAllMode = false;
+
+const pieChart = echarts.init(document.getElementById('chartPie'));
+const lineChart = echarts.init(document.getElementById('chartLine'));
+const barChart = echarts.init(document.getElementById('chartBar'));
+
+window.addEventListener('resize', () => {
+    pieChart.resize();
+    lineChart.resize();
+    barChart.resize();
+});
+
+function updateUI() {
+    const btnAll = document.getElementById('btnAll');
+    const btnPrev = document.getElementById('btnPrev');
+    const btnNext = document.getElementById('btnNext');
+    const monthLabel = document.getElementById('monthLabel');
+
+    if (isAllMode) {
+        btnAll.classList.add('active');
+        btnAll.textContent = '返回單月';
+        btnPrev.style.display = 'none';
+        btnNext.style.display = 'none';
+        monthLabel.textContent = '全部月份';
+        document.getElementById('expenseLabel').textContent = '總支出';
+        document.getElementById('incomeLabel').textContent = '總收入';
+        document.getElementById('pieTitle').textContent = '支出分類佔比（全部）';
+        document.getElementById('lineTitle').textContent = '每月收支趨勢';
+        document.getElementById('barTitle').textContent = '所有月份收支對比';
+    } else {
+        btnAll.classList.remove('active');
+        btnAll.textContent = '全部月份';
+        btnPrev.style.display = '';
+        btnNext.style.display = '';
+        monthLabel.textContent = `${currentYear} 年 ${currentMonth} 月`;
+        document.getElementById('expenseLabel').textContent = '本月支出';
+        document.getElementById('incomeLabel').textContent = '本月收入';
+        document.getElementById('pieTitle').textContent = '支出分類佔比';
+        document.getElementById('lineTitle').textContent = '每日收支趨勢';
+        document.getElementById('barTitle').textContent = '近 6 個月收支對比';
+    }
+}
+
+function toggleAll() {
+    isAllMode = !isAllMode;
+    updateUI();
+    loadAll();
+}
+
+function changeMonth(delta) {
+    if (isAllMode) return;
+    currentMonth += delta;
+    if (currentMonth > 12) { currentMonth = 1; currentYear++; }
+    if (currentMonth < 1) { currentMonth = 12; currentYear--; }
+    updateUI();
+    loadMonthly();
+    loadCategory();
+}
+
+function loadAll() {
+    loadMonthly();
+    loadCategory();
+    loadSummary();
+}
+
+async function loadMonthly() {
+    const url = isAllMode
+        ? '/api/report/monthly?all=true'
+        : `/api/report/monthly?year=${currentYear}&month=${currentMonth}`;
+    const res = await fetch(withToken(url));
+    const data = await res.json();
+
+    const totalExp = data.expenses.reduce((a, b) => a + b, 0);
+    const totalInc = data.incomes.reduce((a, b) => a + b, 0);
+    document.getElementById('totalExpense').textContent = `$${totalExp.toLocaleString()}`;
+    document.getElementById('totalIncome').textContent = `$${totalInc.toLocaleString()}`;
+    document.getElementById('totalNet').textContent = `$${(totalExp - totalInc).toLocaleString()}`;
+
+    const xLabels = isAllMode ? data.labels : data.days.map(d => d + '日');
+
+    lineChart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['支出', '收入'], bottom: 0 },
+        grid: { left: 50, right: 20, top: 20, bottom: 40 },
+        dataZoom: isAllMode && data.labels.length > 12 ? [
+            { type: 'inside', start: 0, end: 100 },
+            { type: 'slider', start: 0, end: 100, bottom: 30 }
+        ] : [],
+        xAxis: {
+            type: 'category',
+            data: xLabels,
+            axisLabel: isAllMode ? {} : {
+                interval: function(index) {
+                    return (data.days[index] - 1) % 5 === 0;
+                }
+            }
+        },
+        yAxis: { type: 'value' },
+        series: [
+            {
+                name: '支出', type: 'line', smooth: true,
+                data: data.expenses,
+                itemStyle: { color: '#e74c3c' },
+                areaStyle: { color: 'rgba(231,76,60,0.1)' }
+            },
+            {
+                name: '收入', type: 'line', smooth: true,
+                data: data.incomes,
+                itemStyle: { color: '#27ae60' },
+                areaStyle: { color: 'rgba(39,174,96,0.1)' }
+            }
+        ]
+    }, true);
+}
+
+async function loadCategory() {
+    const url = isAllMode
+        ? '/api/report/category?all=true'
+        : `/api/report/category?year=${currentYear}&month=${currentMonth}`;
+    const res = await fetch(withToken(url));
+    const data = await res.json();
+
+    pieChart.setOption({
+        tooltip: {
+            trigger: 'item',
+            formatter: '{b}: ${c} ({d}%)'
+        },
+        legend: { bottom: 0, type: 'scroll' },
+        series: [{
+            type: 'pie',
+            radius: ['35%', '65%'],
+            center: ['50%', '45%'],
+            avoidLabelOverlap: true,
+            itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+            label: { formatter: '{b}\n{d}%' },
+            data: data.data
+        }]
+    }, true);
+}
+
+async function loadSummary() {
+    const url = isAllMode
+        ? '/api/report/summary?all=true'
+        : '/api/report/summary';
+    const res = await fetch(withToken(url));
+    const data = await res.json();
+
+    barChart.setOption({
+        tooltip: { trigger: 'axis' },
+        legend: { data: ['支出', '收入'], bottom: 0 },
+        grid: { left: 50, right: 20, top: 20, bottom: isAllMode && data.months.length > 12 ? 60 : 40 },
+        dataZoom: isAllMode && data.months.length > 12 ? [
+            { type: 'inside', start: 0, end: 100 },
+            { type: 'slider', start: 0, end: 100, bottom: 30 }
+        ] : [],
+        xAxis: { type: 'category', data: data.months },
+        yAxis: { type: 'value' },
+        series: [
+            {
+                name: '支出', type: 'bar',
+                data: data.expenses,
+                itemStyle: { color: '#e74c3c', borderRadius: [4, 4, 0, 0] }
+            },
+            {
+                name: '收入', type: 'bar',
+                data: data.incomes,
+                itemStyle: { color: '#27ae60', borderRadius: [4, 4, 0, 0] }
+            }
+        ]
+    }, true);
+}
+
+let ledgerData = [];
+let ledgerFilter = 'all';
+
+function setLedgerFilter(type) {
+    ledgerFilter = type;
+    document.querySelectorAll('.ledger-filter button').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent === (
+            type === 'all' ? '全部' : type === 'expense' ? '支出' : '收入'
+        ));
+    });
+    renderLedger();
+}
+
+function renderLedger() {
+    const tbody = document.getElementById('ledgerBody');
+    const filtered = ledgerFilter === 'all'
+        ? ledgerData
+        : ledgerData.filter(r => r.type === ledgerFilter);
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="ledger-empty">沒有資料</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = filtered.map(r => {
+        const isExp = r.type === 'expense';
+        const tagClass = isExp ? 'tag-expense' : 'tag-income';
+        const tagText = isExp ? '支出' : '收入';
+        const sign = isExp ? '-' : '+';
+        const color = isExp ? '#e74c3c' : '#27ae60';
+        const escaped = JSON.stringify(r).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
+        return `<tr>
+            <td>${r.created_at}</td>
+            <td><span class="tag ${tagClass}">${tagText}</span></td>
+            <td>${r.item}</td>
+            <td>${r.category}</td>
+            <td style="text-align:right;color:${color};font-weight:600">${sign}$${r.amount.toLocaleString()}</td>
+            <td style="text-align:center;white-space:nowrap">
+                <button class="btn-action btn-edit" onclick='openModal(${escaped})'>編輯</button>
+                <button class="btn-action btn-delete" onclick="deleteRecord('${r.type}',${r.id})">刪除</button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+async function loadLedger() {
+    const url = isAllMode
+        ? '/api/report/ledger?all=true'
+        : `/api/report/ledger?year=${currentYear}&month=${currentMonth}`;
+    const res = await fetch(withToken(url));
+    const data = await res.json();
+    ledgerData = data.records;
+    renderLedger();
+}
+
+// patch loadAll and changeMonth to also load ledger
+const _origLoadAll = loadAll;
+loadAll = function() { _origLoadAll(); loadLedger(); };
+
+const _origChangeMonth = changeMonth;
+changeMonth = function(delta) { _origChangeMonth(delta); loadLedger(); };
+
+// --- Modal & CRUD ---
+let editingRecord = null; // null = 新增模式, object = 編輯模式
+
+function openModal(record) {
+    editingRecord = record || null;
+    document.getElementById('modalTitle').textContent = editingRecord ? '編輯紀錄' : '新增紀錄';
+    document.getElementById('modalType').value = editingRecord ? editingRecord.type : 'expense';
+    document.getElementById('modalType').disabled = !!editingRecord;
+    document.getElementById('modalItem').value = editingRecord ? editingRecord.item : '';
+    document.getElementById('modalAmount').value = editingRecord ? editingRecord.amount : '';
+    document.getElementById('modalCategory').value = (editingRecord && editingRecord.category !== '未分類') ? editingRecord.category : '';
+    document.getElementById('recordModal').classList.add('show');
+}
+
+function closeModal() {
+    document.getElementById('recordModal').classList.remove('show');
+    editingRecord = null;
+}
+
+// 點擊 overlay 背景關閉
+document.getElementById('recordModal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+});
+
+async function saveRecord() {
+    const type = document.getElementById('modalType').value;
+    const item = document.getElementById('modalItem').value.trim();
+    const amount = parseInt(document.getElementById('modalAmount').value);
+    const category = document.getElementById('modalCategory').value.trim() || null;
+
+    if (!item) { alert('請輸入項目名稱'); return; }
+    if (!amount || amount <= 0) { alert('請輸入有效金額'); return; }
+
+    try {
+        let res;
+        if (editingRecord) {
+            res = await fetch(withToken(`/api/record/${editingRecord.type}/${editingRecord.id}`), {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ item, amount, category })
+            });
+        } else {
+            res = await fetch(withToken('/api/record'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ type, item, amount, category })
+            });
+        }
+
+        if (!res.ok) {
+            const err = await res.json();
+            alert('操作失敗：' + (err.detail || '未知錯誤'));
+            return;
+        }
+
+        closeModal();
+        loadAll();
+    } catch (e) {
+        alert('請求失敗：' + e.message);
+    }
+}
+
+async function deleteRecord(type, id) {
+    if (!confirm('確定要刪除這筆紀錄嗎？')) return;
+    try {
+        const res = await fetch(withToken(`/api/record/${type}/${id}`), { method: 'DELETE' });
+        if (!res.ok) {
+            const err = await res.json();
+            alert('刪除失敗：' + (err.detail || '未知錯誤'));
+            return;
+        }
+        loadAll();
+    } catch (e) {
+        alert('請求失敗：' + e.message);
+    }
+}
+
+updateUI();
+loadMonthly();
+loadCategory();
+loadSummary();
+loadLedger();
+</script>
+</body>
+</html>

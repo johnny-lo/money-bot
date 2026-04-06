@@ -1,0 +1,48 @@
+services:
+  # 1. 你的記帳機器人
+  app:
+    image: money-bot
+    build: .
+    container_name: money-bot
+    ports:
+      - "8000:8000"
+    environment:
+      - LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
+      - LINE_CHANNEL_ACCESS_TOKEN=${LINE_CHANNEL_ACCESS_TOKEN}
+      - DATABASE_URL=${DATABASE_URL}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - MODEL_NAME=${MODEL_NAME}
+      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
+    depends_on:
+      - db
+    volumes:
+      - .:/app
+
+  # 2. PostgreSQL 資料庫
+  db:
+    image: postgres:15-alpine
+    container_name: money-db
+    restart: always
+    environment:
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=money_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 3. ngrok (直接幫你把網址指到 app)
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: money-tunnel
+    # ★ 下面這行要把 domain 改成你剛剛申請到的那個！
+    command: http --url=https://your-ngrok-domain.ngrok-free.dev app:8000
+    environment:
+      # 去 ngrok 官網 Dashboard 複製你的 Authtoken
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
+    ports:
+      - "4040:4040"
+    depends_on:
+      - app
+
+volumes:
+  postgres_data:

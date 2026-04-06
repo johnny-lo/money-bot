@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+line-bot-sdk==2.4.3
+python-dotenv
+psycopg2-binary
+sqlalchemy
+apscheduler
+discord.py
+aiohttp
