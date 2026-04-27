@@ -17,6 +17,7 @@ PATTERN_INCOME_DELETE = re.compile(r"^刪除收入\s+(\d+)$")
 PATTERN_INCOME_UPDATE = re.compile(r"^修改收入\s+(\d+)\s+(.+)\s+(\d+)$")
 PATTERN_RECURRING = re.compile(r"^固定\s+(支出|收入)\s+(.+)\s+(\d+)\s+(\d+)$")
 PATTERN_RECURRING_DELETE = re.compile(r"^取消固定\s+(\d+)$")
+PATTERN_FETCH_INVOICE = re.compile(r"^抓發票(?:\s+(\d+))?$")
 
 HELP_TEXT = (
     "📖 【指令說明】\n"
@@ -44,6 +45,10 @@ HELP_TEXT = (
     "🏷️ 分類：\n"
     "　分類 → 手動觸發 AI 分類\n"
     "\n"
+    "🧾 發票：\n"
+    "　抓發票 → 抓今天的發票\n"
+    "　抓發票 7 → 抓近 7 天\n"
+    "\n"
     "🔄 固定收支：\n"
     "　固定 支出 房租 15000 1\n"
     "　固定 收入 薪水 50000 5\n"
@@ -65,6 +70,14 @@ def handle_categorize() -> str:
         return run_weekly_categorization()
     except Exception as e:
         return f"💥 手動分類失敗：{e}"
+
+
+def handle_fetch_invoices(days: int = 1) -> str:
+    try:
+        from einvoice import sync_invoices
+        return sync_invoices(days=days)
+    except Exception as e:
+        return f"💥 抓發票失敗：{type(e).__name__}: {e}"
 
 
 def handle_report(user_id: str, base_url: str) -> str:
@@ -403,6 +416,11 @@ def process_text_message(msg: str, user_id: str = None, base_url: str = None) ->
 
     if msg == "分類":
         return [handle_categorize()]
+
+    match_fetch = PATTERN_FETCH_INVOICE.match(msg)
+    if match_fetch:
+        days = int(match_fetch.group(1) or 1)
+        return [handle_fetch_invoices(days)]
 
     if msg == "報表" and user_id and base_url:
         return [handle_report(user_id, base_url)]

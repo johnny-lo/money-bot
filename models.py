@@ -9,6 +9,7 @@ class Transaction(Base):
     item = Column(String, index=True)
     price = Column(Integer)
     category = Column(String, nullable=True, index=True)  # AI 自動分類欄位
+    invoice_no = Column(String, nullable=True, index=True)  # 發票號碼，einvoice 自動帶入；手動記帳為 NULL
     created_at = Column(DateTime, default=func.now())
 
 

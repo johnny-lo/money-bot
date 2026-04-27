@@ -8,6 +8,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple/ --trusted-host pypi.tuna.tsinghua.edu.cn
 
+# 安裝 Playwright Chromium 與系統依賴（給發票爬蟲用）
+RUN playwright install --with-deps chromium
+
 # 複製程式碼
 COPY . .
 

@@ -29,6 +29,13 @@
 - **AI 自動分類** — 每週日 00:00 自動將未分類帳目分類（也可手動觸發 `分類`）
 - **AI 角色回應** — 記帳後由「木須龍」角色（台灣配音風格）給出有趣評論
 
+### 電子發票自動同步
+- **每日 06:00 自動抓**手機條碼載具當日發票，逐筆解析品名/金額寫入支出
+- **手動觸發** — `抓發票`（抓今天）、`抓發票 7`（近 7 天）
+- **CAPTCHA 自動破解** — 用 Gemini Vision 辨識財政部圖形驗證碼
+- **去重機制** — 以發票號碼為 key，重跑不會重複寫入
+- **品項代號處理** — 純數字代號（如藥局商品 SKU）會自動加上賣方名前綴方便辨識
+
 ## 技術架構
 
 | 層級 | 技術 |
@@ -38,6 +45,7 @@
 | AI | Google Gemini API (文字 + 多模態) |
 | 訊息平台 | LINE Bot SDK 2.4.3 / discord.py |
 | 排程 | APScheduler (背景排程) |
+| 爬蟲 | Playwright + Chromium (財政部電子發票) |
 | 前端報表 | ECharts 5 (純 HTML/JS) |
 | 部署 | Docker Compose (app + PostgreSQL + ngrok) |
 
@@ -52,6 +60,10 @@
 | `MODEL_NAME` | Gemini 模型名稱 |
 | `DISCORD_BOT_TOKEN` | Discord Bot Token（選填，未設定則跳過） |
 | `NGROK_AUTHTOKEN` | ngrok 認證 Token |
+| `EINVOICE_PHONE_1` | 第一組載具：財政部電子發票會員手機號碼 |
+| `EINVOICE_PASSWORD_1` | 第一組載具：驗證碼（密碼） |
+| `EINVOICE_PHONE_2` | 第二組載具（選填） |
+| `EINVOICE_PASSWORD_2` | 第二組載具密碼（選填） |
 
 ## 快速啟動
 
@@ -85,6 +97,8 @@ docker compose logs -f app
 | `刪除 ID` | 刪除支出 |
 | `刪除收入 ID` | 刪除收入 |
 | `分類` | 手動觸發 AI 分類 |
+| `抓發票` | 手動抓今天的發票 |
+| `抓發票 7` | 抓近 7 天的發票 |
 | `固定 支出/收入 品名 金額 日期` | 建立固定收支 |
 | `固定清單` | 查看固定項目 |
 | `取消固定 ID` | 取消固定項目 |

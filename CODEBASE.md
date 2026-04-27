@@ -1,11 +1,11 @@
 # Codebase Index (AI Quick Reference)
 
 > 供 AI 快速理解專案結構，每次 commit 時更新。
-> Last updated: 2026-04-06
+> Last updated: 2026-04-25
 
 ## Stack
 
-Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2.4.3 / discord.py / APScheduler / ECharts 5 / Docker Compose + ngrok
+Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2.4.3 / discord.py / APScheduler / Playwright (Chromium) / ECharts 5 / Docker Compose + ngrok
 
 ## File Map
 
@@ -21,6 +21,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── categorize.py        # AI 分類：run_weekly_categorization() 批次分類未分類帳目
 ├── recurring.py         # 固定收支：run_daily_recurring() 每日自動寫入到期項目
 ├── auth.py              # Token 驗證：generate_report_token()、validate_report_token()、require_token dependency
+├── einvoice.py          # 財政部電子發票同步：Playwright 登入 → CAPTCHA(Gemini) → 抓發票 → 寫 transactions
 ├── persona.md           # AI 角色設定：木須龍(台灣配音風格)，記帳後生成角色回應
 ├── requirements.txt     # Python 依賴
 ├── Dockerfile           # python:3.11-slim，pip install → uvicorn 啟動
@@ -37,11 +38,11 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 
 | Table | Columns | Notes |
 |-------|---------|-------|
-| `transactions` | id(PK), item(str), price(int), category(str?), created_at(datetime) | 支出 |
+| `transactions` | id(PK), item(str), price(int), category(str?), invoice_no(str?), created_at(datetime) | 支出。invoice_no 是發票去重 key（einvoice 自動帶入；手動記帳為 NULL） |
 | `incomes` | id(PK), item(str), amount(int), category(str?), created_at(datetime) | 收入 |
 | `recurring_records` | id(PK), type("expense"/"income"), item, amount, category?, day_of_month(1-28), active(1/0), created_at | 固定收支 |
 
-main.py 啟動時自動 `CREATE TABLE` + 檢查/補上 category 欄位。
+main.py 啟動時自動 `CREATE TABLE` + 檢查/補上 category / invoice_no 欄位。
 
 ## Request Flow
 
@@ -70,6 +71,7 @@ LINE/Discord 訊息
 |-----|----------|----------|
 | weekly_categorize | 每週日 00:00 (Asia/Taipei) | categorize.run_weekly_categorization() |
 | daily_recurring | 每日 00:05 | recurring.run_daily_recurring() |
+| daily_invoice_sync | 每日 06:00 | einvoice.sync_invoices() — 抓今天的發票 |
 
 ## Core Logic: Text Command Routing (core.py)
 
@@ -86,7 +88,8 @@ LINE/Discord 訊息
 10. `刪除 ID` → handle_delete_expense()
 11. `修改收入 ID 品名 金額` → handle_update_income()
 12. `修改 ID 品名 金額` → handle_update_expense()
-13. fallback: handle_record_text() → regex 解析 `品名 金額` 記帳
+13. `抓發票` / `抓發票 N` → handle_fetch_invoices(days)
+14. fallback: handle_record_text() → regex 解析 `品名 金額` 記帳
 
 ## Key Patterns
 
@@ -99,4 +102,4 @@ LINE/Discord 訊息
 
 ## Environment Variables
 
-LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, DISCORD_BOT_TOKEN (optional), NGROK_AUTHTOKEN
+LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, DISCORD_BOT_TOKEN (optional), NGROK_AUTHTOKEN, EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional)

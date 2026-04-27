@@ -4,6 +4,7 @@ services:
     image: money-bot
     build: .
     container_name: money-bot
+    restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
@@ -34,6 +35,7 @@ services:
   ngrok:
     image: ngrok/ngrok:latest
     container_name: money-tunnel
+    restart: unless-stopped
     # ★ 下面這行要把 domain 改成你剛剛申請到的那個！
     command: http --url=https://your-ngrok-domain.ngrok-free.dev app:8000
     environment:
