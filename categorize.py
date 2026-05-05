@@ -21,22 +21,26 @@ def run_weekly_categorization():
             [f"ID:{t.id} | {t.item} | {t.price}元" for t in uncategorized]
         )
 
-        # 撈出已有的分類當作參考，讓 AI 保持一致性
-        existing_categories = db.query(Transaction.category).filter(
-            Transaction.category.isnot(None)
-        ).distinct().all()
-        cat_hint = ""
-        if existing_categories:
-            cats = ", ".join([c[0] for c in existing_categories])
-            cat_hint = f"\n目前資料庫中已使用過的分類有：{cats}\n請盡量沿用這些分類名稱以保持一致性，除非某筆帳目確實不屬於任何現有分類才建立新的。"
-
         prompt = (
-            f"你是一個記帳分類助手。請幫以下每一筆消費記錄分類。{cat_hint}\n\n"
+            f"你是一個記帳分類助手。請幫以下每一筆消費記錄分類。\n\n"
             f"帳目清單：\n{items_list}\n\n"
             f"請嚴格只回傳 JSON 陣列格式，每個元素包含 id 和 category 兩個欄位。\n"
-            f"分類請用簡短的中文（例如：飲食、交通、娛樂、日用品、醫療、服飾、3C、居住、教育、社交等）。\n"
+            f"分類請從以下選一個：三餐、飲料、零食、食材、油費、停車、居家用品、個人保養、醫療、服飾、娛樂、其他。\n"
+            f"判斷原則：\n"
+            f"- 三餐 = 正餐外食（午晚餐、便當、餐廳、麵店）\n"
+            f"- 飲料 = 咖啡、手搖、罐裝飲料、茶、豆漿、果汁\n"
+            f"- 零食 = 餅乾、甜點、糖果、零嘴\n"
+            f"- 食材 = 自煮的菜、肉、蛋、奶、麵、起司、即食麵\n"
+            f"- 油費 = 加油、加油站\n"
+            f"- 停車 = 停車費\n"
+            f"- 居家用品 = 收納、清潔、家電、燈泡、紙巾、擴香、洗衣服務\n"
+            f"- 個人保養 = 隱形眼鏡、衛生用品、保養品\n"
+            f"- 醫療 = 看醫生、藥局處方\n"
+            f"- 服飾 = 衣服、鞋、配件\n"
+            f"- 娛樂 = 健身、按摩、休閒運動\n"
+            f"- 其他 = 確實無法歸類\n"
             f"格式範例：\n"
-            f'[{{"id": 1, "category": "飲食"}}, {{"id": 2, "category": "交通"}}]\n'
+            f'[{{"id": 1, "category": "三餐"}}, {{"id": 2, "category": "飲料"}}]\n'
             f"不要包含任何其他文字或 Markdown 標籤。"
         )
 

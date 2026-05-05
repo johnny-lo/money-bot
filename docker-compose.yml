@@ -6,7 +6,7 @@ services:
     container_name: money-bot
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
       - LINE_CHANNEL_ACCESS_TOKEN=${LINE_CHANNEL_ACCESS_TOKEN}
@@ -42,7 +42,7 @@ services:
       # 去 ngrok 官網 Dashboard 複製你的 Authtoken
       NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
     ports:
-      - "4040:4040"
+      - "127.0.0.1:4040:4040"
     depends_on:
       - app
 

@@ -363,14 +363,15 @@ async def _scrape_carrier(phone: str, password: str, days: int, headless: bool =
 
 # ─────────────────── DB 寫入 ───────────────────
 
-def _save_invoices(invoices: list[dict]) -> tuple[int, int]:
-    """寫入 DB，去重（同一張發票已寫過就跳過）。回傳 (新增發票數, 新增品項數)。"""
+def _save_invoices(invoices: list[dict]) -> tuple[int, int, list[dict]]:
+    """寫入 DB，去重（同一張發票已寫過就跳過）。回傳 (新增發票數, 新增品項數, 新增品項清單)。"""
     if not invoices:
-        return 0, 0
+        return 0, 0, []
     db = SessionLocal()
     try:
         new_inv = 0
         new_items = 0
+        added: list[dict] = []
         for inv in invoices:
             inv_no = inv["invoice_no"]
             if db.query(Transaction).filter(Transaction.invoice_no == inv_no).first():
@@ -385,28 +386,32 @@ def _save_invoices(invoices: list[dict]) -> tuple[int, int]:
             for it in items:
                 if it["amount"] == 0:
                     continue  # 折扣 / 促銷標記
+                name = format_item(it["name"], inv["seller"])
                 tx = Transaction(
-                    item=format_item(it["name"], inv["seller"]),
+                    item=name,
                     price=it["amount"],
                     invoice_no=inv_no,
                     created_at=inv_dt,
                 )
                 db.add(tx)
                 new_items += 1
+                added.append({"item": name, "price": it["amount"], "date": inv["date"]})
                 wrote = True
             # 明細抓不到 → 保底寫一筆 = 賣方名 + 發票總額
             if not wrote and inv["amount"] > 0:
+                name = simplify_seller(inv["seller"]) or inv_no
                 tx = Transaction(
-                    item=simplify_seller(inv["seller"]) or inv_no,
+                    item=name,
                     price=inv["amount"],
                     invoice_no=inv_no,
                     created_at=inv_dt,
                 )
                 db.add(tx)
                 new_items += 1
+                added.append({"item": name, "price": inv["amount"], "date": inv["date"]})
             new_inv += 1
         db.commit()
-        return new_inv, new_items
+        return new_inv, new_items, added
     except Exception:
         db.rollback()
         raise
@@ -427,22 +432,24 @@ def _list_carriers() -> list[tuple[int, str, str]]:
     return carriers
 
 
-def sync_invoices(days: int = 1, headless: bool = True) -> str:
-    """同步所有設定載具的發票。回傳人類可讀摘要訊息（給 LINE/排程 log 用）。"""
+def sync_invoices(days: int = 1, headless: bool = True) -> dict:
+    """同步所有設定載具的發票。回傳 {"summary": str, "new_items": list[dict]}。"""
     carriers = _list_carriers()
     if not carriers:
-        return "⚠️ 未設定任何載具（EINVOICE_PHONE_1 / EINVOICE_PASSWORD_1）"
+        return {"summary": "⚠️ 未設定任何載具（EINVOICE_PHONE_1 / EINVOICE_PASSWORD_1）", "new_items": []}
 
     lines = [f"🧾 發票同步（最近 {days} 天）"]
     total_new_inv = 0
     total_new_items = 0
+    all_added: list[dict] = []
     for label, phone, password in carriers:
         masked = f"{phone[:4]}***{phone[-2:]}"
         try:
             invoices = asyncio.run(_scrape_carrier(phone, password, days, headless=headless))
-            new_inv, new_items = _save_invoices(invoices)
+            new_inv, new_items, added = _save_invoices(invoices)
             total_new_inv += new_inv
             total_new_items += new_items
+            all_added.extend(added)
             lines.append(
                 f"  載具{label} {masked}：抓 {len(invoices)} 張、新增 {new_inv} 張（{new_items} 品項）"
             )
@@ -451,7 +458,7 @@ def sync_invoices(days: int = 1, headless: bool = True) -> str:
     lines.append(f"📊 總計新增：{total_new_inv} 張發票 / {total_new_items} 筆品項")
     summary = "\n".join(lines)
     print(summary)
-    return summary
+    return {"summary": summary, "new_items": all_added}
 
 
 # ─────────────────── CLI ───────────────────
@@ -464,4 +471,4 @@ if __name__ == "__main__":
     ap.add_argument("--days", type=int, default=1)
     ap.add_argument("--headful", action="store_true")
     args = ap.parse_args()
-    print(sync_invoices(days=args.days, headless=not args.headful))
+    print(sync_invoices(days=args.days, headless=not args.headful)["summary"])

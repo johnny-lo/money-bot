@@ -11,7 +11,7 @@ from einvoice import sync_invoices as run_invoice_sync
 from routes.report import router as report_router
 from routes.record import router as record_router
 from line_handler import register_line_routes
-from discord_handler import create_discord_bot
+from discord_handler import create_discord_bot, notify_invoice_sync, notify_monthly_summary
 
 load_dotenv()
 
@@ -52,16 +52,25 @@ register_line_routes(app)
 # APScheduler：每週日 00:00 自動分類
 # -----------------------------------------------
 from apscheduler.schedulers.background import BackgroundScheduler
+
+
+def _daily_invoice_with_notify():
+    """抓發票後自動通知 Discord #🧾-發票通知 頻道。"""
+    result = run_invoice_sync(days=2)
+    notify_invoice_sync(result["summary"], result.get("new_items", []))
+
+
 scheduler = BackgroundScheduler(timezone="Asia/Taipei")
 scheduler.add_job(run_weekly_categorization, "cron", day_of_week="sun", hour=0, minute=0, id="weekly_categorize")
 scheduler.add_job(run_daily_recurring, "cron", hour=0, minute=5, id="daily_recurring")
-scheduler.add_job(run_invoice_sync, "cron", hour=6, minute=0, id="daily_invoice_sync")
+scheduler.add_job(_daily_invoice_with_notify, "cron", hour=21, minute=0, id="daily_invoice_sync")
+scheduler.add_job(notify_monthly_summary, "cron", day=1, hour=9, minute=0, id="monthly_summary")
 
 
 @app.on_event("startup")
 async def startup_event():
     scheduler.start()
-    print("⏰ 排程已啟動：每週日 00:00 自動分類 / 每日 00:05 固定收支 / 每日 06:00 抓發票")
+    print("⏰ 排程已啟動：每週日 00:00 分類 / 每日 00:05 固定收支 / 每日 21:00 抓發票+Discord 通知 / 每月 1 號 09:00 月結")
 
     # 啟動 Discord Bot（如果有設定 token）
     discord_token = os.getenv("DISCORD_BOT_TOKEN")

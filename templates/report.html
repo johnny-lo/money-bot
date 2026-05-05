@@ -97,6 +97,12 @@
             padding: 4px 12px; font-size: 0.8rem; cursor: pointer;
         }
         .ledger-filter button.active { background: #4a6cf7; color: #fff; }
+        .ledger-filter select {
+            background: #eee; border: none; border-radius: 6px;
+            padding: 4px 10px; font-size: 0.8rem; cursor: pointer;
+            outline: none;
+        }
+        .ledger-filter select:focus { background: #e3e7fb; }
         .ledger-table {
             width: 100%;
             border-collapse: collapse;
@@ -227,6 +233,9 @@
                 <button class="active" onclick="setLedgerFilter('all')">全部</button>
                 <button onclick="setLedgerFilter('expense')">支出</button>
                 <button onclick="setLedgerFilter('income')">收入</button>
+                <select id="categoryFilter" onchange="setCategoryFilter(this.value)">
+                    <option value="all">全部分類</option>
+                </select>
             </div>
         </h2>
         <table class="ledger-table">
@@ -452,10 +461,12 @@ async function loadSummary() {
 
 let ledgerData = [];
 let ledgerFilter = 'all';
+let ledgerCategoryFilter = 'all';
 
 function setLedgerFilter(type) {
     ledgerFilter = type;
     document.querySelectorAll('.ledger-filter button').forEach(btn => {
+        if (btn.classList.contains('btn-add')) return;
         btn.classList.toggle('active', btn.textContent === (
             type === 'all' ? '全部' : type === 'expense' ? '支出' : '收入'
         ));
@@ -463,11 +474,29 @@ function setLedgerFilter(type) {
     renderLedger();
 }
 
+function setCategoryFilter(cat) {
+    ledgerCategoryFilter = cat;
+    renderLedger();
+}
+
+function refreshCategoryOptions() {
+    const sel = document.getElementById('categoryFilter');
+    const cats = [...new Set(ledgerData.map(r => r.category || '未分類'))].sort();
+    const current = sel.value;
+    sel.innerHTML = '<option value="all">全部分類</option>' +
+        cats.map(c => `<option value="${c}">${c}</option>`).join('');
+    sel.value = cats.includes(current) || current === 'all' ? current : 'all';
+    ledgerCategoryFilter = sel.value;
+}
+
 function renderLedger() {
     const tbody = document.getElementById('ledgerBody');
-    const filtered = ledgerFilter === 'all'
+    let filtered = ledgerFilter === 'all'
         ? ledgerData
         : ledgerData.filter(r => r.type === ledgerFilter);
+    if (ledgerCategoryFilter !== 'all') {
+        filtered = filtered.filter(r => (r.category || '未分類') === ledgerCategoryFilter);
+    }
 
     if (filtered.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" class="ledger-empty">沒有資料</td></tr>';
@@ -502,6 +531,7 @@ async function loadLedger() {
     const res = await fetch(withToken(url));
     const data = await res.json();
     ledgerData = data.records;
+    refreshCategoryOptions();
     renderLedger();
 }
 

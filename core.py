@@ -75,9 +75,18 @@ def handle_categorize() -> str:
 def handle_fetch_invoices(days: int = 1) -> str:
     try:
         from einvoice import sync_invoices
-        return sync_invoices(days=days)
+        return sync_invoices(days=days)["summary"]
     except Exception as e:
         return f"💥 抓發票失敗：{type(e).__name__}: {e}"
+
+
+def fetch_invoices_data(days: int = 1) -> dict:
+    """Discord 用：回傳 {"summary": str, "new_items": list[dict]}。"""
+    try:
+        from einvoice import sync_invoices
+        return sync_invoices(days=days)
+    except Exception as e:
+        return {"summary": f"💥 抓發票失敗：{type(e).__name__}: {e}", "new_items": []}
 
 
 def handle_report(user_id: str, base_url: str) -> str:
@@ -474,3 +483,306 @@ def process_text_message(msg: str, user_id: str = None, base_url: str = None) ->
 
     # 一般記帳
     return handle_record_text(msg)
+
+
+# ────────────────────────────────────────────────────────────────
+# Data API for Discord embeds (回傳結構化資料，不格式化字串)
+# ────────────────────────────────────────────────────────────────
+
+
+def query_monthly_data() -> dict:
+    db = SessionLocal()
+    try:
+        now = datetime.now()
+        total_expense = db.query(func.sum(Transaction.price)).filter(
+            func.extract('year', Transaction.created_at) == now.year,
+            func.extract('month', Transaction.created_at) == now.month,
+        ).scalar() or 0
+        total_income = db.query(func.sum(Income.amount)).filter(
+            func.extract('year', Income.created_at) == now.year,
+            func.extract('month', Income.created_at) == now.month,
+        ).scalar() or 0
+        cat_rows = db.query(
+            Transaction.category, func.sum(Transaction.price),
+        ).filter(
+            func.extract('year', Transaction.created_at) == now.year,
+            func.extract('month', Transaction.created_at) == now.month,
+        ).group_by(Transaction.category).all()
+        categories = sorted(
+            [{"name": (c or "未分類"), "amount": int(a or 0)} for c, a in cat_rows],
+            key=lambda x: x["amount"],
+            reverse=True,
+        )
+        return {
+            "year": now.year,
+            "month": now.month,
+            "income": int(total_income),
+            "expense": int(total_expense),
+            "net": int(total_expense - total_income),
+            "categories": categories,
+        }
+    finally:
+        db.close()
+
+
+def query_recent_data(limit: int = 5) -> list[dict]:
+    db = SessionLocal()
+    try:
+        expenses = db.query(Transaction).order_by(Transaction.created_at.desc()).limit(limit).all()
+        incomes = db.query(Income).order_by(Income.created_at.desc()).limit(limit).all()
+        combined = []
+        for r in expenses:
+            combined.append({
+                "type": "expense", "id": r.id, "item": r.item,
+                "amount": r.price, "category": r.category,
+                "created_at": r.created_at,
+            })
+        for r in incomes:
+            combined.append({
+                "type": "income", "id": r.id, "item": r.item,
+                "amount": r.amount, "category": r.category,
+                "created_at": r.created_at,
+            })
+        combined.sort(key=lambda x: x["created_at"], reverse=True)
+        return combined[:limit]
+    finally:
+        db.close()
+
+
+def record_expense_data(item: str, price: int) -> dict:
+    db = SessionLocal()
+    try:
+        tx = Transaction(item=item, price=price)
+        db.add(tx)
+        db.commit()
+        db.refresh(tx)
+        persona = generate_persona_comment(f"💸 支出：{item} {price} 元") or ""
+        return {
+            "success": True, "id": tx.id, "item": tx.item,
+            "amount": tx.price, "category": tx.category, "persona": persona,
+        }
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e)}
+    finally:
+        db.close()
+
+
+def record_income_data(item: str, amount: int) -> dict:
+    db = SessionLocal()
+    try:
+        inc = Income(item=item, amount=amount)
+        db.add(inc)
+        db.commit()
+        db.refresh(inc)
+        persona = generate_persona_comment(f"💰 收入：{item} {amount} 元") or ""
+        return {
+            "success": True, "id": inc.id, "item": inc.item,
+            "amount": inc.amount, "category": inc.category, "persona": persona,
+        }
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e)}
+    finally:
+        db.close()
+
+
+def update_expense_data(target_id: int, new_item: str, new_price: int) -> dict:
+    db = SessionLocal()
+    try:
+        rec = db.query(Transaction).filter(Transaction.id == target_id).first()
+        if not rec:
+            return {"success": False, "error": f"找不到支出 ID: {target_id}"}
+        old = {"item": rec.item, "amount": rec.price}
+        rec.item = new_item
+        rec.price = new_price
+        db.commit()
+        return {
+            "success": True, "id": target_id,
+            "old": old, "new": {"item": new_item, "amount": new_price},
+        }
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e)}
+    finally:
+        db.close()
+
+
+def update_income_data(target_id: int, new_item: str, new_amount: int) -> dict:
+    db = SessionLocal()
+    try:
+        rec = db.query(Income).filter(Income.id == target_id).first()
+        if not rec:
+            return {"success": False, "error": f"找不到收入 ID: {target_id}"}
+        old = {"item": rec.item, "amount": rec.amount}
+        rec.item = new_item
+        rec.amount = new_amount
+        db.commit()
+        return {
+            "success": True, "id": target_id,
+            "old": old, "new": {"item": new_item, "amount": new_amount},
+        }
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e)}
+    finally:
+        db.close()
+
+
+def delete_expense_data(target_id: int) -> dict:
+    db = SessionLocal()
+    try:
+        rec = db.query(Transaction).filter(Transaction.id == target_id).first()
+        if not rec:
+            return {"success": False, "error": f"找不到支出 ID: {target_id}"}
+        item, amount = rec.item, rec.price
+        db.delete(rec)
+        db.commit()
+        return {"success": True, "id": target_id, "item": item, "amount": amount}
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e)}
+    finally:
+        db.close()
+
+
+def delete_income_data(target_id: int) -> dict:
+    db = SessionLocal()
+    try:
+        rec = db.query(Income).filter(Income.id == target_id).first()
+        if not rec:
+            return {"success": False, "error": f"找不到收入 ID: {target_id}"}
+        item, amount = rec.item, rec.amount
+        db.delete(rec)
+        db.commit()
+        return {"success": True, "id": target_id, "item": item, "amount": amount}
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e)}
+    finally:
+        db.close()
+
+
+def list_recurring_data() -> list[dict]:
+    db = SessionLocal()
+    try:
+        records = db.query(RecurringRecord).filter(
+            RecurringRecord.active == 1,
+        ).order_by(RecurringRecord.day_of_month).all()
+        return [{
+            "id": r.id, "type": r.type, "item": r.item,
+            "amount": r.amount, "day_of_month": r.day_of_month,
+        } for r in records]
+    finally:
+        db.close()
+
+
+def add_recurring_data(type_str: str, item: str, amount: int, day: int) -> dict:
+    if day < 1 or day > 28:
+        return {"success": False, "error": "日期請設 1~28（避免大小月問題）"}
+    r_type = "income" if type_str in ("收入", "income") else "expense"
+    db = SessionLocal()
+    try:
+        rec = RecurringRecord(type=r_type, item=item, amount=amount, day_of_month=day)
+        db.add(rec)
+        db.commit()
+        db.refresh(rec)
+        return {
+            "success": True, "id": rec.id, "type": r_type,
+            "item": item, "amount": amount, "day_of_month": day,
+        }
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e)}
+    finally:
+        db.close()
+
+
+def delete_recurring_data(target_id: int) -> dict:
+    db = SessionLocal()
+    try:
+        rec = db.query(RecurringRecord).filter(
+            RecurringRecord.id == target_id,
+            RecurringRecord.active == 1,
+        ).first()
+        if not rec:
+            return {"success": False, "error": f"找不到啟用中的固定項目 ID: {target_id}"}
+        rec.active = 0
+        info = {"id": target_id, "type": rec.type, "item": rec.item, "amount": rec.amount}
+        db.commit()
+        return {"success": True, **info}
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e)}
+    finally:
+        db.close()
+
+
+def handle_image_data(image_bytes: bytes) -> dict:
+    """處理圖片記帳，回傳結構化資料。"""
+    prompt = """這是一張消費明細或發票。請幫我列出上面所有的「消費項目」與對應的「金額」。
+    請嚴格只回傳 JSON 陣列 (Array) 格式，不要包含任何其他文字或 Markdown 標籤。
+    如果遇到折扣或折扣碼，請用負數金額表示，或直接扣除在單項金額內。
+    格式範例：
+    [
+      {"item": "雞胸肉", "price": 150},
+      {"item": "高麗菜", "price": 45}
+    ]
+    如果完全無法辨識出任何項目，請回傳空陣列 []"""
+
+    result_text = gemini_image(prompt, image_bytes).strip()
+    if result_text.startswith("```json"):
+        result_text = result_text[7:]
+    if result_text.startswith("```"):
+        result_text = result_text[3:]
+    if result_text.endswith("```"):
+        result_text = result_text[:-3]
+
+    try:
+        items_data = json.loads(result_text.strip())
+    except Exception as e:
+        return {"success": False, "error": f"AI 回傳無法解析：{e}"}
+
+    if not items_data or not isinstance(items_data, list):
+        return {"success": False, "error": "AI 找不到明細上的具體項目，請確認照片是否清晰。"}
+
+    expenses, discounts = [], []
+    db = SessionLocal()
+    try:
+        for data in items_data:
+            item_name = data.get("item", "未知項目")
+            price_val = int(data.get("price", 0))
+            if price_val == 0:
+                continue
+            if price_val < 0:
+                amt = abs(price_val)
+                inc = Income(item=f"折扣：{item_name}", amount=amt)
+                db.add(inc)
+                db.flush()
+                discounts.append({"id": inc.id, "item": item_name, "amount": amt})
+                continue
+            tx = Transaction(item=item_name, price=price_val)
+            db.add(tx)
+            db.flush()
+            expenses.append({"id": tx.id, "item": item_name, "amount": price_val})
+
+        if not expenses and not discounts:
+            return {"success": False, "error": "有辨識到文字，但沒有抓到有效的金額項目。"}
+
+        db.commit()
+        total_e = sum(e["amount"] for e in expenses)
+        total_d = sum(d["amount"] for d in discounts)
+        actual = total_e - total_d
+        persona = generate_persona_comment(
+            f"影像辨識記帳，共 {len(expenses)} 項，總計 {total_e} 元"
+        ) or ""
+        return {
+            "success": True, "expenses": expenses, "discounts": discounts,
+            "total_expense": total_e, "total_discount": total_d,
+            "actual": actual, "persona": persona,
+        }
+    except Exception as e:
+        db.rollback()
+        return {"success": False, "error": str(e)}
+    finally:
+        db.close()
