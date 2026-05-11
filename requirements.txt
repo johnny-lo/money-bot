@@ -8,3 +8,4 @@ apscheduler
 discord.py
 aiohttp
 playwright
+pytest

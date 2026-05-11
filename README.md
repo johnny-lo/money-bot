@@ -24,13 +24,25 @@
   - 近 6 個月柱狀圖對比
   - 流水帳明細（含新增/編輯/刪除功能、收支類型 + 分類雙重下拉篩選）
 
+### 自動報表
+- **週報**（每週日 21:00 推 Discord `#📊-報表查詢`）：本週收支三格頭、與上週對比、大組分布、細類分布、單筆最大 Top 3、每日支出迷你長條圖、異常分類偵測、AI 評語
+- **月報**（每月第一個週日接在週報後）：上月收支三格頭、與上上月對比、儲蓄率、預算狀態（需設 `MONTHLY_BUDGET`）、大組分布、細類分布、Top 3、近 6 月走勢迷你折線、異常分類偵測、AI 評語
+
 ### AI 功能
 - **Gemini 圖片辨識** — 拍照自動解析消費明細
-- **AI 自動分類** — 每週日 00:00 自動將未分類帳目分類（也可手動觸發 `分類`），固定 12 類：三餐 / 飲料 / 零食 / 食材 / 油費 / 停車 / 居家用品 / 個人保養 / 醫療 / 服飾 / 娛樂 / 其他
+- **AI 自動分類** — 每週日 21:00 自動將未分類帳目分類（也可手動觸發 `分類`）。13 細類分 6 大組：
+  - **固定**：居住水電 / 分期保險
+  - **交通**：交通
+  - **飲食**：三餐 / 聚餐 / 飲料零食 / 食材 / 超商
+  - **生活**：日用品 / 醫療 / 服飾
+  - **娛樂**：娛樂
+  - **其他**：其他
 - **AI 角色回應** — 記帳後由「木須龍」角色（台灣配音風格）給出有趣評論
+- **AI 週評語** — 週日 21:00 週報用更強的 Gemini 模型（`WEEKLY_MODEL`，預設 `gemini-pro-latest`）生成本週理財評語
 
 ### 電子發票自動同步
-- **每日 21:00 自動抓**手機條碼載具當日 + 昨日發票（避免錯過 21:00 後新開立的），逐筆解析品名/金額寫入支出，並把當次新增明細以 embed 推到 Discord `#🧾-發票通知`
+- **週一 ~ 週六 21:00 自動抓**手機條碼載具當日 + 昨日發票（避免錯過 21:00 後新開立的），逐筆解析品名/金額寫入支出，並把當次新增明細以 embed 推到 Discord `#🧾-發票通知`
+- **週日 21:00** 順序執行「抓發票 → AI 分類 → 週報卡片」一條龍 pipeline，週報推到 `#📊-報表查詢`
 - **手動觸發** — `抓發票`（抓今天）、`抓發票 7`（近 7 天）
 - **CAPTCHA 自動破解** — 用 Gemini Vision 辨識財政部圖形驗證碼
 - **去重機制** — 以發票號碼為 key，重跑不會重複寫入
@@ -57,10 +69,12 @@
 | `LINE_CHANNEL_ACCESS_TOKEN` | LINE Bot Channel Access Token |
 | `DATABASE_URL` | PostgreSQL 連線字串 |
 | `GEMINI_API_KEY` | Google Gemini API Key |
-| `MODEL_NAME` | Gemini 模型名稱 |
+| `MODEL_NAME` | Gemini 模型名稱（記帳/分類/角色回應） |
+| `WEEKLY_MODEL` | 週/月評語用的強模型（選填，預設 `gemini-pro-latest`） |
+| `MONTHLY_BUDGET` | 月度預算金額（選填，0 = 不顯示預算進度）|
 | `DISCORD_BOT_TOKEN` | Discord Bot Token（選填，未設定則跳過） |
-| `DISCORD_INVOICE_CHANNEL_ID` | 每日 21:00 發票通知頻道 ID（選填） |
-| `DISCORD_REPORT_CHANNEL_ID` | 每月 1 號月結通知頻道 ID（選填） |
+| `DISCORD_INVOICE_CHANNEL_ID` | 發票通知頻道 ID（選填） |
+| `DISCORD_REPORT_CHANNEL_ID` | 週報 / 月結通知頻道 ID（選填） |
 | `DISCORD_RECORD_CHANNEL_ID` | 記帳主頻道 ID（選填，預留） |
 | `NGROK_AUTHTOKEN` | ngrok 認證 Token |
 | `EINVOICE_PHONE_1` | 第一組載具：財政部電子發票會員手機號碼 |
@@ -79,6 +93,9 @@ docker compose up -d --build
 
 # 3. 確認服務狀態
 docker compose logs -f app
+
+# 4. 跑單元測試（report_helpers 純函式）
+docker compose exec app pytest tests/ -v
 ```
 
 服務啟動後：
@@ -112,8 +129,8 @@ docker compose logs -f app
 
 **頻道結構**（一次性 setup 腳本建立，含木須龍主題 banner 圖）：
 - `#📝-記帳` — slash commands 主場
-- `#📊-報表查詢` — 每月 1 號 09:00 自動 post 上月結算
-- `#🧾-發票通知` — 每日 21:00 抓完發票自動 post 結果
+- `#📊-報表查詢` — 每週日 21:00 自動 post 週報；每月第一個週日同時連推上月完整月結
+- `#🧾-發票通知` — 週一 ~ 週六 21:00 抓完發票自動 post 結果（週日歸週報 pipeline）
 
 | Slash | 說明 |
 |-------|------|

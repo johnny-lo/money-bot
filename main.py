@@ -11,7 +11,12 @@ from einvoice import sync_invoices as run_invoice_sync
 from routes.report import router as report_router
 from routes.record import router as record_router
 from line_handler import register_line_routes
-from discord_handler import create_discord_bot, notify_invoice_sync, notify_monthly_summary
+from discord_handler import (
+    create_discord_bot,
+    notify_invoice_sync,
+    notify_monthly_summary,
+    notify_weekly_summary,
+)
 
 load_dotenv()
 
@@ -55,22 +60,55 @@ from apscheduler.schedulers.background import BackgroundScheduler
 
 
 def _daily_invoice_with_notify():
-    """抓發票後自動通知 Discord #🧾-發票通知 頻道。"""
+    """週一到週六 21:00 抓發票後自動通知 Discord #🧾-發票通知 頻道。"""
     result = run_invoice_sync(days=2)
     notify_invoice_sync(result["summary"], result.get("new_items", []))
 
 
+def _weekly_pipeline():
+    """週日 21:00：發票同步 → AI 分類 → 週報 →（每月第一個週日多推上月月結）。"""
+    try:
+        result = run_invoice_sync(days=2)
+        notify_invoice_sync(result["summary"], result.get("new_items", []))
+    except Exception as e:
+        print(f"⚠️ 週日發票同步失敗：{e}")
+    try:
+        run_weekly_categorization()
+    except Exception as e:
+        print(f"⚠️ 週日分類失敗：{e}")
+    try:
+        notify_weekly_summary()
+    except Exception as e:
+        print(f"⚠️ 週報推送失敗：{e}")
+
+    # 每月第一個週日（day ≤ 7）= 本月最早的週日 → 推上月完整月結
+    from datetime import datetime as _dt
+    if _dt.now().day <= 7:
+        try:
+            notify_monthly_summary()
+        except Exception as e:
+            print(f"⚠️ 月結推送失敗：{e}")
+
+
 scheduler = BackgroundScheduler(timezone="Asia/Taipei")
-scheduler.add_job(run_weekly_categorization, "cron", day_of_week="sun", hour=0, minute=0, id="weekly_categorize")
 scheduler.add_job(run_daily_recurring, "cron", hour=0, minute=5, id="daily_recurring")
-scheduler.add_job(_daily_invoice_with_notify, "cron", hour=21, minute=0, id="daily_invoice_sync")
-scheduler.add_job(notify_monthly_summary, "cron", day=1, hour=9, minute=0, id="monthly_summary")
+scheduler.add_job(
+    _daily_invoice_with_notify, "cron",
+    day_of_week="mon,tue,wed,thu,fri,sat", hour=21, minute=0,
+    id="daily_invoice_sync",
+)
+scheduler.add_job(_weekly_pipeline, "cron", day_of_week="sun", hour=21, minute=0, id="weekly_pipeline")
 
 
 @app.on_event("startup")
 async def startup_event():
     scheduler.start()
-    print("⏰ 排程已啟動：每週日 00:00 分類 / 每日 00:05 固定收支 / 每日 21:00 抓發票+Discord 通知 / 每月 1 號 09:00 月結")
+    print(
+        "⏰ 排程已啟動："
+        "每日 00:05 固定收支 / "
+        "週一~週六 21:00 抓發票+Discord 通知 / "
+        "週日 21:00 抓發票→分類→週報（每月第一個週日多推上月月結）"
+    )
 
     # 啟動 Discord Bot（如果有設定 token）
     discord_token = os.getenv("DISCORD_BOT_TOKEN")

@@ -14,10 +14,10 @@ else:
     print(f"⚠️ 找不到 {persona_path}，將使用預設 AI 設定。")
 
 
-def gemini_text(prompt: str) -> str:
-    """透過 HTTP 呼叫 Gemini，傳入純文字 prompt。"""
+def gemini_text(prompt: str, model: str | None = None) -> str:
+    """透過 HTTP 呼叫 Gemini，傳入純文字 prompt。可指定 model（如週評語用更強模型）。"""
     api_key = os.getenv("GEMINI_API_KEY")
-    model = os.getenv("MODEL_NAME")
+    model = model or os.getenv("MODEL_NAME")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
     req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")

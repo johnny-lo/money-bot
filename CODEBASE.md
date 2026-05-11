@@ -1,7 +1,7 @@
 # Codebase Index (AI Quick Reference)
 
 > 供 AI 快速理解專案結構，每次 commit 時更新。
-> Last updated: 2026-05-05
+> Last updated: 2026-05-11
 
 ## Stack
 
@@ -15,10 +15,12 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── core.py              # 核心業務邏輯：文字指令解析/處理、圖片記帳、訊息路由 + Data API（Discord embeds 用）
 ├── line_handler.py      # LINE Bot：webhook /callback、文字/圖片訊息事件處理（純文字介面）
 ├── discord_handler.py   # Discord Bot：14 個 Slash Commands + Embeds、圖片附件 on_message 處理
-├── gemini.py            # Gemini API 封裝：gemini_text()、gemini_image()、generate_persona_comment()
+├── gemini.py            # Gemini API 封裝：gemini_text(prompt, model=None)、gemini_image()、generate_persona_comment()。`model=None` 時 fallback 到 MODEL_NAME env
 ├── database.py          # SQLAlchemy engine/SessionLocal/Base 建立（讀 DATABASE_URL）
 ├── models.py            # ORM 模型：Transaction(支出)、Income(收入)、RecurringRecord(固定收支)
-├── categorize.py        # AI 分類：run_weekly_categorization() 批次分類未分類帳目（封閉 12 類：三餐/飲料/零食/食材/油費/停車/居家用品/個人保養/醫療/服飾/娛樂/其他）
+├── categorize.py        # AI 分類：CATEGORIES(13 細類)/CATEGORY_GROUPS(細→大組)/GROUP_ORDER、run_weekly_categorization()(只處理 NULL)、run_full_recategorization()(清掉全部重跑)、category_group()。AI 分批 50 筆送，避免單次 prompt 太長
+├── report_helpers.py    # 報表純函式（無 DB / 無網路）：compare(對比)、top_n_expenses、detect_anomalies、sparkline/daily_heatmap、savings_rate、budget_status、日期工具(week_range/month_range/is_first_sunday 等)。全部由 tests/test_report_helpers.py 覆蓋（49 個測試）
+├── tests/               # pytest 測試。跑法：`docker compose exec app pytest tests/ -v`
 ├── recurring.py         # 固定收支：run_daily_recurring() 每日自動寫入到期項目
 ├── auth.py              # Token 驗證：generate_report_token()、validate_report_token()、require_token dependency
 ├── einvoice.py          # 財政部電子發票同步：Playwright 登入 → CAPTCHA(Gemini) → 抓發票 → 寫 transactions。`sync_invoices()` 回傳 `{"summary": str, "new_items": list[dict]}`，支援多組載具（EINVOICE_PHONE_1/2 + PASSWORD_1/2）
@@ -68,12 +70,34 @@ LINE/Discord 訊息
 
 ## Scheduled Jobs (APScheduler)
 
+時區 `Asia/Taipei`。
+
 | Job | Schedule | Function |
 |-----|----------|----------|
-| weekly_categorize | 每週日 00:00 (Asia/Taipei) | categorize.run_weekly_categorization() |
-| daily_recurring | 每日 00:05 | recurring.run_daily_recurring() |
-| daily_invoice_sync | 每日 21:00 | `_daily_invoice_with_notify()` — 抓今天+昨天 + 通知 Discord `#🧾-發票通知`（含「新增明細」second embed，逐筆列日期/品名/金額，超過 3900 字自動截斷） |
-| monthly_summary | 每月 1 號 09:00 | `notify_monthly_summary()` — 上月結算 embed 推到 `#📊-報表查詢` |
+| daily_recurring | 每日 00:05 | `recurring.run_daily_recurring()` |
+| daily_invoice_sync | 週一 ~ 週六 21:00 | `_daily_invoice_with_notify()` — 抓今天+昨天 + 通知 Discord `#🧾-發票通知`（含「新增明細」second embed，逐筆列日期/品名/金額，超過 3900 字自動截斷） |
+| weekly_pipeline | 週日 21:00 | `_weekly_pipeline()` — 一條龍：(1) 抓發票+通知 → (2) `run_weekly_categorization()` → (3) `notify_weekly_summary()` 週報。**每月第一個週日**（即 `day ≤ 7` 的週日）會額外串接 (4) `notify_monthly_summary()` 推上月完整月結 |
+
+## Category Schema (categorize.py)
+
+13 細類 → 6 大組對應，封閉清單（AI 必須從中選一）：
+
+| 大組 | 細類 |
+|---|---|
+| 固定 | 居住水電、分期保險 |
+| 交通 | 交通 |
+| 飲食 | 三餐、聚餐、飲料零食、食材、超商 |
+| 生活 | 日用品、醫療、服飾 |
+| 娛樂 | 娛樂 |
+| 其他 | 其他 |
+
+- **居住水電** = 房租、管理費、電費、水費、瓦斯
+- **分期保險** = 車貸、手機分期、其他貸款攤提、車險、人壽險、意外險
+- **交通** = 加油、停車費、車輛保養、洗車、ETC、大眾運輸
+- **三餐** = 正餐外食（單筆通常 ≤ 1500 元）
+- **聚餐** = 大額餐廳消費、家人/朋友聚餐請客（單筆通常 > 1500 元）
+- **超商** = 萊爾富/7-11/全家 等只看得到店名的發票
+- 改規則：改 `CATEGORIES` + `CATEGORY_GROUPS` + `CATEGORIZE_RULES`，再呼叫 `run_full_recategorization()` 重跑歷史
 
 ## Core Logic: Text Command Routing (core.py)
 
@@ -120,7 +144,13 @@ LINE/Discord 訊息
     - `#🧾-發票通知` — 每日抓發票結果自動 post 到此
   - 各頻道頂部釘選歡迎卡片（含 banner 圖、用途說明）
   - 對應 channel ID 存在 `.env`：`DISCORD_RECORD_CHANNEL_ID` / `DISCORD_REPORT_CHANNEL_ID` / `DISCORD_INVOICE_CHANNEL_ID`
+- **週報 (`notify_weekly_summary`)** — 本週（週一→週日）embed 欄位：三格頭(收/支/淨) → vs 上週對比 → 大組分布 → 細類分布(前 8) → Top 3 單筆 → 每日支出迷你長條 → 異常分類(近 4 週均值+50%) → AI 評語
+- **月結 (`notify_monthly_summary`)** — 上月 embed 欄位：三格頭 → vs 上上月對比 → 儲蓄率 → 預算狀態(`MONTHLY_BUDGET`) → 大組 → 細類(前 8) → Top 3 → 近 6 月 sparkline → 異常分類(近 4 月均值+50%) → AI 評語
+- **AI 評語**：兩種報表共用 `_generate_ai_comment()`，用 `WEEKLY_MODEL`（強模型，預設 `gemini-pro-latest`）+ persona.md 木須龍。撞 quota(429) 時欄位省略，embed 照樣推
+- **DB 查詢輔助** `_query_period(start, end)` 一次撈完一段期間需要的所有彙總（總額/分類/Top N/每日金額），週報跟月報共用
 
 ## Environment Variables
 
-LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, DISCORD_BOT_TOKEN (optional), DISCORD_INVOICE_CHANNEL_ID (optional), DISCORD_REPORT_CHANNEL_ID (optional), DISCORD_RECORD_CHANNEL_ID (optional), NGROK_AUTHTOKEN, EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional)
+LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, WEEKLY_MODEL (optional, 預設 `gemini-pro-latest`), MONTHLY_BUDGET (optional, 0/不設=不顯示預算進度), DISCORD_BOT_TOKEN (optional), DISCORD_INVOICE_CHANNEL_ID (optional), DISCORD_REPORT_CHANNEL_ID (optional), DISCORD_RECORD_CHANNEL_ID (optional), NGROK_AUTHTOKEN, EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional)
+
+> 注意：channel ID + EINVOICE 系列原本在 `.env` 但沒寫進 `docker-compose.yml` 的 `environment:` block，導致 container 內部 `os.getenv()` 拿不到 → 排程通知都會在 `if not chan_id: return` 靜默退出。已於 2026-05-11 修正。
