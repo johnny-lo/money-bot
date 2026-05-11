@@ -131,7 +131,7 @@ LINE/Discord 訊息
 ## Discord Bot Architecture (discord_handler.py)
 
 - **MoneyBot(discord.Client)** + `app_commands.CommandTree`
-- 14 個 slash commands 全用中文名稱（`/記帳`, `/查詢`, `/最近` 等）
+- 16 個 slash commands 全用中文名稱（`/記帳`, `/查詢`, `/最近`, `/測試週報`, `/測試月報` 等）
 - 每個 command callback 流程：(1) `await ix.response.defer()` 必要時、(2) 呼叫 `core.*_data()`、(3) 用對應 embed builder 組卡片、(4) `ix.followup.send(embeds=...)`
 - 慢 commands（`/記帳`, `/收入`, `/分類`, `/抓發票`）必 defer 避免 3 秒超時
 - 配色：支出 `#E74C3C` / 收入 `#2ECC71` / 查詢 `#3498DB` / 木須龍 `#9B59B6` / 警告 `#F1C40F`
@@ -146,7 +146,8 @@ LINE/Discord 訊息
   - 對應 channel ID 存在 `.env`：`DISCORD_RECORD_CHANNEL_ID` / `DISCORD_REPORT_CHANNEL_ID` / `DISCORD_INVOICE_CHANNEL_ID`
 - **週報 (`notify_weekly_summary`)** — 本週（週一→週日）embed 欄位：三格頭(收/支/淨) → vs 上週對比 → 大組分布 → 細類分布(前 8) → Top 3 單筆 → 每日支出迷你長條 → 異常分類(近 4 週均值+50%) → AI 評語
 - **月結 (`notify_monthly_summary`)** — 上月 embed 欄位：三格頭 → vs 上上月對比 → 儲蓄率 → 預算狀態(`MONTHLY_BUDGET`) → 大組 → 細類(前 8) → Top 3 → 近 6 月 sparkline → 異常分類(近 4 月均值+50%) → AI 評語
-- **AI 評語**：兩種報表共用 `_generate_ai_comment()`，用 `WEEKLY_MODEL`（強模型，預設 `gemini-pro-latest`）+ persona.md 木須龍。撞 quota(429) 時欄位省略，embed 照樣推
+- **AI 評語**：兩種報表共用 `_generate_ai_comment()`，用 `WEEKLY_MODEL`（強模型，預設 `gemini-pro-latest`）+ persona.md 木須龍。失敗（429/503 等）時欄位會顯示「⚠️ AI 評語生成失敗：{錯誤訊息}」，embed 照樣推
+- **手動測試**：在 Discord 用 `/測試週報` / `/測試月報` 立即觸發推送（**必須在 bot 主進程內呼叫**，因為 `_bot_instance` 是 module 級狀態；從 `docker compose exec` 開的子進程裡呼叫 `notify_*()` 會靜默失敗）
 - **DB 查詢輔助** `_query_period(start, end)` 一次撈完一段期間需要的所有彙總（總額/分類/Top N/每日金額），週報跟月報共用
 
 ## Environment Variables

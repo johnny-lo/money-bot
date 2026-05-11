@@ -390,6 +390,24 @@ class MoneyBot(discord.Client):
         async def cmd_help(ix: discord.Interaction):
             await ix.response.send_message(embed=help_embed())
 
+        @tree.command(name="測試週報", description="立即觸發本週週報推到 #📊-報表查詢")
+        async def cmd_test_weekly(ix: discord.Interaction):
+            await ix.response.defer(ephemeral=True)
+            try:
+                notify_weekly_summary()
+                await ix.followup.send("✅ 已觸發本週週報，請看 #📊-報表查詢", ephemeral=True)
+            except Exception as ex:
+                await ix.followup.send(f"⚠️ 失敗：{ex}", ephemeral=True)
+
+        @tree.command(name="測試月報", description="立即觸發上月月報推到 #📊-報表查詢")
+        async def cmd_test_monthly(ix: discord.Interaction):
+            await ix.response.defer(ephemeral=True)
+            try:
+                notify_monthly_summary()
+                await ix.followup.send("✅ 已觸發上月月報，請看 #📊-報表查詢", ephemeral=True)
+            except Exception as ex:
+                await ix.followup.send(f"⚠️ 失敗：{ex}", ephemeral=True)
+
 
 def create_discord_bot() -> MoneyBot:
     bot = MoneyBot()
@@ -564,8 +582,9 @@ def _generate_ai_comment(
     try:
         return gemini_text(prompt, model=model).strip()
     except Exception as e:
-        print(f"⚠️ {period_kind}評語生成失敗（{model}）：{e}")
-        return ""
+        msg = str(e)
+        print(f"⚠️ {period_kind}評語生成失敗（{model}）：{msg}")
+        return f"⚠️ AI 評語生成失敗：{msg}"
 
 
 def notify_weekly_summary() -> None:
