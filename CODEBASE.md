@@ -158,3 +158,7 @@ LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MO
 > codex 整合：`codex` CLI 裝在 app 映像內（Dockerfile 用 `npm install -g @openai/codex`，**非獨立 container**），登入憑證以 `docker-compose.yml` 把主機 `${HOME}/.codex` 掛到容器 `/root/.codex`（rw，讓 ChatGPT 訂閱 token 自動刷新可寫回）。`auth_mode=chatgpt`=訂閱制，不走單次計費 API。
 
 > 注意：channel ID + EINVOICE 系列原本在 `.env` 但沒寫進 `docker-compose.yml` 的 `environment:` block，導致 container 內部 `os.getenv()` 拿不到 → 排程通知都會在 `if not chan_id: return` 靜默退出。已於 2026-05-11 修正。
+
+## 規劃中模組（Specs）
+
+- **美食地圖模組**（設計定稿，待實作）：Discord 專屬頻道丟美食影片連結/截圖 → 自動抽店名/地址/推薦品項/類型 → Google Places 正規化 → 存 `FoodPlace` → 地圖網頁（想去/去過）+ 縣市/國家推薦。設計細節見 `docs/superpowers/specs/2026-05-23-food-map-module-design.md`。注意接合點：Discord `on_message` 須依 `FOOD_CHANNEL_ID` 分流，避免美食截圖被現有「拍照記帳」邏輯誤記成支出。
