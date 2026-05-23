@@ -1,7 +1,7 @@
 import json
 from database import SessionLocal
 from models import Transaction
-from gemini import gemini_text
+from codex_cli import codex_text
 
 
 # 13 細類（封閉清單，AI 必須從這裡選一個）
@@ -69,7 +69,7 @@ def _categorize_batch(items: list[Transaction]) -> dict[int, str]:
         f'範例：[{{"id": 1, "category": "三餐"}}, {{"id": 2, "category": "飲料零食"}}]\n'
         f"不要包含任何其他文字或 Markdown 標籤。"
     )
-    result_text = gemini_text(prompt).strip()
+    result_text = codex_text(prompt).strip()
     if result_text.startswith("```json"):
         result_text = result_text[7:]
     if result_text.startswith("```"):

@@ -30,15 +30,17 @@
 
 ### AI 功能
 - **Gemini 圖片辨識** — 拍照自動解析消費明細
-- **AI 自動分類** — 每週日 21:00 自動將未分類帳目分類（也可手動觸發 `分類`）。13 細類分 6 大組：
+- **AI 自動分類** — 每週日 21:00 自動將未分類帳目分類（也可手動觸發 `分類`），走 codex CLI（ChatGPT 訂閱制）。13 細類分 6 大組：
   - **固定**：居住水電 / 分期保險
   - **交通**：交通
   - **飲食**：三餐 / 聚餐 / 飲料零食 / 食材 / 超商
   - **生活**：日用品 / 醫療 / 服飾
   - **娛樂**：娛樂
   - **其他**：其他
-- **AI 角色回應** — 記帳後由「木須龍」角色（台灣配音風格）給出有趣評論
-- **AI 週評語** — 週日 21:00 週報用更強的 Gemini 模型（`WEEKLY_MODEL`，預設 `gemini-pro-latest`）生成本週理財評語
+- **AI 角色回應** — 記帳後由「木須龍」角色（台灣配音風格）給出有趣評論（走 Gemini，求即時）
+- **AI 週/月評語** — 週報/月報的理財評語走 codex CLI（ChatGPT 訂閱制，預設 `gpt-5.5`），免 Gemini 計費 API 的 429 配額困擾
+
+> **文字 vs 影像分工**：帳目分類、週/月報評語等「純文字」生成走 codex 訂閱制；拍照記帳辨識、發票 CAPTCHA 破解等「影像」仍由 Gemini Vision 處理。codex 裝在 app 容器映像內（**非獨立服務**），登入憑證由 compose 掛載主機 `~/.codex` 到容器 `/root/.codex`。
 
 ### 電子發票自動同步
 - **週一 ~ 週六 21:00 自動抓**手機條碼載具當日 + 昨日發票（避免錯過 21:00 後新開立的），逐筆解析品名/金額寫入支出，並把當次新增明細以 embed 推到 Discord `#🧾-發票通知`
@@ -54,7 +56,8 @@
 |------|------|
 | Web 框架 | FastAPI + Uvicorn |
 | 資料庫 | PostgreSQL 15 (SQLAlchemy ORM) |
-| AI | Google Gemini API (文字 + 多模態) |
+| AI（文字） | OpenAI Codex CLI（ChatGPT 訂閱制，分類 + 週/月報評語） |
+| AI（影像） | Google Gemini API（拍照辨識 + CAPTCHA）|
 | 訊息平台 | LINE Bot SDK 2.4.3 / discord.py |
 | 排程 | APScheduler (背景排程) |
 | 爬蟲 | Playwright + Chromium (財政部電子發票) |
@@ -69,8 +72,8 @@
 | `LINE_CHANNEL_ACCESS_TOKEN` | LINE Bot Channel Access Token |
 | `DATABASE_URL` | PostgreSQL 連線字串 |
 | `GEMINI_API_KEY` | Google Gemini API Key |
-| `MODEL_NAME` | Gemini 模型名稱（記帳/分類/角色回應） |
-| `WEEKLY_MODEL` | 週/月評語用的強模型（選填，預設 `gemini-pro-latest`） |
+| `MODEL_NAME` | Gemini 模型名稱（影像辨識：拍照記帳 / CAPTCHA / 木須龍即時評論） |
+| `CODEX_MODEL` | codex 模型覆蓋（選填，留空＝用 codex 預設 `gpt-5.5`；分類與週/月報評語用） |
 | `MONTHLY_BUDGET` | 月度預算金額（選填，0 = 不顯示預算進度）|
 | `DISCORD_BOT_TOKEN` | Discord Bot Token（選填，未設定則跳過） |
 | `DISCORD_INVOICE_CHANNEL_ID` | 發票通知頻道 ID（選填） |

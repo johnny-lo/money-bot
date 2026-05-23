@@ -13,7 +13,7 @@ services:
       - DATABASE_URL=${DATABASE_URL}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - MODEL_NAME=${MODEL_NAME}
-      - WEEKLY_MODEL=${WEEKLY_MODEL:-gemini-pro-latest}
+      - CODEX_MODEL=${CODEX_MODEL:-}
       - MONTHLY_BUDGET=${MONTHLY_BUDGET:-0}
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - DISCORD_RECORD_CHANNEL_ID=${DISCORD_RECORD_CHANNEL_ID}
@@ -27,6 +27,8 @@ services:
       - db
     volumes:
       - .:/app
+      # 掛入主機的 codex 登入憑證（ChatGPT 訂閱）；rw 讓 token 自動刷新可寫回
+      - ${HOME}/.codex:/root/.codex
 
   # 2. PostgreSQL 資料庫
   db:

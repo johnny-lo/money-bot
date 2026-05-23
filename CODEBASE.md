@@ -15,10 +15,11 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── core.py              # 核心業務邏輯：文字指令解析/處理、圖片記帳、訊息路由 + Data API（Discord embeds 用）
 ├── line_handler.py      # LINE Bot：webhook /callback、文字/圖片訊息事件處理（純文字介面）
 ├── discord_handler.py   # Discord Bot：14 個 Slash Commands + Embeds、圖片附件 on_message 處理
-├── gemini.py            # Gemini API 封裝：gemini_text(prompt, model=None)、gemini_image()、generate_persona_comment()。`model=None` 時 fallback 到 MODEL_NAME env
+├── gemini.py            # Gemini API 封裝：gemini_image()（影像辨識：拍照記帳、CAPTCHA，用 MODEL_NAME）、gemini_text()（保留作後備）、generate_persona_comment()（木須龍記帳評論，走 Gemini 文字）
+├── codex_cli.py         # codex_text(prompt)：shell 出去呼叫本機 `codex exec`（ChatGPT 訂閱制，預設 gpt-5.5），用 --output-last-message 取乾淨輸出。供「分類 + 週/月報評語」的文字生成用，取代計費的 Gemini 文字 API（CODEX_MODEL env 可覆蓋模型）
 ├── database.py          # SQLAlchemy engine/SessionLocal/Base 建立（讀 DATABASE_URL）
 ├── models.py            # ORM 模型：Transaction(支出)、Income(收入)、RecurringRecord(固定收支)
-├── categorize.py        # AI 分類：CATEGORIES(13 細類)/CATEGORY_GROUPS(細→大組)/GROUP_ORDER、run_weekly_categorization()(只處理 NULL)、run_full_recategorization()(清掉全部重跑)、category_group()。AI 分批 50 筆送，避免單次 prompt 太長
+├── categorize.py        # AI 分類（走 codex_text / 訂閱制）：CATEGORIES(13 細類)/CATEGORY_GROUPS(細→大組)/GROUP_ORDER、run_weekly_categorization()(只處理 NULL)、run_full_recategorization()(清掉全部重跑)、category_group()。AI 分批 50 筆送，避免單次 prompt 太長
 ├── report_helpers.py    # 報表純函式（無 DB / 無網路）：compare(對比)、top_n_expenses、detect_anomalies、sparkline/daily_heatmap、savings_rate、budget_status、日期工具(week_range/month_range/is_first_sunday 等)。全部由 tests/test_report_helpers.py 覆蓋（49 個測試）
 ├── tests/               # pytest 測試。跑法：`docker compose exec app pytest tests/ -v`
 ├── recurring.py         # 固定收支：run_daily_recurring() 每日自動寫入到期項目
@@ -146,12 +147,14 @@ LINE/Discord 訊息
   - 對應 channel ID 存在 `.env`：`DISCORD_RECORD_CHANNEL_ID` / `DISCORD_REPORT_CHANNEL_ID` / `DISCORD_INVOICE_CHANNEL_ID`
 - **週報 (`notify_weekly_summary`)** — 本週（週一→週日）embed 欄位：三格頭(收/支/淨) → vs 上週對比 → 大組分布 → 細類分布(前 8) → Top 3 單筆 → 每日支出迷你長條 → 異常分類(近 4 週均值+50%) → AI 評語
 - **月結 (`notify_monthly_summary`)** — 上月 embed 欄位：三格頭 → vs 上上月對比 → 儲蓄率 → 預算狀態(`MONTHLY_BUDGET`) → 大組 → 細類(前 8) → Top 3 → 近 6 月 sparkline → 異常分類(近 4 月均值+50%) → AI 評語
-- **AI 評語**：兩種報表共用 `_generate_ai_comment()`，用 `WEEKLY_MODEL`（強模型，預設 `gemini-pro-latest`）+ persona.md 木須龍。失敗（429/503 等）時欄位會顯示「⚠️ AI 評語生成失敗：{錯誤訊息}」，embed 照樣推
+- **AI 評語**：兩種報表共用 `_generate_ai_comment()`，走 `codex_cli.codex_text()`（ChatGPT 訂閱制，預設 gpt-5.5，不再用計費 Gemini，免 429 配額）+ persona.md 木須龍。會餵入報表已算好的 vs 上期對比 / 儲蓄率（月）/ 異常暴增分類 / 單筆 Top 3，要求講出具體數字與可執行建議；prompt 依 `period_kind` 分流（週報 2–3 句聚焦本週、月報 3–4 句講趨勢+下月行動）。失敗時欄位會顯示「⚠️ AI 評語生成失敗：{錯誤訊息}」，embed 照樣推。註：木須龍「記帳當下」評論（generate_persona_comment）仍走 Gemini，只有報表評語與分類改用 codex
 - **手動測試**：在 Discord 用 `/測試週報` / `/測試月報` 立即觸發推送（**必須在 bot 主進程內呼叫**，因為 `_bot_instance` 是 module 級狀態；從 `docker compose exec` 開的子進程裡呼叫 `notify_*()` 會靜默失敗）
 - **DB 查詢輔助** `_query_period(start, end)` 一次撈完一段期間需要的所有彙總（總額/分類/Top N/每日金額），週報跟月報共用
 
 ## Environment Variables
 
-LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, WEEKLY_MODEL (optional, 預設 `gemini-pro-latest`), MONTHLY_BUDGET (optional, 0/不設=不顯示預算進度), DISCORD_BOT_TOKEN (optional), DISCORD_INVOICE_CHANNEL_ID (optional), DISCORD_REPORT_CHANNEL_ID (optional), DISCORD_RECORD_CHANNEL_ID (optional), NGROK_AUTHTOKEN, EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional)
+LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, CODEX_MODEL (optional, 留空=用 codex 預設 gpt-5.5), MONTHLY_BUDGET (optional, 0/不設=不顯示預算進度), DISCORD_BOT_TOKEN (optional), DISCORD_INVOICE_CHANNEL_ID (optional), DISCORD_REPORT_CHANNEL_ID (optional), DISCORD_RECORD_CHANNEL_ID (optional), NGROK_AUTHTOKEN, EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional)
+
+> codex 整合：`codex` CLI 裝在 app 映像內（Dockerfile 用 `npm install -g @openai/codex`，**非獨立 container**），登入憑證以 `docker-compose.yml` 把主機 `${HOME}/.codex` 掛到容器 `/root/.codex`（rw，讓 ChatGPT 訂閱 token 自動刷新可寫回）。`auth_mode=chatgpt`=訂閱制，不走單次計費 API。
 
 > 注意：channel ID + EINVOICE 系列原本在 `.env` 但沒寫進 `docker-compose.yml` 的 `environment:` block，導致 container 內部 `os.getenv()` 拿不到 → 排程通知都會在 `if not chan_id: return` 靜默退出。已於 2026-05-11 修正。

@@ -558,32 +558,71 @@ def _generate_ai_comment(
     income: int, expense: int, net: int,
     groups: list[dict], categories: list[dict],
     period_label: str, period_kind: str,
+    *,
+    vs_prev: str = "",
+    savings: str = "",
+    anomalies: list[dict] | None = None,
+    top_records: list[dict] | None = None,
 ) -> str:
-    """用較強的 Gemini 模型生成期間評語（木須龍口吻）。失敗回空字串。"""
+    """用 codex CLI（ChatGPT 訂閱，gpt-5.5）生成期間評語（木須龍口吻）。失敗回錯誤訊息字串。
+
+    傳入報表已算好的 vs 上期對比 / 儲蓄率 / 異常暴增 / 單筆 Top 3，
+    讓評語能講出具體數字與可執行建議，而非空泛鼓勵。
+    """
     try:
-        from gemini import gemini_text, PERSONA_TEXT
+        from codex_cli import codex_text
+        from gemini import PERSONA_TEXT
     except Exception:
         return ""
+
     group_str = "、".join(f"{g['name']} {g['amount']}元" for g in groups) or "（無）"
     top_cats = "、".join(f"{c['name']} {c['amount']}元" for c in categories[:5]) or "（無）"
+    top3 = "、".join(
+        f"{r['item']} {r['amount']}元" for r in (top_records or [])[:3]
+    ) or "（無）"
+    anomaly_str = "、".join(
+        f"{a['category']}（{a['current']}元，較近期均值 +{a['pct']:.0f}%）"
+        for a in (anomalies or [])[:3]
+    ) or "（無明顯異常）"
+
+    facts = [
+        f"- 收入：{income} 元",
+        f"- 支出：{expense} 元（vs 上期：{vs_prev or '—'}）",
+        f"- 淨支出：{net} 元",
+    ]
+    if savings:
+        facts.append(f"- 儲蓄率：{savings}")
+    facts += [
+        f"- 大組支出分布：{group_str}",
+        f"- 前 5 大細類：{top_cats}",
+        f"- 單筆最大三筆：{top3}",
+        f"- 異常暴增分類：{anomaly_str}",
+    ]
+
+    if period_kind == "本月":
+        ask = (
+            "請用你的角色口吻給一段 3–4 句的月度理財評語：先點出本月相對上月的整體變化"
+            "（用儲蓄率或支出增減來講），再指出最大支出來源與任何異常暴增的分類，"
+            "最後給「下個月」一個具體、可執行的行動建議——要明確到哪一類、怎麼做、目標省多少。"
+        )
+    else:
+        ask = (
+            "請用你的角色口吻給一段 2–3 句的本週理財評語：點出本週最大支出來源、"
+            "與上週相比的變化，並給一個「這週就能做」的具體小調整建議。"
+        )
+
     prompt = (
         f"{PERSONA_TEXT}\n\n---\n"
         f"以下是主人{period_kind}（{period_label}）的記帳結算：\n"
-        f"- 收入：{income} 元\n"
-        f"- 支出：{expense} 元\n"
-        f"- 淨支出：{net} 元\n"
-        f"- 大組支出分布：{group_str}\n"
-        f"- 前 5 大細類：{top_cats}\n\n"
-        f"請用你的角色口吻給一段 2–3 句的{period_kind}理財評語，"
-        f"必須點出最大支出來源、給一個具體可執行的建議。"
-        f"不要列點、不要加標題、直接給評語文字。"
+        + "\n".join(facts)
+        + "\n\n" + ask
+        + "請直接給一段口語評語文字，不要列點、不要加標題、不要重複貼上面的數字清單。"
     )
-    model = os.getenv("WEEKLY_MODEL", "gemini-pro-latest")
     try:
-        return gemini_text(prompt, model=model).strip()
+        return codex_text(prompt).strip()
     except Exception as e:
         msg = str(e)
-        print(f"⚠️ {period_kind}評語生成失敗（{model}）：{msg}")
+        print(f"⚠️ {period_kind}評語生成失敗（codex）：{msg}")
         return f"⚠️ AI 評語生成失敗：{msg}"
 
 
@@ -666,7 +705,12 @@ def notify_weekly_summary() -> None:
     if anomalies:
         e.add_field(name="🚨 異常分類", value=format_anomalies(anomalies[:3]), inline=False)
 
-    comment = _generate_ai_comment(total_i, total_e, net, groups, categories, week_label, "本週")
+    comment = _generate_ai_comment(
+        total_i, total_e, net, groups, categories, week_label, "本週",
+        vs_prev=compare(total_e, prev["total_e"]),
+        anomalies=anomalies,
+        top_records=curr["top_records"],
+    )
     if comment:
         e.add_field(name="🐉 本週評語", value=comment[:1024], inline=False)
 
@@ -781,7 +825,13 @@ def notify_monthly_summary() -> None:
     if anomalies:
         e.add_field(name="🚨 異常分類", value=format_anomalies(anomalies[:3]), inline=False)
 
-    comment = _generate_ai_comment(total_i, total_e, net, groups, categories, f"{y}/{m:02d}", "本月")
+    comment = _generate_ai_comment(
+        total_i, total_e, net, groups, categories, f"{y}/{m:02d}", "本月",
+        vs_prev=compare(total_e, prev["total_e"]),
+        savings=format_savings_rate(total_i, total_e),
+        anomalies=anomalies,
+        top_records=curr["top_records"],
+    )
     if comment:
         e.add_field(name="🐉 本月評語", value=comment[:1024], inline=False)
 

@@ -11,6 +11,13 @@ RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua
 # 安裝 Playwright Chromium 與系統依賴（給發票爬蟲用）
 RUN playwright install --with-deps chromium
 
+# 安裝 Node 與 OpenAI Codex CLI
+# 週報/月報評語 + 帳目分類的「文字」生成走 codex（ChatGPT 訂閱），取代計費的 Gemini 文字 API；
+# 影像辨識（拍照記帳、CAPTCHA）仍由 gemini.py 用 Gemini Vision 處理。
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+    && npm install -g @openai/codex \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # 複製程式碼
 COPY . .
 
