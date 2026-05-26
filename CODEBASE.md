@@ -161,4 +161,4 @@ LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MO
 
 ## 規劃中模組（Specs）
 
-- **美食地圖模組**（設計定稿，待實作）：Discord 專屬頻道丟美食影片連結/截圖 → 自動抽店名/地址/推薦品項/類型 → Google Places 正規化 → 存 `FoodPlace` → 地圖網頁（想去/去過）+ 縣市/國家推薦。設計細節見 `docs/superpowers/specs/2026-05-23-food-map-module-design.md`。注意接合點：Discord `on_message` 須依 `FOOD_CHANNEL_ID` 分流，避免美食截圖被現有「拍照記帳」邏輯誤記成支出。
+- **美食地圖模組**（設計定稿 MVP 導向，待實作）：在 Discord `#美食輸入` 頻道丟截圖/連結 → 自動抽店名/品項/類型 → Google Places (New) 正規化 + 低星負評 AI「雷點摘要」→ 存 `FoodPlace`(想去/去過) → `/美食推薦 <縣市/國家>`(含隨機挑一家)；地圖網頁(Maps JS)排 MVP 之後。設計細節見 `docs/superpowers/specs/2026-05-23-food-map-module-design.md`。**關鍵接合點**：`on_message` 須依 `FOOD_INGEST_CHANNEL_ID` / `DISCORD_RECORD_CHANNEL_ID` 分流（後者未設則退回舊的任意頻道記帳 + 警告），避免美食截圖被「拍照記帳」誤記成支出。
