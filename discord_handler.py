@@ -28,6 +28,7 @@ COLOR_INCOME  = 0x2ECC71   # 綠
 COLOR_INFO    = 0x3498DB   # 藍
 COLOR_PERSONA = 0x9B59B6   # 紫（木須龍）
 COLOR_WARN    = 0xF1C40F   # 黃
+COLOR_FOOD    = 0xE67E22   # 美食橘
 
 
 def fmt_money(n: int) -> str:
@@ -193,6 +194,53 @@ def image_recorded_embed(d: dict) -> discord.Embed:
         e.add_field(name="實付", value=fmt_money(d["actual"]), inline=True)
     else:
         e.add_field(name="總計", value=fmt_money(d["total_expense"]), inline=False)
+    return e
+
+
+def food_place_embed(p: dict, *, created: bool = True) -> discord.Embed:
+    from food.places import maps_url
+    title = ("🍜 已加入想去" if created else "🍜 已更新（這家記過了）") + f"：{p['name']}"
+    e = discord.Embed(title=title, color=COLOR_FOOD)
+    if p.get("cuisine_type"):
+        e.add_field(name="類型", value=p["cuisine_type"], inline=True)
+    region = " / ".join(x for x in (p.get("country"), p.get("city")) if x) or "—"
+    e.add_field(name="地區", value=region, inline=True)
+    e.add_field(name="狀態", value=p.get("status", "想去"), inline=True)
+    if p.get("address"):
+        e.add_field(name="地址", value=p["address"], inline=False)
+    if p.get("recommended_items"):
+        e.add_field(name="推薦品項", value=p["recommended_items"], inline=False)
+    if p.get("caution_summary"):
+        e.add_field(name="⚠️ 雷點", value=p["caution_summary"], inline=False)
+    if p.get("place_id"):
+        e.add_field(name="地圖", value=maps_url(p["place_id"]), inline=False)
+    e.set_footer(text=f"編號 {p['id']}")
+    return e
+
+
+def food_list_embed(places: list[dict], title: str) -> discord.Embed:
+    e = discord.Embed(title=title, color=COLOR_FOOD)
+    if not places:
+        e.description = "（沒有符合的店家）"
+        return e
+    lines = []
+    for p in places[:20]:
+        cat = f" `{p['cuisine_type']}`" if p.get("cuisine_type") else ""
+        items = f" — {p['recommended_items']}" if p.get("recommended_items") else ""
+        lines.append(f"`#{p['id']}` **{p['name']}**{cat}{items}")
+    e.description = "\n".join(lines)
+    if len(places) > 20:
+        e.set_footer(text=f"共 {len(places)} 家，只顯示前 20")
+    return e
+
+
+def food_reco_embed(query: str, places: list[dict], pick: dict | None) -> discord.Embed:
+    e = food_list_embed(places, title=f"🍜 {query} 的想去清單（{len(places)} 家）")
+    if pick:
+        e.add_field(name="🎲 選擇困難？這家",
+                    value=f"**{pick['name']}**" +
+                          (f" — {pick['recommended_items']}" if pick.get("recommended_items") else ""),
+                    inline=False)
     return e
 
 
@@ -389,6 +437,56 @@ class MoneyBot(discord.Client):
         @tree.command(name="說明", description="顯示所有指令")
         async def cmd_help(ix: discord.Interaction):
             await ix.response.send_message(embed=help_embed())
+
+        @tree.command(name="美食新增", description="新增一家想去的店（自動查 Google 正規化）")
+        @app_commands.describe(店名="店名", 區域="縣市/城市（幫助定位，選填）", 推薦品項="想吃什麼（選填）")
+        async def cmd_food_add(ix: discord.Interaction, 店名: str, 區域: str = "", 推薦品項: str = ""):
+            await ix.response.defer()
+            from food.places import search_text
+            from food.repo import upsert_place
+            query = f"{店名} {區域}".strip()
+            try:
+                place = search_text(query)
+            except Exception as ex:
+                await ix.followup.send(embed=error_embed(f"查 Google 失敗：{ex}"))
+                return
+            if not place:
+                await ix.followup.send(embed=error_embed(f"找不到「{query}」，換個更完整的店名或加上區域再試。"))
+                return
+            p, created = upsert_place(place, recommended_items=推薦品項 or None)
+            await ix.followup.send(embed=food_place_embed(p, created=created))
+
+        @tree.command(name="美食推薦", description="依縣市/國家推薦想去的店")
+        @app_commands.describe(地區="縣市或國家，例如 台中 / 日本")
+        async def cmd_food_reco(ix: discord.Interaction, 地區: str):
+            await ix.response.defer()
+            from food.repo import list_places
+            from food.recommend import filter_for_recommendation, sort_recent, pick_random
+            matched = sort_recent(filter_for_recommendation(list_places("想去"), 地區))
+            pick = pick_random(matched)
+            await ix.followup.send(embed=food_reco_embed(地區, matched, pick))
+
+        @tree.command(name="美食清單", description="列出美食清單")
+        @app_commands.describe(狀態="想去 / 去過（留空=全部）")
+        async def cmd_food_list(ix: discord.Interaction, 狀態: str = ""):
+            await ix.response.defer()
+            from food.repo import list_places
+            status = 狀態 if 狀態 in ("想去", "去過") else None
+            places = list_places(status)
+            title = f"🍜 美食清單（{狀態 or '全部'}，{len(places)} 家）"
+            await ix.followup.send(embed=food_list_embed(places, title))
+
+        @tree.command(name="去過", description="把某家標成去過（可記評分/心得）")
+        @app_commands.describe(編號="店家編號", 評分="1-5（選填）", 心得="一句話（選填）")
+        async def cmd_food_visited(ix: discord.Interaction, 編號: int, 評分: int = 0, 心得: str = ""):
+            await ix.response.defer()
+            from food.repo import set_visited
+            rating = 評分 if 1 <= 評分 <= 5 else None
+            p = set_visited(編號, rating=rating, note=心得 or None)
+            if not p:
+                await ix.followup.send(embed=error_embed(f"找不到編號 {編號}"))
+                return
+            await ix.followup.send(embed=food_place_embed(p, created=False))
 
         @tree.command(name="測試週報", description="立即觸發本週週報推到 #📊-報表查詢")
         async def cmd_test_weekly(ix: discord.Interaction):

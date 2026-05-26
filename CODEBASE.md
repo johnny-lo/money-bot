@@ -27,6 +27,11 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── einvoice.py          # 財政部電子發票同步：Playwright 登入 → CAPTCHA(Gemini) → 抓發票 → 寫 transactions。`sync_invoices()` 回傳 `{"summary": str, "new_items": list[dict]}`，支援多組載具（EINVOICE_PHONE_1/2 + PASSWORD_1/2）
 ├── persona.md           # AI 角色設定：木須龍(台灣配音風格)，記帳後生成角色回應
 ├── resource/            # Discord 頻道歡迎 banner 圖（手動放入，由 _setup_discord 一次性上傳；已 .gitignore 不入版本控制）
+├── food/
+│   ├── __init__.py
+│   ├── places.py        # Google Places (New) 整合：search_text(query)→dict|None、maps_url(place_id)→str
+│   ├── repo.py          # food_places 表 CRUD：upsert_place()、list_places(status)、set_visited()
+│   └── recommend.py     # 推薦邏輯：filter_for_recommendation()、sort_recent()、pick_random()
 ├── requirements.txt     # Python 依賴
 ├── Dockerfile           # python:3.11-slim，pip install → uvicorn 啟動
 ├── docker-compose.yml   # 三個服務：app(127.0.0.1:8000)、db(PostgreSQL，僅 docker network)、ngrok(127.0.0.1:4040 inspector + tunnel)
@@ -45,6 +50,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 | `transactions` | id(PK), item(str), price(int), category(str?), invoice_no(str?), created_at(datetime) | 支出。invoice_no 是發票去重 key（einvoice 自動帶入；手動記帳為 NULL） |
 | `incomes` | id(PK), item(str), amount(int), category(str?), created_at(datetime) | 收入 |
 | `recurring_records` | id(PK), type("expense"/"income"), item, amount, category?, day_of_month(1-28), active(1/0), created_at | 固定收支 |
+| `food_places` | id(PK), place_id(str?), name, address?, lat?, lng?, country?, city?, district?, cuisine_type?, recommended_items?, caution_summary?, status("想去"/"去過"), my_rating(int?), my_note?, source_url?, updated_at, created_at | 美食地圖（Phase 1A+） |
 
 main.py 啟動時自動 `CREATE TABLE` + 檢查/補上 category / invoice_no 欄位。
 
@@ -132,7 +138,7 @@ LINE/Discord 訊息
 ## Discord Bot Architecture (discord_handler.py)
 
 - **MoneyBot(discord.Client)** + `app_commands.CommandTree`
-- 16 個 slash commands 全用中文名稱（`/記帳`, `/查詢`, `/最近`, `/測試週報`, `/測試月報` 等）
+- 20 個 slash commands 全用中文名稱（`/記帳`, `/查詢`, `/最近`, `/測試週報`, `/測試月報`, `/美食新增`, `/美食推薦`, `/美食清單`, `/去過` 等）
 - 每個 command callback 流程：(1) `await ix.response.defer()` 必要時、(2) 呼叫 `core.*_data()`、(3) 用對應 embed builder 組卡片、(4) `ix.followup.send(embeds=...)`
 - 慢 commands（`/記帳`, `/收入`, `/分類`, `/抓發票`）必 defer 避免 3 秒超時
 - 配色：支出 `#E74C3C` / 收入 `#2ECC71` / 查詢 `#3498DB` / 木須龍 `#9B59B6` / 警告 `#F1C40F`
@@ -161,4 +167,4 @@ LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MO
 
 ## 規劃中模組（Specs）
 
-- **美食地圖模組**（設計定稿 MVP 導向，待實作）：在 Discord `#美食輸入` 頻道丟截圖/連結 → 自動抽店名/品項/類型 → Google Places (New) 正規化 + 低星負評 AI「雷點摘要」→ 存 `FoodPlace`(想去/去過) → `/美食推薦 <縣市/國家>`(含隨機挑一家)；地圖網頁(Maps JS)排 MVP 之後。設計細節見 `docs/superpowers/specs/2026-05-23-food-map-module-design.md`。**關鍵接合點**：`on_message` 須依 `FOOD_INGEST_CHANNEL_ID` / `DISCORD_RECORD_CHANNEL_ID` 分流（後者未設則退回舊的任意頻道記帳 + 警告），避免美食截圖被「拍照記帳」誤記成支出。
+- **美食地圖模組**（**Phase 1A 已實作：4 個 slash 指令**）：`/美食新增`、`/美食推薦`、`/美食清單`、`/去過`，手動建私人美食清單 + 縣市/國家推薦（含🎲隨機挑一家）。後續 Phase：在 Discord `#美食輸入` 頻道丟截圖/連結 → 自動抽店名/品項/類型 → Google Places (New) 正規化 + 低星負評 AI「雷點摘要」→ 地圖網頁(Maps JS)排 MVP 之後。設計細節見 `docs/superpowers/specs/2026-05-23-food-map-module-design.md`。**關鍵接合點**：`on_message` 須依 `FOOD_INGEST_CHANNEL_ID` / `DISCORD_RECORD_CHANNEL_ID` 分流（後者未設則退回舊的任意頻道記帳 + 警告），避免美食截圖被「拍照記帳」誤記成支出。
