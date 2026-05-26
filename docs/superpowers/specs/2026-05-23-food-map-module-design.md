@@ -17,7 +17,7 @@
 
 - 不做 yt-dlp 下載影片 + 抽幀辨識（維護成本高、踩平台 ToS）。改用「截圖 + caption 文字」覆蓋實際情境。
 - 不寫入使用者的 Google Maps 原生清單（公開 API 不支援）。
-- 不做多使用者/權限系統（沿用單人 bot 現況）。
+- 不做多使用者/權限系統：清單為**單一共用清單**（情侶共用），`my_rating`/`my_note` 不分人。
 - 不做訂位、菜單價格爬取。
 - pending（需補件）**不做過期清理 / 垃圾回收**——單人低頻率不需要。
 
@@ -50,6 +50,8 @@
 ```
 
 > 退路設計是記取教訓：先前「channel ID 漏帶 → 靜默失敗」。本模組**寧可退回舊行為也不靜默關閉**既有記帳。
+>
+> 指引提示只對**圖片**觸發，且**同頻道一段時間內只提示一次**（防洗版），避免每則訊息都被回。
 
 ### 3.2 LINE / Discord 分工
 
@@ -71,28 +73,30 @@
 | `address` | String | 完整地址 |
 | `lat` / `lng` | Float, nullable | 座標（地圖用；MVP 推薦不需要） |
 | `place_id` | String, index, unique | Google Place 唯一 ID（去重 + 導航連結） |
-| `country` | String, index | 國家（**一定有**；國外以此為推薦粒度） |
-| `city` | String, nullable, index | 縣市（**主要給台灣**；國外多半空） |
+| `country` | String, index | 國家（**一定有**；國外可用此粒度查全部） |
+| `city` | String, nullable, index | 城市（**有就填、不限台灣**；台灣=縣市，國外=locality/administrative_area，如 東京/大阪/首爾） |
 | `district` | String, nullable | 區（有就存，沒有不強求） |
 | `cuisine_type` | String, nullable, index | 料理類型（拉麵/咖啡…；AI 推測，可空、可改；先自由文字） |
 | `recommended_items` | String, nullable | 推薦品項（文字） |
 | `caution_summary` | String, nullable | **雷點提醒**：Google 低星負評 AI 摘要（取代平均星等，見 §6.4） |
 | `status` | String | `想去`（預設）/ `去過` |
-| `my_rating` | Integer, nullable | 自己的評分（標去過時填，1–5） |
-| `my_note` | String, nullable | 心得 |
+| `my_rating` | Integer, nullable | 共用評分（標去過時填，1–5；不分人） |
+| `my_note` | String, nullable | 共用心得（不分人） |
 | `source_url` | String, nullable | 原始影片/貼文連結存證 |
 | `discord_message_id` | String, nullable, index | 卡片訊息 ID（給 ✅ 反應回查對應店家） |
 | `created_at` | DateTime | 記錄時間，`default=func.now()` |
+| `updated_at` | DateTime | 最後更新時間，`default=func.now(), onupdate=func.now()`（重複丟同店時更新，用於「最近又丟過這家」） |
 
 **去重**：以 `place_id` 為唯一鍵；同一家重複丟 → 更新（補來源/品項/時間）+ 回「這家你已記過」提示（見 §6.7），不新增重複。
 
 ### 4.1 地區規則（推薦的命脈）
 
 - 查 Places 一律帶 `languageCode=zh-TW`，讓 `country`/`city` 回中文。
-- `country` 一定填；`city` 台灣才有意義，國外可空。
+- `country` 一定填；`city` **有就填、不限台灣**（台灣=縣市；國外盡量存 locality/administrative_area，如 東京/大阪/首爾）。國外既可按國家查（列全部）也可按城市縮小。
 - **推薦比對**：使用者輸入一個詞，同時比對 `country` 與 `city`，用「正規化 + 別名 + 包含」而非精確等於：
   - 台灣縣市別名：`台中 = 台中市 = Taichung`、`台北 = 台北市 = Taipei`…
   - 國家別名：`日本 = Japan`、`韓國 = Korea`…
+  - 國外城市別名：`東京 = Tokyo`、`大阪 = Osaka`、`首爾 = Seoul`…（別名表持續補；查不到精確就退包含比對）
   - 找不到精確 → 退而用包含比對。
 - 別名/正規化是純函式，納入單元測試。
 
@@ -166,6 +170,8 @@ bot 貼「⚠️ 需補件」卡片
 ```
 
 限制：Places 每家只回約 5 則評論、不保證涵蓋所有負評；這是 best-effort 參考，不是完整負評分析。
+
+**實作原則（事後加值）**：雷點摘要需**額外一次 Place Details 呼叫**，會增加幾秒延遲。所以**先把店存成功、回卡片**，雷點摘要當事後加值補上（可同步補或背景補）；任一段（評論/摘要）失敗或太慢都**不影響、不拖慢入庫**，`caution_summary` 留空即可。
 
 ### 6.5 標記去過
 
