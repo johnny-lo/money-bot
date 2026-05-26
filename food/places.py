@@ -34,6 +34,8 @@ def search_text(query: str) -> dict | None:
     if not places:
         return None
     p = places[0]
+    if not p.get("id"):
+        return None  # 沒有 place_id 無法去重/導航，視同查無
     region = parse_address_components(p.get("addressComponents"))
     loc = p.get("location") or {}
     return {

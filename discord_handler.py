@@ -199,7 +199,13 @@ def image_recorded_embed(d: dict) -> discord.Embed:
 
 def food_place_embed(p: dict, *, created: bool = True) -> discord.Embed:
     from food.places import maps_url
-    title = ("🍜 已加入想去" if created else "🍜 已更新（這家記過了）") + f"：{p['name']}"
+    name = p.get("name") or "(未知店名)"
+    if p.get("status") == "去過":
+        title = f"🍜 已標記去過：{name}"
+    elif created:
+        title = f"🍜 已加入想去：{name}"
+    else:
+        title = f"🍜 已更新（這家記過了）：{name}"
     e = discord.Embed(title=title, color=COLOR_FOOD)
     if p.get("cuisine_type"):
         e.add_field(name="類型", value=p["cuisine_type"], inline=True)
@@ -453,7 +459,11 @@ class MoneyBot(discord.Client):
             if not place:
                 await ix.followup.send(embed=error_embed(f"找不到「{query}」，換個更完整的店名或加上區域再試。"))
                 return
-            p, created = upsert_place(place, recommended_items=推薦品項 or None)
+            try:
+                p, created = upsert_place(place, recommended_items=推薦品項 or None)
+            except Exception as ex:
+                await ix.followup.send(embed=error_embed(f"存檔失敗：{ex}"))
+                return
             await ix.followup.send(embed=food_place_embed(p, created=created))
 
         @tree.command(name="美食推薦", description="依縣市/國家推薦想去的店")
