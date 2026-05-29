@@ -53,3 +53,52 @@ def search_text(query: str) -> dict | None:
 def maps_url(place_id: str) -> str:
     """由 place_id 組 Google Maps 連結（導航/查看用）。"""
     return f"https://www.google.com/maps/place/?q=place_id:{place_id}"
+
+
+_DETAILS_URL = "https://places.googleapis.com/v1/places/{place_id}"
+
+
+def fetch_reviews(place_id: str) -> list[dict]:
+    """抓 Place Details 的 reviews 欄位（最相關約 5 則）。失敗回 []。"""
+    key = os.getenv("GOOGLE_PLACES_SERVER_KEY")
+    if not key or not place_id:
+        return []
+    try:
+        req = urllib.request.Request(
+            _DETAILS_URL.format(place_id=place_id),
+            method="GET",
+            headers={
+                "X-Goog-Api-Key": key,
+                "X-Goog-FieldMask": "reviews",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=20) as r:
+            data = json.loads(r.read())
+        return data.get("reviews") or []
+    except Exception:
+        return []
+
+
+def caution_for_place_id(place_id: str) -> str:
+    """用低星評論做雷點摘要。沒低星回友善訊息；任何失敗回空字串。"""
+    from codex_cli import codex_text
+    reviews = fetch_reviews(place_id)
+    if not reviews:
+        return ""
+    low_lines: list[str] = []
+    for r in reviews:
+        rating = r.get("rating") or 0
+        text = (r.get("text") or {}).get("text") or r.get("originalText", {}).get("text") or ""
+        if rating and rating <= 3 and text:
+            low_lines.append(f"({rating}星) {text}")
+    if not low_lines:
+        return "近期評論沒看到明顯雷點"
+    prompt = (
+        "以下是 Google 評論的低星留言，請用一句話(<=40字)歸納主要雷點，"
+        "台灣口語、不加標題、不列點，直接給文字：\n\n"
+        + "\n\n".join(low_lines[:5])
+    )
+    try:
+        return codex_text(prompt).strip()[:200]
+    except Exception:
+        return ""

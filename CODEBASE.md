@@ -30,7 +30,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── food/
 │   ├── __init__.py
 │   ├── regions.py       # 地名正規化（純函式）：canon()、region_matches()、parse_address_components()
-│   ├── places.py        # Google Places (New) 整合：search_text(query)→dict|None、maps_url(place_id)→str
+│   ├── places.py        # Google Places (New) 整合：search_text(query)→dict|None、maps_url(place_id)→str、fetch_reviews(place_id)→list、caution_for_place_id(place_id)→str(低星評論 AI 雷點摘要)
 │   ├── repo.py          # food_places 表 CRUD：upsert_place()、list_places(status)、set_visited()、to_dict()
 │   └── recommend.py     # 推薦邏輯（純函式）：filter_for_recommendation()、sort_recent()、pick_random()
 ├── requirements.txt     # Python 依賴
