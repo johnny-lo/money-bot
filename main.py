@@ -10,6 +10,7 @@ from recurring import run_daily_recurring
 from einvoice import sync_invoices as run_invoice_sync
 from routes.report import router as report_router
 from routes.record import router as record_router
+from routes.food_map import router as food_map_router
 from line_handler import register_line_routes
 from discord_handler import (
     create_discord_bot,
@@ -51,6 +52,7 @@ app = FastAPI()
 # 掛載路由
 app.include_router(report_router)
 app.include_router(record_router)
+app.include_router(food_map_router)
 register_line_routes(app)
 
 # -----------------------------------------------
