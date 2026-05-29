@@ -267,6 +267,14 @@ def food_missing_embed(reason: str, *, hint: str = "") -> discord.Embed:
     return e
 
 
+def food_map_embed(url: str) -> discord.Embed:
+    return discord.Embed(
+        title="🗺️ 美食地圖",
+        description=f"[👉 點此開啟地圖]({url})\n_30 分鐘內有效_\n藍 = 想去、綠 = 去過",
+        color=COLOR_FOOD,
+    )
+
+
 def help_embed() -> discord.Embed:
     e = discord.Embed(title="📖 指令說明", color=COLOR_INFO)
     e.description = (
@@ -636,6 +644,12 @@ class MoneyBot(discord.Client):
                 await ix.followup.send(embed=error_embed(f"找不到編號 {編號}"))
                 return
             await ix.followup.send(embed=food_place_embed(p, created=False))
+
+        @tree.command(name="美食地圖", description="開啟想去/去過的美食地圖")
+        async def cmd_food_map(ix: discord.Interaction):
+            token = generate_report_token(str(ix.user.id))
+            url = f"{BASE_URL}/food/map?token={token}"
+            await ix.response.send_message(embed=food_map_embed(url))
 
         @tree.command(name="測試週報", description="立即觸發本週週報推到 #📊-報表查詢")
         async def cmd_test_weekly(ix: discord.Interaction):
