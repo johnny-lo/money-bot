@@ -30,6 +30,10 @@ COLOR_PERSONA = 0x9B59B6   # 紫（木須龍）
 COLOR_WARN    = 0xF1C40F   # 黃
 COLOR_FOOD    = 0xE67E22   # 美食橘
 
+# 非目標頻道圖片提示的防洗版：{channel_id: last_hint_ts}
+_HINT_DEBOUNCE: dict[int, float] = {}
+HINT_COOLDOWN_SEC = 1800  # 30 分鐘
+
 
 def fmt_money(n: int) -> str:
     return f"${n:,}"
@@ -307,26 +311,127 @@ class MoneyBot(discord.Client):
         print(f"🐉 Discord Bot 已上線：{self.user}")
 
     async def on_message(self, message: discord.Message):
-        # 只處理圖片附件，文字交給 slash commands
-        if message.author == self.user or not message.attachments:
+        if message.author == self.user:
             return
-        for att in message.attachments:
-            if not (att.content_type and att.content_type.startswith("image/")):
-                continue
+
+        food_chan = os.getenv("FOOD_INGEST_CHANNEL_ID") or ""
+        rec_chan = os.getenv("DISCORD_RECORD_CHANNEL_ID") or ""
+        ch_id = str(message.channel.id)
+
+        # ── 1) 美食頻道：reply 補件 / 圖片或文字 ingest ─────────────
+        if food_chan and ch_id == food_chan:
+            await self._handle_food_message(message)
+            return
+
+        # ── 2) 圖片附件分流 ───────────────────────────────────────
+        if message.attachments:
+            images = [a for a in message.attachments
+                      if a.content_type and a.content_type.startswith("image/")]
+            if not images:
+                return
+            if not rec_chan:
+                # 退路：未設記帳頻道 → 保留舊的「任意頻道圖片記帳」行為
+                await self._do_image_recording(message, images[0])
+                return
+            if ch_id == rec_chan:
+                await self._do_image_recording(message, images[0])
+                return
+            # 其他頻道：提示分流（含防洗版）
+            import time as _time
+            now = _time.time()
+            last = _HINT_DEBOUNCE.get(message.channel.id, 0)
+            if now - last >= HINT_COOLDOWN_SEC:
+                _HINT_DEBOUNCE[message.channel.id] = now
+                await message.channel.send(
+                    "💡 記帳請丟 <#" + rec_chan + ">，記美食請丟 <#" + (food_chan or "") + ">"
+                )
+            return
+        # 非圖片、非美食頻道訊息 → 不處理（讓 slash 自行運作）
+
+    async def _do_image_recording(self, message: discord.Message, att: discord.Attachment):
+        async with message.channel.typing():
+            try:
+                async with aiohttp.ClientSession() as s:
+                    async with s.get(att.url) as resp:
+                        image_bytes = await resp.read()
+                data = handle_image_data(image_bytes)
+                embeds = [image_recorded_embed(data)]
+                pe = persona_embed(data.get("persona", ""))
+                if pe:
+                    embeds.append(pe)
+                await message.channel.send(embeds=embeds)
+            except Exception as e:
+                await message.channel.send(embed=error_embed(f"視覺大腦失敗：{e}"))
+
+    async def _handle_food_message(self, message: discord.Message):
+        from food import ingest, pending
+        from food.repo import set_message_id
+
+        # reply 補件：上一張 ⚠️ 卡片的補件回覆
+        ref = getattr(message, "reference", None)
+        if ref and ref.message_id and pending.get(ref.message_id):
+            ctx = pending.consume(ref.message_id)
+            async with message.channel.typing():
+                merged = (ctx.get("raw_text") or "") + " " + (message.content or "")
+                p, missing = ingest.from_text(merged.strip(),
+                                              source_url=ctx.get("source_url"))
+            if p:
+                sent = await message.channel.send(
+                    embed=food_place_embed(p, created=p.get("_created", True))
+                )
+                set_message_id(p["id"], sent.id)
+            else:
+                sent = await message.channel.send(embed=food_missing_embed(missing))
+                pending.remember(sent.id, original_message_id=message.id,
+                                 raw_text=merged.strip(),
+                                 source_url=ctx.get("source_url"),
+                                 missing_reason=missing)
+            return
+
+        # 圖片 ingest
+        images = [a for a in message.attachments
+                  if a.content_type and a.content_type.startswith("image/")]
+        if images:
+            att = images[0]
             async with message.channel.typing():
                 try:
                     async with aiohttp.ClientSession() as s:
                         async with s.get(att.url) as resp:
                             image_bytes = await resp.read()
-                    data = handle_image_data(image_bytes)
-                    embeds = [image_recorded_embed(data)]
-                    pe = persona_embed(data.get("persona", ""))
-                    if pe:
-                        embeds.append(pe)
-                    await message.channel.send(embeds=embeds)
-                except Exception as e:
-                    await message.channel.send(embed=error_embed(f"視覺大腦失敗：{e}"))
+                    p, missing = ingest.from_image(
+                        image_bytes,
+                        mime_type=att.content_type or "image/jpeg",
+                        source_url=att.url,
+                    )
+                except Exception as ex:
+                    await message.channel.send(embed=error_embed(f"處理截圖失敗：{ex}"))
+                    return
+            if p:
+                sent = await message.channel.send(
+                    embed=food_place_embed(p, created=p.get("_created", True))
+                )
+                set_message_id(p["id"], sent.id)
+            else:
+                sent = await message.channel.send(embed=food_missing_embed(missing))
+                pending.remember(sent.id, original_message_id=message.id,
+                                 attachment_url=att.url,
+                                 missing_reason=missing)
             return
+
+        # 純文字 ingest
+        if message.content and message.content.strip():
+            async with message.channel.typing():
+                p, missing = ingest.from_text(message.content.strip())
+            if p:
+                sent = await message.channel.send(
+                    embed=food_place_embed(p, created=p.get("_created", True))
+                )
+                set_message_id(p["id"], sent.id)
+            else:
+                sent = await message.channel.send(embed=food_missing_embed(missing))
+                pending.remember(sent.id, original_message_id=message.id,
+                                 raw_text=message.content.strip(),
+                                 missing_reason=missing)
 
     def _register_commands(self):
         tree = self.tree
