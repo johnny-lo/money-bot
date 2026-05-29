@@ -31,7 +31,10 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── __init__.py
 │   ├── regions.py       # 地名正規化（純函式）：canon()、region_matches()、parse_address_components()
 │   ├── places.py        # Google Places (New) 整合：search_text(query)→dict|None、maps_url(place_id)→str、fetch_reviews(place_id)→list、caution_for_place_id(place_id)→str(低星評論 AI 雷點摘要)
-│   ├── repo.py          # food_places 表 CRUD：upsert_place()、list_places(status)、set_visited()、to_dict()
+│   ├── extract.py       # 截圖/文字 → 欄位 JSON：parse_extracted_json()(純函式)、from_image()(Gemini Vision)、from_text()(codex)
+│   ├── pending.py       # 需補件 in-memory 暫存(無 TTL,重啟丟失)：remember()/get()/consume()/clear()
+│   ├── ingest.py        # orchestrator：extract → places → upsert → 事後雷點(best-effort)。回 (place|None, missing_reason)
+│   ├── repo.py          # food_places 表 CRUD：upsert_place()、list_places(status)、set_visited()、to_dict()、set_message_id()、update_caution()、set_visited_by_message_id()
 │   └── recommend.py     # 推薦邏輯（純函式）：filter_for_recommendation()、sort_recent()、pick_random()
 ├── requirements.txt     # Python 依賴
 ├── Dockerfile           # python:3.11-slim，pip install → uvicorn 啟動
@@ -143,7 +146,8 @@ LINE/Discord 訊息
 - 每個 command callback 流程：(1) `await ix.response.defer()` 必要時、(2) 呼叫 `core.*_data()`、(3) 用對應 embed builder 組卡片、(4) `ix.followup.send(embeds=...)`
 - 慢 commands（`/記帳`, `/收入`, `/分類`, `/抓發票`）必 defer 避免 3 秒超時
 - 配色：支出 `#E74C3C` / 收入 `#2ECC71` / 查詢 `#3498DB` / 木須龍 `#9B59B6` / 警告 `#F1C40F`
-- 圖片附件走 `on_message`（slash 不適合接拖拉檔案）
+- 圖片附件走 `on_message`，依頻道分流：`FOOD_INGEST_CHANNEL_ID` → `_handle_food_message()`（截圖/文字 ingest、reply 補件）；`DISCORD_RECORD_CHANNEL_ID` → `_do_image_recording()`（圖片記帳）；**未設 RECORD 頻道則退回「任意頻道圖片記帳」舊行為**；其他頻道圖片回指引（`_HINT_DEBOUNCE` 30 分鐘防洗版）
+- `on_raw_reaction_add`：在 `#美食輸入` 對店家卡片按 ✅ → `set_visited_by_message_id()` 標去過 + 追問評分/心得
 - **Sync→Async 橋接**：`set_bot()`/`_post_embeds_sync()` 讓 APScheduler 排程（同步 thread）能投遞 embeds 到 Discord。原理：把 coroutine 用 `asyncio.run_coroutine_threadsafe(coro, bot.loop)` 排到 bot 的 event loop
 - **頻道結構**（由一次性 setup 腳本建立）：
   - `📊 記帳機器人` (category)
@@ -168,4 +172,8 @@ LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MO
 
 ## 規劃中模組（Specs）
 
-- **美食地圖模組**（**Phase 1A 已實作：4 個 slash 指令**）：`/美食新增`、`/美食推薦`、`/美食清單`、`/去過`，手動建私人美食清單 + 縣市/國家推薦（含🎲隨機挑一家）。後續 Phase：在 Discord `#美食輸入` 頻道丟截圖/連結 → 自動抽店名/品項/類型 → Google Places (New) 正規化 + 低星負評 AI「雷點摘要」→ 地圖網頁(Maps JS)排 MVP 之後。設計細節見 `docs/superpowers/specs/2026-05-23-food-map-module-design.md`。**關鍵接合點**：`on_message` 須依 `FOOD_INGEST_CHANNEL_ID` / `DISCORD_RECORD_CHANNEL_ID` 分流（後者未設則退回舊的任意頻道記帳 + 警告），避免美食截圖被「拍照記帳」誤記成支出。
+- **美食地圖模組**（**Phase 1A + 1B 已實作**）：
+  - Phase 1A（slash）：`/美食新增`、`/美食推薦`（含🎲隨機）、`/美食清單`、`/去過`，手動建清單 + 縣市/國家推薦
+  - Phase 1B（自動）：`#美食輸入` 頻道丟截圖/文字 → `food.ingest`（extract → Places 正規化 → upsert → 低星負評 AI 雷點摘要 best-effort）→ 卡片；抽不到走 `food.pending` reply 補件；✅ 反應標去過
+  - 後續 Phase（未實作）：地圖網頁(Maps JS)、連結來源(YouTube/IG/TikTok)。設計見 `docs/superpowers/specs/2026-05-23-food-map-module-design.md`
+  - **關鍵接合點**：`on_message` 依 `FOOD_INGEST_CHANNEL_ID` / `DISCORD_RECORD_CHANNEL_ID` 分流（後者未設則退回舊的任意頻道記帳），避免美食截圖被「拍照記帳」誤記成支出
