@@ -34,6 +34,7 @@
 - **需補件**：抽不到完整資訊 → 貼 ⚠️ 卡片，**reply 該卡片**補上店名/地址即可接回（補件記憶體於 bot 重啟後失效，重貼即可）
 - **標去過**：對店家卡片按 ✅ → 立即標「去過」（之後可用 `/去過 編號 [評分] [心得]` 補評分/心得）
 - **推薦**：`/美食推薦 <縣市/國家>` 列想去清單 + 🎲 隨機挑一家；`/美食清單 [想去/去過]`
+- **地圖**（Phase 2）：`/美食地圖` → 產生 30 分鐘有效連結 → Google Maps 網頁，**藍 pin=想去、綠 pin=去過**；點 pin 看詳情（類型/推薦/評分/心得/🔥雷點/地址/Google Maps 連結）；上方「全部/想去/去過」可切換。地圖表面只有色點，雷點只在點開才顯示
 - **頻道分流**：`#美食輸入` 走美食流程、`#記帳` 走圖片記帳；其他頻道誤丟圖片會回一句指引（同頻道 30 分鐘內只回一次）。未設 `DISCORD_RECORD_CHANNEL_ID` 時圖片記帳退回「任意頻道」舊行為
 
 ### AI 功能
@@ -87,6 +88,10 @@
 | `DISCORD_INVOICE_CHANNEL_ID` | 發票通知頻道 ID（選填） |
 | `DISCORD_REPORT_CHANNEL_ID` | 週報 / 月結通知頻道 ID（選填） |
 | `DISCORD_RECORD_CHANNEL_ID` | 記帳主頻道 ID（選填，預留） |
+| `FOOD_INGEST_CHANNEL_ID` | 美食輸入頻道 ID（美食地圖；丟截圖/文字自動記店） |
+| `GOOGLE_PLACES_SERVER_KEY` | 後端 Google Places API (New) 金鑰（美食店名正規化 / 雷點摘要） |
+| `GOOGLE_MAPS_BROWSER_KEY` | 前端 Google Maps JavaScript API 金鑰（美食地圖網頁；限 ngrok referrer + 只開 Maps JS API） |
+| `GOOGLE_MAPS_MAP_ID` | Google Maps Map ID（AdvancedMarker 必需；未申請填 `DEMO_MAP_ID`，會有浮水印） |
 | `NGROK_AUTHTOKEN` | ngrok 認證 Token |
 | `EINVOICE_PHONE_1` | 第一組載具：財政部電子發票會員手機號碼 |
 | `EINVOICE_PASSWORD_1` | 第一組載具：驗證碼（密碼） |
@@ -163,3 +168,4 @@ docker compose exec app pytest tests/ -v
 | `/美食推薦 地區` | 依縣市/國家列出想去清單，含 🎲 隨機挑一家 |
 | `/美食清單 [狀態]` | 列出美食清單（想去 / 去過 / 全部） |
 | `/去過 編號 [評分] [心得]` | 將店家標為去過，可記 1-5 星評分與心得 |
+| `/美食地圖` | 產生 Google Maps 網頁連結（藍=想去/綠=去過，點 pin 看詳情，可切換） |
