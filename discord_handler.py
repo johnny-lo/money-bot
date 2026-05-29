@@ -342,9 +342,10 @@ class MoneyBot(discord.Client):
             last = _HINT_DEBOUNCE.get(message.channel.id, 0)
             if now - last >= HINT_COOLDOWN_SEC:
                 _HINT_DEBOUNCE[message.channel.id] = now
-                await message.channel.send(
-                    "💡 記帳請丟 <#" + rec_chan + ">，記美食請丟 <#" + (food_chan or "") + ">"
-                )
+                hint = "💡 記帳請丟 <#" + rec_chan + ">"
+                if food_chan:
+                    hint += "，記美食請丟 <#" + food_chan + ">"
+                await message.channel.send(hint)
             return
         # 非圖片、非美食頻道訊息 → 不處理（讓 slash 自行運作）
 
