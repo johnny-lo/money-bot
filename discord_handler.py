@@ -250,6 +250,19 @@ def food_reco_embed(query: str, places: list[dict], pick: dict | None) -> discor
     return e
 
 
+def food_missing_embed(reason: str, *, hint: str = "") -> discord.Embed:
+    """需補件卡片：用 reply 回覆本卡片補上店名/地址即可接回。"""
+    e = discord.Embed(
+        title="⚠️ 抽不到完整資訊，請補件",
+        description=reason or "缺少店名",
+        color=COLOR_WARN,
+    )
+    if hint:
+        e.add_field(name="提示", value=hint, inline=False)
+    e.set_footer(text="🔁 直接 reply 這張卡片，補上店名或更完整的店名+區域")
+    return e
+
+
 def help_embed() -> discord.Embed:
     e = discord.Embed(title="📖 指令說明", color=COLOR_INFO)
     e.description = (
