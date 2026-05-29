@@ -2,6 +2,7 @@
 import os
 import json
 import urllib.request
+import urllib.parse
 
 from food.regions import parse_address_components
 
@@ -50,9 +51,17 @@ def search_text(query: str) -> dict | None:
     }
 
 
-def maps_url(place_id: str) -> str:
-    """由 place_id 組 Google Maps 連結（導航/查看用）。"""
-    return f"https://www.google.com/maps/place/?q=place_id:{place_id}"
+def maps_url(place_id: str, name: str = "") -> str:
+    """組 Google Maps 連結（官方 Maps URLs api=1 格式，導航/查看用）。
+
+    query 為必填（place_id 找不到時的 fallback）；有店名就帶店名，否則用 place_id 字串墊。
+    參考：https://developers.google.com/maps/documentation/urls/get-started
+    """
+    query = urllib.parse.quote(name or place_id)
+    return (
+        "https://www.google.com/maps/search/?api=1"
+        f"&query={query}&query_place_id={place_id}"
+    )
 
 
 _DETAILS_URL = "https://places.googleapis.com/v1/places/{place_id}"

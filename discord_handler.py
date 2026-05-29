@@ -223,7 +223,7 @@ def food_place_embed(p: dict, *, created: bool = True) -> discord.Embed:
     if p.get("caution_summary"):
         e.add_field(name="⚠️ 雷點", value=p["caution_summary"], inline=False)
     if p.get("place_id"):
-        e.add_field(name="地圖", value=maps_url(p["place_id"]), inline=False)
+        e.add_field(name="地圖", value=maps_url(p["place_id"], p.get("name") or ""), inline=False)
     e.set_footer(text=f"編號 {p['id']}")
     return e
 
