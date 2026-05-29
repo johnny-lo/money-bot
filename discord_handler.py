@@ -434,6 +434,26 @@ class MoneyBot(discord.Client):
                                  raw_text=message.content.strip(),
                                  missing_reason=missing)
 
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        # 自己的反應不處理
+        if payload.user_id == (self.user.id if self.user else 0):
+            return
+        food_chan = os.getenv("FOOD_INGEST_CHANNEL_ID") or ""
+        if not food_chan or str(payload.channel_id) != food_chan:
+            return
+        if str(payload.emoji) != "✅":
+            return
+        from food.repo import set_visited_by_message_id
+        rec = set_visited_by_message_id(payload.message_id)
+        if rec is None:
+            return
+        ch = self.get_channel(payload.channel_id)
+        if ch:
+            await ch.send(
+                f"🍜 已標記去過：**{rec['name']}**（編號 {rec['id']}）。"
+                "想記評分/心得嗎？回我一句或用 `/去過`。"
+            )
+
     def _register_commands(self):
         tree = self.tree
 
