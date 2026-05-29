@@ -10,7 +10,7 @@
 
 > 對應 spec：`docs/superpowers/specs/2026-05-23-food-map-module-design.md` §6.3 地圖呈現。
 > 設計來源：Phase 2 設計研究 workflow（wf_9df7a39b-7f6）。
-> **已定決策**：① 不做 clustering；② InfoWindow **不顯示雷點** `caution_summary`（也不從 API 回傳）；③ 做想去/去過前端 toggle（隱藏 marker、不重抓 API）；④ 不做 `?focus` 地區聚焦。
+> **已定決策**：① 不做 clustering；② **地圖表面不浮現任何文字**（pin 只是色點），但**點 pin 的 InfoWindow 會顯示雷點 `caution_summary`**（有值才顯示該行）；③ 做想去/去過前端 toggle（隱藏 marker、不重抓 API）；④ 不做 `?focus` 地區聚焦。
 > 專案慣例：每次 commit 同步更新 `README.md` / `CODEBASE.md`（Task 8）。
 
 ---
@@ -99,12 +99,19 @@ def test_maps_url_fallback_to_coords_when_no_place_id():
     assert "query_place_id" not in out[0]["maps_url"]
 
 
-def test_no_caution_summary_in_output():
+def test_caution_summary_passed_through():
     out = build_map_places([
         {"id": 1, "name": "A", "status": "想去", "lat": 25.0, "lng": 121.5,
-         "place_id": "p1", "caution_summary": "很雷"},
+         "place_id": "p1", "caution_summary": "尖峰排隊久"},
     ])
-    assert "caution_summary" not in out[0]
+    assert out[0]["caution_summary"] == "尖峰排隊久"
+
+
+def test_caution_summary_defaults_empty_when_absent():
+    out = build_map_places([
+        {"id": 1, "name": "A", "status": "想去", "lat": 25.0, "lng": 121.5, "place_id": "p1"},
+    ])
+    assert out[0]["caution_summary"] == ""
 
 
 def test_output_fields_and_empty():
@@ -112,11 +119,11 @@ def test_output_fields_and_empty():
     out = build_map_places([
         {"id": 7, "name": "店", "status": "想去", "lat": 25.0, "lng": 121.5, "place_id": "p1",
          "cuisine_type": "拉麵", "recommended_items": "豚骨", "my_rating": 4,
-         "my_note": "讚", "address": "台北市"},
+         "my_note": "讚", "address": "台北市", "caution_summary": "雷"},
     ])
     assert set(out[0].keys()) == {
-        "id", "name", "status", "visited", "lat", "lng",
-        "cuisine_type", "recommended_items", "my_rating", "my_note", "address", "maps_url",
+        "id", "name", "status", "visited", "lat", "lng", "cuisine_type",
+        "recommended_items", "my_rating", "my_note", "address", "caution_summary", "maps_url",
     }
 ```
 
@@ -129,7 +136,7 @@ def test_output_fields_and_empty():
 ```python
 """把 FoodPlace dict 整形成前端地圖 marker 用的精簡 JSON（純函式，無 I/O）。
 
-決策：不含 caution_summary（地圖只給正面資訊）；過濾掉無座標的店。
+決策：含 caution_summary（點 pin 的 InfoWindow 顯示，有值才渲染）；過濾掉無座標的店。
 """
 from food.places import maps_url
 
@@ -158,6 +165,7 @@ def build_map_places(places: list[dict]) -> list[dict]:
             "my_rating": p.get("my_rating"),
             "my_note": p.get("my_note"),
             "address": p.get("address"),
+            "caution_summary": p.get("caution_summary") or "",
             "maps_url": url,
         })
     return out
@@ -165,7 +173,7 @@ def build_map_places(places: list[dict]) -> list[dict]:
 
 - [ ] **Step 4: 跑測試確認通過**
 
-`docker compose exec -T app pytest tests/test_food_map_data.py -v` → 6 passed.
+`docker compose exec -T app pytest tests/test_food_map_data.py -v` → 7 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -404,6 +412,7 @@ git commit -m "feat(food): /food/map + /api/food/places routes (token-guarded)"
             if (pl.recommended_items) h += '<p>👍 ' + esc(pl.recommended_items) + '</p>';
             if (pl.my_rating) h += '<p>⭐ ' + '★'.repeat(pl.my_rating) + '</p>';
             if (pl.my_note) h += '<p>📝 ' + esc(pl.my_note) + '</p>';
+            if (pl.caution_summary) h += '<p>🔥 雷點：' + esc(pl.caution_summary) + '</p>';
             if (pl.address) h += '<p>📍 ' + esc(pl.address) + '</p>';
             if (pl.maps_url) h += '<p><a href="' + esc(pl.maps_url) + '" target="_blank" rel="noopener">在 Google Maps 開啟</a></p>';
             h += '</div>';
@@ -472,7 +481,7 @@ docker compose restart app
    docker compose exec -T app python -c "from auth import generate_report_token; print('https://your-ngrok-domain.ngrok-free.dev/food/map?token='+generate_report_token('me'))"
    ```
    把連結貼到瀏覽器（30 分鐘有效）。
-3. 驗收：藍 pin=想去、綠 pin=去過；點 pin 跳資訊視窗（店名/類型/推薦/評分/心得/地址/Google Maps 連結，**無雷點**）；自動框景；上方「全部 / 想去 / 去過」切換能隱藏/顯示對應 pin。
+3. 驗收：藍 pin=想去、綠 pin=去過；點 pin 跳資訊視窗（店名/類型/推薦/評分/心得/**🔥 雷點（有值才出現）**/地址/Google Maps 連結）；自動框景；上方「全部 / 想去 / 去過」切換能隱藏/顯示對應 pin。
 4. 用含 `<` `>` 特殊字元的店名建一筆，確認 InfoWindow 不破版（esc 生效）。
 
 - [ ] **Step 5: Commit**
@@ -505,7 +514,7 @@ try: urllib.request.urlopen('http://localhost:8000/api/food/places', timeout=5)
 except urllib.error.HTTPError as e: print('/api/food/places ->', e.code, '(401 表示已掛載+受保護)')
 "
 ```
-Expected：測試 ≥ 75 passed（69 + 6 map_data）；`/api/food/places -> 401`。
+Expected：測試 ≥ 76 passed（69 + 7 map_data）；`/api/food/places -> 401`。
 
 - [ ] **Step 3: 若有改動才 commit**（Task 2 已 commit main.py，通常此處無改動）
 
@@ -607,7 +616,7 @@ git commit -m "chore(food): inject GOOGLE_MAPS_BROWSER_KEY / MAP_ID into contain
 
 - [ ] DB 有 ≥2 筆有座標的店（想去 + 去過各一）
 - [ ] Discord `/美食地圖` → 橘 embed → 點連結
-- [ ] 地圖：藍/綠 pin 正確、點 pin 出 InfoWindow（無雷點欄位）、自動框景
+- [ ] 地圖：藍/綠 pin 正確、點 pin 出 InfoWindow（含 🔥 雷點，有值才出現）、自動框景
 - [ ] 「全部 / 想去 / 去過」toggle 正常隱藏/顯示
 - [ ] 從**錯誤**網域（localhost）開應出 `RefererNotAllowedMapError`（驗證 referrer 限制生效）
 - [ ] 含特殊字元店名不破版
@@ -635,7 +644,7 @@ git commit -m "docs(food): Phase 2 web map (/美食地圖, /food/map, browser ke
 
 ## 完成標準（Phase 2）
 
-- [ ] `pytest tests/` 全綠（≥ 75：69 + 6 map_data）
+- [ ] `pytest tests/` 全綠（≥ 76：69 + 7 map_data）
 - [ ] 無 token 打 `/food/map`、`/api/food/places` 皆 401
 - [ ] Discord `/美食地圖` 開出地圖，藍/綠 pin + InfoWindow + toggle 正常
 - [ ] referrer 限制生效（錯網域被擋）
