@@ -87,3 +87,46 @@ def set_visited(food_id: int, rating: int | None = None,
         return to_dict(rec)
     finally:
         db.close()
+
+
+def set_message_id(food_id: int, message_id) -> None:
+    """記下這筆 FoodPlace 對應的 Discord 卡片訊息 ID（給 ✅ 反應回查用）。"""
+    db = SessionLocal()
+    try:
+        rec = db.query(FoodPlace).filter(FoodPlace.id == food_id).first()
+        if rec is not None:
+            rec.discord_message_id = str(message_id)
+            db.commit()
+    finally:
+        db.close()
+
+
+def update_caution(food_id: int, caution: str) -> None:
+    """事後加值雷點摘要。"""
+    db = SessionLocal()
+    try:
+        rec = db.query(FoodPlace).filter(FoodPlace.id == food_id).first()
+        if rec is not None:
+            rec.caution_summary = caution
+            db.commit()
+    finally:
+        db.close()
+
+
+def set_visited_by_message_id(message_id) -> dict | None:
+    """從 Discord 卡片訊息 ID 反查 FoodPlace，標為去過。查無回 None。"""
+    db = SessionLocal()
+    try:
+        rec = (
+            db.query(FoodPlace)
+            .filter(FoodPlace.discord_message_id == str(message_id))
+            .first()
+        )
+        if rec is None:
+            return None
+        rec.status = "去過"
+        db.commit()
+        db.refresh(rec)
+        return to_dict(rec)
+    finally:
+        db.close()
