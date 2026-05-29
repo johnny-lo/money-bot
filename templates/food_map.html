@@ -74,13 +74,22 @@
 
             let data;
             try {
-                const res = await fetch(withToken('/api/food/places'));
+                const res = await fetch(withToken('/api/food/places'), {
+                    headers: { 'ngrok-skip-browser-warning': 'true' },
+                });
+                const text = await res.text();
                 if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    showMsg('載入失敗：' + (err.detail || res.status));
+                    let detail = res.status;
+                    try { detail = (JSON.parse(text).detail) || res.status; } catch (_) {}
+                    showMsg('載入失敗：' + detail);
                     return;
                 }
-                data = await res.json();
+                try {
+                    data = JSON.parse(text);
+                } catch (_) {
+                    showMsg('資料格式錯誤（可能是 ngrok 攔截頁，請重新整理）');
+                    return;
+                }
             } catch (e) {
                 showMsg('載入失敗：' + e);
                 return;
@@ -105,11 +114,33 @@
                 MARKERS.push({ marker, status: pl.status });
                 bounds.extend({ lat: pl.lat, lng: pl.lng });
             }
-            map.fitBounds(bounds);
-            if (places.length === 1) {
-                google.maps.event.addListenerOnce(map, 'idle', () => {
-                    if (map.getZoom() > 16) map.setZoom(16);
-                });
+            function fitAll() {
+                map.fitBounds(bounds);
+                if (places.length === 1) {
+                    google.maps.event.addListenerOnce(map, 'idle', () => {
+                        if (map.getZoom() > 16) map.setZoom(16);
+                    });
+                }
+            }
+
+            // 預設定位到使用者目前位置（縣市層級 zoom）；拒絕/失敗則框全部店家
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        const me = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                        map.setCenter(me);
+                        map.setZoom(13);  // 縣市層級
+                        const mePin = new PinElement({
+                            background: '#ea4335', borderColor: '#b31412',
+                            glyphColor: 'white', scale: 1.1,
+                        });
+                        new AdvancedMarkerElement({ map, position: me, title: '你的位置', content: mePin.element });
+                    },
+                    () => fitAll(),
+                    { enableHighAccuracy: false, timeout: 6000, maximumAge: 300000 }
+                );
+            } else {
+                fitAll();
             }
         }
 
