@@ -7,6 +7,7 @@
 雷點摘要採事後加值（best-effort），失敗不影響入庫。
 """
 from food import extract
+from food.links import classify_platform
 from food.places import search_text, caution_for_place_id
 from food.repo import upsert_place, update_caution
 
@@ -68,7 +69,6 @@ def from_url(url: str, *, caption: str = "") -> tuple[dict | None, str]:
       3) 若 fields['name'] 為空 → 走深度振查(Task 7B 的 deep_extract_via_codex)
       4) _from_fields → search_text + upsert + 雷點 best-effort
     """
-    from food.links import classify_platform
     platform = classify_platform(url)
     try:
         blob = extract.from_url(url, platform)

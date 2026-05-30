@@ -206,7 +206,9 @@ _DEEP_PROMPT = """任務:從這個美食社群連結抽出店家資訊。
 
 
 def deep_extract_via_codex(url: str, *, hint: str = "") -> dict | None:
-    """codex full-access 看圖 + 搜尋深度振查。失敗回 None。"""
+    """注意:這是 blocking subprocess(120s timeout);從 async 路徑呼叫請用 asyncio.to_thread 包(Task 8 已正確包了)。
+
+    codex full-access 看圖 + 搜尋深度振查。失敗回 None。"""
     if not url:
         return None
     hint_line = f"使用者額外提示: {hint}\n" if hint.strip() else ""

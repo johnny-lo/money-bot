@@ -19,6 +19,9 @@ from core import (
 from auth import generate_report_token
 from database import SessionLocal
 from models import Transaction, Income
+from food import ingest, pending
+from food.links import detect_links, strip_urls
+from food.repo import set_message_id
 
 NGROK_DOMAIN = "your-ngrok-domain.ngrok-free.dev"
 BASE_URL = f"https://{NGROK_DOMAIN}"
@@ -373,9 +376,6 @@ class MoneyBot(discord.Client):
                 await message.channel.send(embed=error_embed(f"視覺大腦失敗：{e}"))
 
     async def _handle_food_message(self, message: discord.Message):
-        from food import ingest, pending
-        from food.repo import set_message_id
-
         # reply 補件：上一張 ⚠️ 卡片的補件回覆
         ref = getattr(message, "reference", None)
         if ref and ref.message_id and pending.get(ref.message_id):
@@ -428,9 +428,6 @@ class MoneyBot(discord.Client):
             return
 
         # 連結 ingest(YouTube / IG / TikTok / Google Maps / 一般網站)
-        from food.links import detect_links, strip_urls
-        from food import ingest
-        from food.repo import set_message_id
         links = detect_links(message.content or "")
         if links:
             caption = strip_urls(message.content or "")
@@ -440,32 +437,31 @@ class MoneyBot(discord.Client):
                     *[asyncio.to_thread(ingest.from_url, lk["url"], caption=caption) for lk in links],
                     return_exceptions=True,
                 )
-            # 一個連結→一張結果卡
-            for lk, res in zip(links, results):
-                url = lk["url"]
-                platform = lk["platform"]
-                if isinstance(res, Exception):
-                    p, missing = None, f"處理失敗:{res}"
-                else:
-                    p, missing = res
-                if p:
-                    sent = await message.channel.send(
-                        embed=food_place_embed(p, created=p.get("_created", True))
-                    )
-                    set_message_id(p["id"], sent.id)
-                else:
-                    hint = ""
-                    if platform in ("threads", "facebook"):
-                        hint = "貼文文字常只說地區、店名在圖裡 — reply 補上店名最快"
-                    sent = await message.channel.send(embed=food_missing_embed(missing, hint=hint))
-                    from food import pending
-                    pending.remember(
-                        sent.id,
-                        original_message_id=message.id,
-                        raw_text=caption,
-                        source_url=url,
-                        missing_reason=missing,
-                    )
+                # 一個連結→一張結果卡
+                for lk, res in zip(links, results):
+                    url = lk["url"]
+                    platform = lk["platform"]
+                    if isinstance(res, Exception):
+                        p, missing = None, f"處理失敗:{res}"
+                    else:
+                        p, missing = res
+                    if p:
+                        sent = await message.channel.send(
+                            embed=food_place_embed(p, created=p.get("_created", True))
+                        )
+                        set_message_id(p["id"], sent.id)
+                    else:
+                        hint = ""
+                        if platform in ("threads", "facebook"):
+                            hint = "貼文文字常只說地區、店名在圖裡 — reply 補上店名最快"
+                        sent = await message.channel.send(embed=food_missing_embed(missing, hint=hint))
+                        pending.remember(
+                            sent.id,
+                            original_message_id=message.id,
+                            raw_text=caption,
+                            source_url=url,
+                            missing_reason=missing,
+                        )
             return
 
         # 純文字 ingest

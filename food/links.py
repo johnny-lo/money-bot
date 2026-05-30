@@ -59,7 +59,8 @@ def strip_urls(text: str) -> str:
     """移除文字中的 URL,留下使用者註解。"""
     if not text:
         return ""
-    return _URL_RE.sub("", text).strip(" \t\n") if _URL_RE.sub("", text).strip() else ""
+    out = _URL_RE.sub("", text)
+    return out.strip(" \t\n") if out.strip() else ""
 
 
 def detect_links(text: str) -> list[dict]:
