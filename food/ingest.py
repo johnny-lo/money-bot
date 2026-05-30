@@ -57,3 +57,41 @@ def _from_fields(fields: dict, *, source_url: str | None) -> tuple[dict | None, 
         pass
     p["_created"] = created
     return p, ""
+
+
+def from_url(url: str, *, caption: str = "") -> tuple[dict | None, str]:
+    """從連結入庫。caption 是使用者去 URL 後的文字註解(若有,優先採用)。
+
+    流程:
+      1) extract.from_url(yt-dlp 主 + og fetch 備援)→ blob
+      2) caption + blob 餵 extract.from_text(codex)→ fields
+      3) 若 fields['name'] 為空 → 走深度振查(Task 7B 的 deep_extract_via_codex)
+      4) _from_fields → search_text + upsert + 雷點 best-effort
+    """
+    from food.links import classify_platform
+    platform = classify_platform(url)
+    try:
+        blob = extract.from_url(url, platform)
+    except Exception as ex:
+        return None, f"連結抽取失敗:{ex}"
+    pieces = [p for p in (caption.strip() if caption else "", blob or "") if p]
+    if pieces:
+        text = "\n".join(pieces)
+        try:
+            fields = extract.from_text(text)
+        except Exception as ex:
+            return None, f"文字解析失敗:{ex}"
+    else:
+        fields = {"name": "", "area": "", "recommended_items": "", "cuisine_type": ""}
+    # 加碼第 3 層:純文字抽不到店名 → 動用深度振查(看圖 + 搜尋交叉驗證)
+    if not fields.get("name"):
+        try:
+            deep = extract.deep_extract_via_codex(url, hint=caption or "")
+        except Exception as ex:
+            deep = None
+            print(f"⚠️ deep_extract 失敗:{ex}")
+        if deep and deep.get("name"):
+            fields = deep
+    if not fields.get("name"):
+        return None, f"{platform} 連結抽不到店名"
+    return _from_fields(fields, source_url=url)
