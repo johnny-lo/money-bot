@@ -63,3 +63,18 @@ def parse_video_id(url: str) -> str | None:
         return None
     m = _YT_ID_RE.search(url)
     return m.group(1) if m else None
+
+
+from urllib.parse import unquote_plus as _unquote_plus
+
+_GMAPS_PLACE_RE = _re.compile(r"/maps/place/([^/@?]+)")
+
+
+def gmaps_place_name(url: str) -> str:
+    """從 Google Maps URL 解出店名;解不出回空字串。"""
+    if not url:
+        return ""
+    m = _GMAPS_PLACE_RE.search(url)
+    if not m:
+        return ""
+    return _unquote_plus(m.group(1)).strip()

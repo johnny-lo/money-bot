@@ -55,3 +55,30 @@ def test_parse_video_id_with_extra_params():
 def test_parse_video_id_not_youtube():
     assert parse_video_id("https://example.com/abc") is None
     assert parse_video_id("https://www.instagram.com/reel/ABC/") is None
+
+
+from food.extract import gmaps_place_name
+
+
+def test_gmaps_chinese_place():
+    url = "https://www.google.com/maps/place/鼎泰豐+信義店/@25.033,121.530,17z/data=!3m1"
+    assert gmaps_place_name(url) == "鼎泰豐 信義店"
+
+
+def test_gmaps_url_encoded():
+    url = "https://www.google.com/maps/place/%E9%BC%8E%E6%B3%B0%E8%B1%90/@25,121,15z"
+    assert gmaps_place_name(url) == "鼎泰豐"
+
+
+def test_gmaps_english():
+    url = "https://www.google.com/maps/place/Din+Tai+Fung/@25,121,15z"
+    assert gmaps_place_name(url) == "Din Tai Fung"
+
+
+def test_gmaps_coords_only():
+    # 沒有 /place/<name>/ 段(只有座標)應回空字串
+    assert gmaps_place_name("https://www.google.com/maps/@25.033,121.530,17z") == ""
+
+
+def test_gmaps_not_maps_url():
+    assert gmaps_place_name("https://example.com/abc") == ""
