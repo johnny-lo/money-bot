@@ -9,3 +9,4 @@ discord.py
 aiohttp
 playwright
 pytest
+yt-dlp
