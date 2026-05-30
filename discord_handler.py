@@ -427,6 +427,47 @@ class MoneyBot(discord.Client):
                                  missing_reason=missing)
             return
 
+        # 連結 ingest(YouTube / IG / TikTok / Google Maps / 一般網站)
+        from food.links import detect_links, strip_urls
+        from food import ingest
+        from food.repo import set_message_id
+        links = detect_links(message.content or "")
+        if links:
+            caption = strip_urls(message.content or "")
+            async with message.channel.typing():
+                # 多連結平行抽取(asyncio.gather + to_thread)
+                results = await asyncio.gather(
+                    *[asyncio.to_thread(ingest.from_url, lk["url"], caption=caption) for lk in links],
+                    return_exceptions=True,
+                )
+            # 一個連結→一張結果卡
+            for lk, res in zip(links, results):
+                url = lk["url"]
+                platform = lk["platform"]
+                if isinstance(res, Exception):
+                    p, missing = None, f"處理失敗:{res}"
+                else:
+                    p, missing = res
+                if p:
+                    sent = await message.channel.send(
+                        embed=food_place_embed(p, created=p.get("_created", True))
+                    )
+                    set_message_id(p["id"], sent.id)
+                else:
+                    hint = ""
+                    if platform in ("threads", "facebook"):
+                        hint = "貼文文字常只說地區、店名在圖裡 — reply 補上店名最快"
+                    sent = await message.channel.send(embed=food_missing_embed(missing, hint=hint))
+                    from food import pending
+                    pending.remember(
+                        sent.id,
+                        original_message_id=message.id,
+                        raw_text=caption,
+                        source_url=url,
+                        missing_reason=missing,
+                    )
+            return
+
         # 純文字 ingest
         if message.content and message.content.strip():
             async with message.channel.typing():
