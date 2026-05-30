@@ -50,3 +50,16 @@ def from_text(text: str) -> dict:
 def from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
     """截圖 → 欄位（Gemini Vision 一次到位）。"""
     return parse_extracted_json(gemini_image(_IMAGE_PROMPT, image_bytes, mime_type=mime_type))
+
+
+import re as _re
+
+_YT_ID_RE = _re.compile(r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|embed/|v/|live/)|youtu\.be/)([A-Za-z0-9_-]{11})")
+
+
+def parse_video_id(url: str) -> str | None:
+    """從 YouTube URL 解出 11 碼 video id;非 YouTube 或解不出回 None。"""
+    if not url:
+        return None
+    m = _YT_ID_RE.search(url)
+    return m.group(1) if m else None

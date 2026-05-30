@@ -26,3 +26,32 @@ def test_parse_whitespace_stripped():
     out = parse_extracted_json(raw)
     assert out["name"] == "C"
     assert out["area"] == "台北"
+
+
+from food.extract import parse_video_id
+
+
+def test_parse_video_id_watch():
+    assert parse_video_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+
+
+def test_parse_video_id_youtu_be():
+    assert parse_video_id("https://youtu.be/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+    assert parse_video_id("https://youtu.be/dQw4w9WgXcQ?si=xxx") == "dQw4w9WgXcQ"
+
+
+def test_parse_video_id_shorts():
+    assert parse_video_id("https://www.youtube.com/shorts/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+
+
+def test_parse_video_id_embed():
+    assert parse_video_id("https://www.youtube.com/embed/dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+
+
+def test_parse_video_id_with_extra_params():
+    assert parse_video_id("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s") == "dQw4w9WgXcQ"
+
+
+def test_parse_video_id_not_youtube():
+    assert parse_video_id("https://example.com/abc") is None
+    assert parse_video_id("https://www.instagram.com/reel/ABC/") is None
