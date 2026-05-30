@@ -5,6 +5,8 @@
 - from_image：用 gemini_image 直接從截圖一步到位抽欄位
 """
 import json
+import urllib.request
+import urllib.parse
 
 from gemini import gemini_image
 from codex_cli import codex_text
@@ -113,3 +115,74 @@ def parse_og(html_body: str) -> dict:
         "title": _og_first(html_body, _OG_RE_TITLE),
         "description": _og_first(html_body, _OG_RE_DESC),
     }
+
+
+_FETCH_UA = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"  # Meta 平台對爬蟲 UA 才回 og meta;一般網站也接受。實測 Threads 用瀏覽器 UA 拿不到、用 facebookexternalhit 拿得到 og:description
+_FETCH_TIMEOUT = 12
+_FETCH_MAX_BYTES = 400_000
+
+
+def _yt_dlp_blob(url: str) -> str | None:
+    """用 yt-dlp 抽 title + description。失敗回 None。"""
+    try:
+        import yt_dlp
+        with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True, "no_warnings": True}) as y:
+            info = y.extract_info(url, download=False)
+        title = (info.get("title") or "").strip()
+        desc = (info.get("description") or "").strip()
+        uploader = (info.get("uploader") or "").strip()
+        parts = [p for p in (title, uploader, desc) if p]
+        return "\n".join(parts) if parts else None
+    except Exception:
+        return None
+
+
+def _http_get(url: str) -> tuple[str, str] | None:
+    """fetch URL → (final_url, body)。失敗回 None。"""
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": _FETCH_UA,
+            "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+        })
+        r = urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT)
+        body = r.read(_FETCH_MAX_BYTES).decode("utf-8", "ignore")
+        return r.geturl(), body
+    except Exception:
+        return None
+
+
+def from_url(url: str, platform: str) -> str | None:
+    """從連結抽『要餵 codex 的文字 blob』。失敗回 None 代表降級。
+
+    - youtube / instagram / tiktok / facebook → 先試 yt-dlp,失敗退 og fetch
+    - threads → og fetch(yt-dlp 不支援,但爬蟲 UA 拿得到 og:description)
+    - gmaps → follow redirect → gmaps_place_name
+    - other → og:title + og:description
+    """
+    if not url:
+        return None
+
+    if platform == "gmaps":
+        got = _http_get(url)
+        if not got:
+            return None
+        final_url, _ = got
+        name = gmaps_place_name(final_url) or gmaps_place_name(url)
+        return name or None
+
+    # 主力:yt-dlp(YouTube/IG/TikTok/FB 的 caption 通常最完整)
+    if platform in ("youtube", "instagram", "tiktok", "facebook"):
+        blob = _yt_dlp_blob(url)
+        if blob:
+            return blob
+        # 退到 og fetch(yt-dlp 失敗時)
+
+    # og fetch(Threads / FB/IG/TikTok 退路 / 一般網站)
+    got = _http_get(url)
+    if not got:
+        return None
+    _, body = got
+    og = parse_og(body)
+    parts = [og.get("title", ""), og.get("description", "")]
+    blob = "\n".join(p for p in parts if p)
+    return blob or None
