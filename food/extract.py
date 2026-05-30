@@ -186,3 +186,69 @@ def from_url(url: str, platform: str) -> str | None:
     parts = [og.get("title", ""), og.get("description", "")]
     blob = "\n".join(p for p in parts if p)
     return blob or None
+
+
+import json as _json
+import subprocess as _subprocess
+import tempfile as _tempfile
+
+_DEEP_TIMEOUT = 120  # 上限
+_DEEP_PROMPT = """任務:從這個美食社群連結抽出店家資訊。
+連結: {url}
+{hint_line}
+請用任何方式取得內容並判斷(curl/python/yt-dlp/看圖辨識招牌/Google 搜尋交叉驗證)。
+特別注意:店名常常在影片畫面/招牌圖片裡,文字描述可能只有地區/心得。
+
+請只回 JSON,不要其他文字、不要 markdown 標籤:
+{{"name":"店名","area":"地區/縣市","recommended_items":"推薦品項","cuisine_type":"料理類型"}}
+
+任一欄位真的拿不到就空字串。整個都拿不到回所有欄位空字串的 JSON。"""
+
+
+def deep_extract_via_codex(url: str, *, hint: str = "") -> dict | None:
+    """codex full-access 看圖 + 搜尋深度振查。失敗回 None。"""
+    if not url:
+        return None
+    hint_line = f"使用者額外提示: {hint}\n" if hint.strip() else ""
+    prompt = _DEEP_PROMPT.format(url=url, hint_line=hint_line)
+    fd, out_path = _tempfile.mkstemp(suffix=".json")
+    import os as _os
+    _os.close(fd)
+    try:
+        cmd = [
+            "codex", "exec",
+            "--ephemeral", "--skip-git-repo-check",
+            "-s", "danger-full-access",
+            "-C", "/tmp",
+            "-o", out_path,
+            "-",
+        ]
+        proc = _subprocess.run(
+            cmd, input=prompt, text=True,
+            capture_output=True, timeout=_DEEP_TIMEOUT,
+        )
+        if proc.returncode != 0:
+            return None
+        with open(out_path, encoding="utf-8") as f:
+            raw = f.read().strip()
+        # 去掉可能的 markdown 包覆
+        if raw.startswith("```json"):
+            raw = raw[7:]
+        elif raw.startswith("```"):
+            raw = raw[3:]
+        if raw.endswith("```"):
+            raw = raw[:-3]
+        data = _json.loads(raw.strip())
+        return {
+            "name": (data.get("name") or "").strip(),
+            "area": (data.get("area") or "").strip(),
+            "recommended_items": (data.get("recommended_items") or "").strip(),
+            "cuisine_type": (data.get("cuisine_type") or "").strip(),
+        }
+    except Exception:
+        return None
+    finally:
+        try:
+            _os.remove(out_path)
+        except OSError:
+            pass
