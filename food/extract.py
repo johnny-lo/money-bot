@@ -78,3 +78,38 @@ def gmaps_place_name(url: str) -> str:
     if not m:
         return ""
     return _unquote_plus(m.group(1)).strip()
+
+
+import html as _html
+
+_OG_RE_TITLE = _re.compile(
+    r'<meta[^>]+(?:'
+    r'property=["\']og:title["\'][^>]+content=["\']([^"\']*)["\']'
+    r'|content=["\']([^"\']*)["\'][^>]+property=["\']og:title["\']'
+    r')',
+    _re.IGNORECASE,
+)
+_OG_RE_DESC = _re.compile(
+    r'<meta[^>]+(?:'
+    r'property=["\']og:description["\'][^>]+content=["\']([^"\']*)["\']'
+    r'|content=["\']([^"\']*)["\'][^>]+property=["\']og:description["\']'
+    r')',
+    _re.IGNORECASE,
+)
+_OG_MAX = 2000
+
+
+def _og_first(html_body: str, regex) -> str:
+    m = regex.search(html_body or "")
+    if not m:
+        return ""
+    raw = next((g for g in m.groups() if g), "")
+    return _html.unescape(raw)[:_OG_MAX]
+
+
+def parse_og(html_body: str) -> dict:
+    """從 HTML body 抽 og:title 與 og:description;沒有回空字串。"""
+    return {
+        "title": _og_first(html_body, _OG_RE_TITLE),
+        "description": _og_first(html_body, _OG_RE_DESC),
+    }

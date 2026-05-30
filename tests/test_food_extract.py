@@ -82,3 +82,33 @@ def test_gmaps_coords_only():
 
 def test_gmaps_not_maps_url():
     assert gmaps_place_name("https://example.com/abc") == ""
+
+
+from food.extract import parse_og
+
+
+def test_parse_og_basic():
+    html = '<meta property="og:title" content="某店家 - 美食媒體"><meta property="og:description" content="台北信義區">'
+    assert parse_og(html) == {"title": "某店家 - 美食媒體", "description": "台北信義區"}
+
+
+def test_parse_og_attribute_order_swapped():
+    # content 在前、property 在後
+    html = '<meta content="X" property="og:title">'
+    assert parse_og(html)["title"] == "X"
+
+
+def test_parse_og_html_entity_decode():
+    html = '<meta property="og:title" content="Tom &amp; Jerry">'
+    assert parse_og(html)["title"] == "Tom & Jerry"
+
+
+def test_parse_og_missing_returns_empty():
+    assert parse_og("<html></html>") == {"title": "", "description": ""}
+
+
+def test_parse_og_truncates_long():
+    long = "X" * 5000
+    html = f'<meta property="og:description" content="{long}">'
+    out = parse_og(html)
+    assert len(out["description"]) <= 2000  # 截斷上限
