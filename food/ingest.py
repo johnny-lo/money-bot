@@ -143,3 +143,24 @@ def take_capped(lines: list[str]) -> tuple[list[str], int]:
     kept = lines[:BATCH_LINE_CAP]
     dropped = max(0, len(lines) - BATCH_LINE_CAP)
     return kept, dropped
+
+
+def bucket_line(fields: dict, place: dict | None) -> str:
+    """信心分桶（純函式,spec §6.2）。回 "ok" | "review" | "fail"。
+
+    ✅ ok    ：codex 有 area 且 Google 回的店有 city 或 country
+    ⚠️ review：有配對(place 非 None)但 codex 無 area 或 Google 無 city/country
+    ❌ fail   ：codex 抽不到店名,或 Google 無配對(place 為 None)
+
+    用 city 或 country 是為了國外店：country 一定填、city 有就填(spec 美食地圖 §4.1),
+    國外只有 country 的店若 codex 也給了 area,仍算高信心。
+    """
+    name = (fields.get("name") or "").strip()
+    if not name or place is None:
+        return "fail"
+    area = (fields.get("area") or "").strip()
+    city = (place.get("city") or "").strip()
+    country = (place.get("country") or "").strip()
+    if area and (city or country):
+        return "ok"
+    return "review"

@@ -148,3 +148,41 @@ def test_take_capped_over_cap_reports_remainder():
     assert kept[0] == "店0"
     assert kept[-1] == "店59"
     assert dropped == 10
+
+
+from food.ingest import bucket_line
+
+
+def _place(city="台北市"):
+    return {"place_id": "p1", "name": "鼎泰豐 信義店", "city": city}
+
+
+def test_bucket_ok_needs_area_and_city():
+    fields = {"name": "鼎泰豐", "area": "信義"}
+    assert bucket_line(fields, _place(city="台北市")) == "ok"
+
+
+def test_bucket_review_when_no_area():
+    fields = {"name": "鼎泰豐", "area": ""}
+    assert bucket_line(fields, _place(city="台北市")) == "review"
+
+
+def test_bucket_review_when_google_no_city():
+    fields = {"name": "鼎泰豐", "area": "信義"}
+    assert bucket_line(fields, _place(city=None)) == "review"
+    assert bucket_line(fields, _place(city="")) == "review"
+
+
+def test_bucket_ok_overseas_country_only():
+    fields = {"name": "一蘭", "area": "福岡"}
+    assert bucket_line(fields, {"place_id": "p2", "name": "一蘭 天神店", "city": "", "country": "日本"}) == "ok"
+
+
+def test_bucket_fail_when_no_name():
+    fields = {"name": "", "area": ""}
+    assert bucket_line(fields, _place()) == "fail"
+
+
+def test_bucket_fail_when_no_place():
+    fields = {"name": "鼎泰豐", "area": "信義"}
+    assert bucket_line(fields, None) == "fail"
