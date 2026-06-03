@@ -121,3 +121,25 @@ def strip_checkbox(line: str) -> tuple[str, str]:
         return status, s[m.end():].strip()
     # 沒勾選框 → 想去；若只是項目符號(- / *)也剝掉
     return "想去", _BULLET_RE.sub("", s).strip()
+
+
+BATCH_LINE_CAP = 60  # 單則訊息批次上限；超過只處理前 60 行（spec §6.4）
+
+
+def split_lines(text: str) -> list[str]:
+    """切行、去空白行、每行 strip（純函式）。"""
+    if not text:
+        return []
+    return [ln.strip() for ln in text.splitlines() if ln.strip()]
+
+
+def is_batch(text: str) -> bool:
+    """非空行數 ≥ 2 → 批次（spec §5）。"""
+    return len(split_lines(text)) >= 2
+
+
+def take_capped(lines: list[str]) -> tuple[list[str], int]:
+    """取前 BATCH_LINE_CAP 行；回 (kept, dropped)。dropped>0 時總結卡明講未處理數。"""
+    kept = lines[:BATCH_LINE_CAP]
+    dropped = max(0, len(lines) - BATCH_LINE_CAP)
+    return kept, dropped

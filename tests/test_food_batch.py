@@ -108,3 +108,43 @@ def test_strip_checkbox_plain_dash_bullet_no_checkbox():
 
 def test_strip_checkbox_keeps_trailing_paren_unclosed():
     assert strip_checkbox("- [x] 映客牛蒡天婦羅 (台中") == ("去過", "映客牛蒡天婦羅 (台中")
+
+
+from food.ingest import split_lines, is_batch, take_capped, BATCH_LINE_CAP
+
+
+def test_split_lines_drops_blank_and_whitespace():
+    text = "鼎泰豐\n\n  \n映客\n   海底撈  "
+    assert split_lines(text) == ["鼎泰豐", "映客", "海底撈"]
+
+
+def test_split_lines_empty():
+    assert split_lines("") == []
+    assert split_lines("   \n  \n") == []
+
+
+def test_is_batch_two_or_more_lines():
+    assert is_batch("鼎泰豐\n映客") is True
+    assert is_batch("鼎泰豐\n\n映客\n海底撈") is True
+
+
+def test_is_batch_single_line_false():
+    assert is_batch("鼎泰豐 信義店") is False
+    assert is_batch("鼎泰豐\n\n  \n") is False   # 只有一個非空行
+    assert is_batch("") is False
+
+
+def test_take_capped_under_cap():
+    lines = ["a", "b", "c"]
+    kept, dropped = take_capped(lines)
+    assert kept == ["a", "b", "c"]
+    assert dropped == 0
+
+
+def test_take_capped_over_cap_reports_remainder():
+    lines = [f"店{i}" for i in range(70)]
+    kept, dropped = take_capped(lines)
+    assert len(kept) == BATCH_LINE_CAP == 60
+    assert kept[0] == "店0"
+    assert kept[-1] == "店59"
+    assert dropped == 10
