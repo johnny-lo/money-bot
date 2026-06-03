@@ -164,3 +164,22 @@ def bucket_line(fields: dict, place: dict | None) -> str:
     if area and (city or country):
         return "ok"
     return "review"
+
+
+def dedupe_resolved(resolved: list[dict]) -> list[dict]:
+    """依 place_id 程序內去重(保序),狀態只升級不降級（純函式,spec §6.1 修 TOCTOU）。
+
+    resolved 每筆 = {place, fields, area_given, status, raw}。
+    同一 place_id 只留第一筆;若任一筆 status=="去過" 則該店升級為去過。
+    """
+    by_place: dict[str, dict] = {}
+    order: list[str] = []
+    for r in resolved:
+        pid = r["place"]["place_id"]
+        cur = by_place.get(pid)
+        if cur is None:
+            by_place[pid] = dict(r)        # 淺拷貝,避免改到原物件
+            order.append(pid)
+        elif r["status"] == "去過":
+            cur["status"] = "去過"          # 只升級不降級
+    return [by_place[pid] for pid in order]

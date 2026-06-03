@@ -186,3 +186,43 @@ def test_bucket_fail_when_no_name():
 def test_bucket_fail_when_no_place():
     fields = {"name": "鼎泰豐", "area": "信義"}
     assert bucket_line(fields, None) == "fail"
+
+
+from food.ingest import dedupe_resolved
+
+
+def _r(place_id, status, name="店", raw="raw"):
+    return {
+        "place": {"place_id": place_id, "name": name, "city": "台北市"},
+        "fields": {"name": name, "area": "信義", "recommended_items": "", "cuisine_type": ""},
+        "area_given": True,
+        "status": status,
+        "raw": raw,
+    }
+
+
+def test_dedupe_collapses_same_place_id():
+    resolved = [_r("p1", "想去", raw="A"), _r("p1", "想去", raw="B"), _r("p2", "想去")]
+    out = dedupe_resolved(resolved)
+    ids = [r["place"]["place_id"] for r in out]
+    assert ids == ["p1", "p2"]               # 保序、p1 只出現一次
+
+
+def test_dedupe_status_upgrade_to_visited():
+    resolved = [_r("p1", "想去"), _r("p1", "去過")]
+    out = dedupe_resolved(resolved)
+    assert len(out) == 1
+    assert out[0]["status"] == "去過"
+
+
+def test_dedupe_visited_first_then_wishlist_stays_visited():
+    resolved = [_r("p1", "去過"), _r("p1", "想去")]
+    out = dedupe_resolved(resolved)
+    assert len(out) == 1
+    assert out[0]["status"] == "去過"
+
+
+def test_dedupe_keeps_first_fields():
+    resolved = [_r("p1", "想去", raw="first"), _r("p1", "去過", raw="second")]
+    out = dedupe_resolved(resolved)
+    assert out[0]["raw"] == "first"
