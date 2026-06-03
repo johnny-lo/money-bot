@@ -12,6 +12,18 @@ from gemini import gemini_image
 from codex_cli import codex_text
 
 
+def _strip_markdown_fence(t: str) -> str:
+    """去掉 AI 回應可能包覆的 markdown code fence（```json … ```）。"""
+    t = (t or "").strip()
+    if t.startswith("```json"):
+        t = t[7:]
+    elif t.startswith("```"):
+        t = t[3:]
+    if t.endswith("```"):
+        t = t[:-3]
+    return t.strip()
+
+
 _TEXT_PROMPT = (
     "請從以下文字內容中擷取店家資訊，只回 JSON、不要 markdown 標籤：\n"
     '{{"name":"店名(沒有就空字串)","area":"區域提示(縣市/城市)","'
@@ -36,14 +48,7 @@ _IMAGE_PROMPT = (
 
 def parse_extracted_json(raw: str) -> dict:
     """把 AI 回應字串清成乾淨 dict。缺欄位以空字串補齊、首尾空白皆 strip。"""
-    t = raw.strip()
-    if t.startswith("```json"):
-        t = t[7:]
-    elif t.startswith("```"):
-        t = t[3:]
-    if t.endswith("```"):
-        t = t[:-3]
-    d = json.loads(t.strip())
+    d = json.loads(_strip_markdown_fence(raw))
     return {
         "name": (d.get("name") or "").strip(),
         "area": (d.get("area") or "").strip(),
@@ -244,15 +249,8 @@ def deep_extract_via_codex(url: str, *, hint: str = "") -> dict | None:
         if proc.returncode != 0:
             return None
         with open(out_path, encoding="utf-8") as f:
-            raw = f.read().strip()
-        # 去掉可能的 markdown 包覆
-        if raw.startswith("```json"):
-            raw = raw[7:]
-        elif raw.startswith("```"):
-            raw = raw[3:]
-        if raw.endswith("```"):
-            raw = raw[:-3]
-        data = _json.loads(raw.strip())
+            raw = f.read()
+        data = _json.loads(_strip_markdown_fence(raw))
         return {
             "name": (data.get("name") or "").strip(),
             "area": (data.get("area") or "").strip(),
@@ -266,3 +264,66 @@ def deep_extract_via_codex(url: str, *, hint: str = "") -> dict | None:
             _os.remove(out_path)
         except OSError:
             pass
+
+
+_PLACE_LIST_PROMPT = (
+    "以下每行是一家店（已去掉清單勾選框）。請逐行擷取店家資訊，"
+    "回一個 JSON 陣列、長度等於行數、順序對齊每一行，只回 JSON、不要 markdown 標籤：\n"
+    '[{"name":"店名(該行抽不到就空字串)","area":"區域提示(縣市/城市/分店);沒有就空字串",'
+    '"recommended_items":"該行明確稱讚/必點的具體菜名;沒有就空字串,不要放料理類別",'
+    '"cuisine_type":"料理類型(例:拉麵、咖啡、火鍋);可空"}]\n\n'
+    "注意:\n"
+    "- 每行尾端可能有括號(可能沒收尾,例如「映客 (台中」),括號內若是地區/分店填 area、"
+    "若是推薦菜填 recommended_items、若是純感想則忽略。\n"
+    "- 陣列長度必須等於下方行數,第 i 個物件對應第 i 行;某行抽不出店名就回 name 空字串。\n"
+    "- recommended_items 必須是明確被稱讚/必點的具體菜名;只列料理類別就留空、填進 cuisine_type。\n\n"
+    "店家清單(每行一家)：\n{lines}"
+)
+
+
+def _empty_fields() -> dict[str, str]:
+    return {"name": "", "area": "", "recommended_items": "", "cuisine_type": ""}
+
+
+def parse_place_list_json(raw: str, n: int) -> list[dict]:
+    """把 codex 回的 JSON 陣列字串清成『對齊 n 行』的 list[fields]（純函式，可單測）。
+
+    - 去 markdown 包覆；每欄 strip、缺欄位補空字串。
+    - 陣列短於 n → 補空 name；長於 n → 截到 n。
+    - 整段 JSON 壞掉/非 list → 回 n 筆全空（落 ❌，不假裝成功）。
+    """
+    t = _strip_markdown_fence(raw)
+    try:
+        data = json.loads(t)
+    except Exception:
+        data = None
+    if not isinstance(data, list):
+        return [_empty_fields() for _ in range(n)]
+    out: list[dict] = []
+    for d in data[:n]:
+        if not isinstance(d, dict):
+            out.append(_empty_fields())
+            continue
+        out.append({
+            "name": (d.get("name") or "").strip(),
+            "area": (d.get("area") or "").strip(),
+            "recommended_items": (d.get("recommended_items") or "").strip(),
+            "cuisine_type": (d.get("cuisine_type") or "").strip(),
+        })
+    while len(out) < n:
+        out.append(_empty_fields())
+    return out
+
+
+def parse_place_list(lines: list[str]) -> list[dict]:
+    """一次 codex 批解析整份清單 → 對齊行序的 list[fields]。I/O 邊界,不單測。
+
+    lines 為已去掉清單勾選框前綴的店名內容（呼叫端負責先剝除前綴）。
+    codex_text 走 stdin、可承載超長 batch；回的陣列由 parse_place_list_json 對齊行數。
+    """
+    n = len(lines)
+    if n == 0:
+        return []
+    blob = "\n".join(lines)
+    raw = codex_text(_PLACE_LIST_PROMPT.format(lines=blob))
+    return parse_place_list_json(raw, n)
