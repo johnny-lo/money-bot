@@ -6,6 +6,7 @@
 
 雷點摘要採事後加值（best-effort），失敗不影響入庫。
 """
+import re
 from food import extract
 from food.links import classify_platform
 from food.places import search_text, caution_for_place_id
@@ -95,3 +96,28 @@ def from_url(url: str, *, caption: str = "") -> tuple[dict | None, str]:
     if not fields.get("name"):
         return None, f"{platform} 連結抽不到店名"
     return _from_fields(fields, source_url=url)
+
+
+# 勾選框前綴：可選項目符號(- / *) + 中括號狀態框；[x]/[X]=去過、[ ]/空=想去
+_CHECKBOX_RE = re.compile(r"^\s*(?:[-*]\s*)?\[\s*([xX ]?)\s*\]\s*")
+# 純項目符號(無勾選框)：- 店名 / * 店名
+_BULLET_RE = re.compile(r"^\s*[-*]\s+")
+
+
+def strip_checkbox(line: str) -> tuple[str, str]:
+    """剝 markdown 待辦勾選框前綴,帶出狀態（純函式,可單測）。
+
+    回 (status, content)：
+      "- [ ] 鼎泰豐 (信義店)" → ("想去", "鼎泰豐 (信義店)")
+      "- [x] 映客 (台中"      → ("去過", "映客 (台中")   # 尾端括號原樣保留給 codex
+      "- 鼎泰豐"              → ("想去", "鼎泰豐")
+      "海底撈"               → ("想去", "海底撈")
+    [x]/[X]=去過,其餘=想去。尾端括號不動。
+    """
+    s = line or ""
+    m = _CHECKBOX_RE.match(s)
+    if m:
+        status = "去過" if m.group(1).lower() == "x" else "想去"
+        return status, s[m.end():].strip()
+    # 沒勾選框 → 想去；若只是項目符號(- / *)也剝掉
+    return "想去", _BULLET_RE.sub("", s).strip()

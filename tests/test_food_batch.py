@@ -71,3 +71,40 @@ def test_parse_place_list_json_non_dict_element():
     assert out[0]["name"] == "A"
     assert out[1] == {"name": "", "area": "", "recommended_items": "", "cuisine_type": ""}
     assert out[2]["name"] == "C"
+
+
+from food.ingest import strip_checkbox
+
+
+def test_strip_checkbox_unchecked():
+    assert strip_checkbox("- [ ] 鼎泰豐 (信義店)") == ("想去", "鼎泰豐 (信義店)")
+
+
+def test_strip_checkbox_checked_lowercase():
+    assert strip_checkbox("- [x] 映客 (台中") == ("去過", "映客 (台中")
+
+
+def test_strip_checkbox_checked_uppercase():
+    assert strip_checkbox("- [X] 海底撈") == ("去過", "海底撈")
+
+
+def test_strip_checkbox_no_space_variant():
+    assert strip_checkbox("-[x]鼎泰豐") == ("去過", "鼎泰豐")
+    assert strip_checkbox("-[ ]海底撈") == ("想去", "海底撈")
+
+
+def test_strip_checkbox_asterisk_bullet():
+    assert strip_checkbox("* [ ] 這家拉麵超好吃 (台中)") == ("想去", "這家拉麵超好吃 (台中)")
+    assert strip_checkbox("* [x] 火鍋店") == ("去過", "火鍋店")
+
+
+def test_strip_checkbox_no_prefix_is_wishlist():
+    assert strip_checkbox("海底撈") == ("想去", "海底撈")
+
+
+def test_strip_checkbox_plain_dash_bullet_no_checkbox():
+    assert strip_checkbox("- 鼎泰豐") == ("想去", "鼎泰豐")
+
+
+def test_strip_checkbox_keeps_trailing_paren_unclosed():
+    assert strip_checkbox("- [x] 映客牛蒡天婦羅 (台中") == ("去過", "映客牛蒡天婦羅 (台中")
