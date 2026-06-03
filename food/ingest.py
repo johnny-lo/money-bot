@@ -7,10 +7,11 @@
 雷點摘要採事後加值（best-effort），失敗不影響入庫。
 """
 import re
+import asyncio
 from food import extract
 from food.links import classify_platform
 from food.places import search_text, caution_for_place_id
-from food.repo import upsert_place, update_caution
+from food.repo import upsert_place, update_caution, set_visited
 
 
 def from_image(image_bytes: bytes, mime_type: str = "image/jpeg",
@@ -183,3 +184,111 @@ def dedupe_resolved(resolved: list[dict]) -> list[dict]:
         elif r["status"] == "去過":
             cur["status"] = "去過"          # 只升級不降級
     return [by_place[pid] for pid in order]
+
+
+_BATCH_SEMAPHORE = 6  # 同時在飛的 Google 正名上限（net-new 限流,spec §6.4）
+
+
+def _resolve_one(fields: dict, status: str, content: str) -> dict:
+    """同步,在 thread 內跑：Google 正名 + 分桶判定。**不 upsert**（留到去重後統一寫）。
+
+    回 {bucket, place, fields, status, raw}；bucket ∈ {"ok","review","fail"}。
+    name 空 / Google 無配對 / 例外 → bucket="fail"、place=None。
+    """
+    name = (fields.get("name") or "").strip()
+    if not name:
+        return {"bucket": "fail", "place": None, "fields": fields,
+                "status": status, "raw": content}
+    query = f"{name} {fields.get('area') or ''}".strip()
+    try:
+        place = search_text(query)
+    except Exception:
+        place = None
+    bucket = bucket_line(fields, place)
+    return {"bucket": bucket, "place": place, "fields": fields,
+            "status": status, "raw": content}
+
+
+async def batch_from_text(blob: str) -> dict:
+    """批次匯入 orchestrator（spec §6）。回 buckets dict 給 food_batch_summary_embed。
+
+    回 {
+      "total_lines": int,          # 取前 cap 後實際處理的非空行數
+      "dropped": int,              # 超過 60 行未處理數（0=未截斷）
+      "wishlist": int, "visited": int,   # 想去/去過計數（標題用）
+      "ok": int,                   # ✅ 高信心家數（已入庫,預設只給計數）
+      "review": list[dict],        # ⚠️ 需確認：[{id, raw_name, resolved_name}]
+      "fail": list[str],           # ❌ 找不到：[原始該行文字]
+      "error": str | None,         # 整批 codex 掛掉 → 一句訊息,其餘欄位空
+    }
+    """
+    lines = split_lines(blob)
+    kept, dropped = take_capped(lines)
+    base = {"total_lines": len(kept), "dropped": dropped, "wishlist": 0,
+            "visited": 0, "ok": 0, "review": [], "fail": [], "error": None}
+    if not kept:
+        return base
+
+    # 0) 行正規化：剝勾選框、帶出狀態
+    parsed = [strip_checkbox(ln) for ln in kept]      # list[(status, content)]
+    statuses = [s for s, _ in parsed]
+    contents = [c for _, c in parsed]
+    base["wishlist"] = sum(1 for s in statuses if s == "想去")
+    base["visited"] = sum(1 for s in statuses if s == "去過")
+
+    # 1) 一次 codex 批解析（整批掛掉 → 整批回錯,不假裝成功,spec §8）
+    try:
+        fields_list = await asyncio.to_thread(extract.parse_place_list, contents)
+    except Exception as ex:
+        base["error"] = f"解析失敗：{ex}"
+        return base
+
+    # 2) 逐行 Google 正名（平行 + Semaphore 限流；限流只在 async 層）
+    sem = asyncio.Semaphore(_BATCH_SEMAPHORE)
+
+    async def _bounded(i):
+        async with sem:
+            return await asyncio.to_thread(
+                _resolve_one, fields_list[i], statuses[i], contents[i]
+            )
+
+    results = await asyncio.gather(
+        *[_bounded(i) for i in range(len(contents))], return_exceptions=True
+    )
+
+    # 3) 分流：fail 直接落桶；resolved 留待去重後統一 upsert（修 TOCTOU）
+    resolved: list[dict] = []
+    for content, res in zip(contents, results):
+        if isinstance(res, Exception) or res is None:
+            base["fail"].append(content)
+            continue
+        if res["bucket"] == "fail":
+            base["fail"].append(res["raw"])
+            continue
+        res["area_given"] = bool((res["fields"].get("area") or "").strip())
+        resolved.append(res)
+
+    # 3b) 程序內依 place_id 去重 + 狀態升級,再統一入庫
+    for r in dedupe_resolved(resolved):
+        place = r["place"]
+        fields = r["fields"]
+        try:
+            p, _created = upsert_place(
+                place,
+                recommended_items=fields.get("recommended_items") or None,
+                cuisine_type=fields.get("cuisine_type") or None,
+            )
+            if r["status"] == "去過":
+                set_visited(p["id"])     # 複用既有;只升級成去過
+        except Exception:
+            base["fail"].append(r["raw"])
+            continue
+        if r["bucket"] == "ok":
+            base["ok"] += 1
+        else:
+            base["review"].append({
+                "id": p["id"],
+                "raw_name": fields.get("name") or r["raw"],
+                "resolved_name": place.get("name") or "",
+            })
+    return base
