@@ -39,6 +39,9 @@
 - **批次匯入**（Batch Import）：在 `#🍜-美食` 貼多行（markdown 待辦清單，`- [ ]`/`- [x]`）→ 一次批次匯入，回 ✅高信心/⚠️需確認/❌找不到 總結卡；`- [x]` 標去過。上限 60 行。
 - **頻道分流**：`#美食輸入` 走美食流程、`#記帳` 走圖片記帳；其他頻道誤丟圖片會回一句指引（同頻道 30 分鐘內只回一次）。未設 `DISCORD_RECORD_CHANNEL_ID` 時圖片記帳退回「任意頻道」舊行為
 
+### 食譜收錄
+食譜收錄 — 把食譜連結丟進 `#🍳-食譜` 頻道，自動抽出乾淨菜名存庫；`/隨機食譜` 解決「今天煮什麼」。同 URL 去重、reply 卡片可改菜名、丟 Google Maps 連結會被擋。
+
 ### AI 功能
 - **Gemini 圖片辨識** — 拍照自動解析消費明細
 - **AI 自動分類** — 每週日 21:00 自動將未分類帳目分類（也可手動觸發 `分類`），走 codex CLI（ChatGPT 訂閱制）。13 細類分 6 大組：
@@ -91,6 +94,7 @@
 | `DISCORD_REPORT_CHANNEL_ID` | 週報 / 月結通知頻道 ID（選填） |
 | `DISCORD_RECORD_CHANNEL_ID` | 記帳主頻道 ID（選填，預留） |
 | `FOOD_INGEST_CHANNEL_ID` | 美食輸入頻道 ID（美食地圖；丟截圖/文字自動記店） |
+| `RECIPE_INGEST_CHANNEL_ID` | `#🍳-食譜` 頻道 ID；未設則食譜分支不啟用（不影響美食/記帳） |
 | `GOOGLE_PLACES_SERVER_KEY` | 後端 Google Places API (New) 金鑰（美食店名正規化 / 雷點摘要） |
 | `GOOGLE_MAPS_BROWSER_KEY` | 前端 Google Maps JavaScript API 金鑰（美食地圖網頁；限 ngrok referrer + 只開 Maps JS API） |
 | `GOOGLE_MAPS_MAP_ID` | Google Maps Map ID（AdvancedMarker 必需；未申請填 `DEMO_MAP_ID`，會有浮水印） |
@@ -172,3 +176,6 @@ docker compose exec app pytest tests/ -v
 | `/去過 編號 [評分] [心得]` | 將店家標為去過，可記 1-5 星評分與心得 |
 | `/美食地圖` | 產生 Google Maps 網頁連結（藍=想去/綠=去過，點 pin 看詳情，可切換） |
 | `/美食刪除 編號` | 依編號刪除一家店（修正批次猜錯的分店） |
+| `/隨機食譜` | 從收錄的食譜裡隨機抽一道 |
+| `/食譜清單` | 列出所有收錄的食譜 |
+| `/食譜刪除 編號` | 刪除一筆食譜 |

@@ -38,6 +38,11 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── repo.py          # food_places 表 CRUD：upsert_place()、list_places(status)、set_visited()、to_dict()、set_message_id()、update_caution()、set_visited_by_message_id() + `delete_place`
 │   ├── map_data.py      # build_map_places(places)(純函式)：過濾無座標、整形地圖 marker JSON、status→visited、組 maps_url
 │   └── recommend.py     # 推薦邏輯（純函式）：filter_for_recommendation()、sort_recent()、pick_random()
+├── recipe/
+│   ├── __init__.py
+│   ├── extract.py       # blob/文字→乾淨菜名：parse_name_json 純函式 + name_from_text codex
+│   ├── repo.py          # Recipe DB 存取：add_recipe url 去重+IntegrityError 防護 / list / pick_random / delete / rename / set_message_id / get_by_message_id
+│   └── ingest.py        # 連結→菜名→入庫 orchestrator：gmaps 略過 + None/空白-blob guard
 ├── requirements.txt     # Python 依賴
 ├── Dockerfile           # python:3.11-slim，pip install → uvicorn 啟動
 ├── docker-compose.yml   # 三個服務：app(127.0.0.1:8000)、db(PostgreSQL，僅 docker network)、ngrok(127.0.0.1:4040 inspector + tunnel)
@@ -59,6 +64,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 | `incomes` | id(PK), item(str), amount(int), category(str?), created_at(datetime) | 收入 |
 | `recurring_records` | id(PK), type("expense"/"income"), item, amount, category?, day_of_month(1-28), active(1/0), created_at | 固定收支 |
 | `food_places` | id(PK), place_id(str?), name, address?, lat?, lng?, country?, city?, district?, cuisine_type?, recommended_items?, caution_summary?, status("想去"/"去過"), my_rating(int?), my_note?, source_url?, updated_at, created_at | 美食地圖（Phase 1A+） |
+| `recipes` | id(PK), name(str), url(str, UNIQUE 去重鍵), discord_message_id(str?, index), created_at | 食譜收錄；url UNIQUE 防重複收錄；discord_message_id 供 reply 卡片更名用 |
 
 main.py 啟動時自動 `CREATE TABLE` + 檢查/補上 category / invoice_no 欄位。
 
@@ -146,11 +152,11 @@ LINE/Discord 訊息
 ## Discord Bot Architecture (discord_handler.py)
 
 - **MoneyBot(discord.Client)** + `app_commands.CommandTree`
-- 24 個 slash commands 全用中文名稱（`/記帳`, `/查詢`, `/最近`, `/測試週報`, `/測試月報`, `/美食新增`, `/美食推薦`, `/美食清單`, `/去過`, `/美食地圖`, `/美食刪除` 等）
+- 27 個 slash commands 全用中文名稱（`/記帳`, `/查詢`, `/最近`, `/測試週報`, `/測試月報`, `/美食新增`, `/美食推薦`, `/美食清單`, `/去過`, `/美食地圖`, `/美食刪除`, `/隨機食譜`, `/食譜清單`, `/食譜刪除` 等）
 - 每個 command callback 流程：(1) `await ix.response.defer()` 必要時、(2) 呼叫 `core.*_data()`、(3) 用對應 embed builder 組卡片、(4) `ix.followup.send(embeds=...)`
 - 慢 commands（`/記帳`, `/收入`, `/分類`, `/抓發票`）必 defer 避免 3 秒超時
 - 配色：支出 `#E74C3C` / 收入 `#2ECC71` / 查詢 `#3498DB` / 木須龍 `#9B59B6` / 警告 `#F1C40F`
-- 圖片附件走 `on_message`，依頻道分流：`FOOD_INGEST_CHANNEL_ID` → `_handle_food_message()`（截圖/文字 ingest、reply 補件）；`DISCORD_RECORD_CHANNEL_ID` → `_do_image_recording()`（圖片記帳）；**未設 RECORD 頻道則退回「任意頻道圖片記帳」舊行為**；其他頻道圖片回指引（`_HINT_DEBOUNCE` 30 分鐘防洗版）
+- 圖片附件走 `on_message`，依頻道分流：`RECIPE_INGEST_CHANNEL_ID` → `_handle_recipe_message()`（連結→食譜入庫 + `_send_recipe_card` reply 卡片；gmaps 連結擋掉）；`FOOD_INGEST_CHANNEL_ID` → `_handle_food_message()`（截圖/文字 ingest、reply 補件）；`DISCORD_RECORD_CHANNEL_ID` → `_do_image_recording()`（圖片記帳）；**未設 RECORD 頻道則退回「任意頻道圖片記帳」舊行為**；其他頻道圖片回指引（`_HINT_DEBOUNCE` 30 分鐘防洗版）。recipe 分支複用 `food.links.classify_platform` / `food.extract.from_url` / `food.pending`；3 個 recipe slash 指令（`/隨機食譜`, `/食譜清單`, `/食譜刪除`）+ 4 個 recipe_*_embed embed builders
 - `on_raw_reaction_add`：在 `#美食輸入` 對店家卡片按 ✅ → `set_visited_by_message_id()` 標去過 + 追問評分/心得
 - **Sync→Async 橋接**：`set_bot()`/`_post_embeds_sync()` 讓 APScheduler 排程（同步 thread）能投遞 embeds 到 Discord。原理：把 coroutine 用 `asyncio.run_coroutine_threadsafe(coro, bot.loop)` 排到 bot 的 event loop
 - **頻道結構**（由一次性 setup 腳本建立）：
@@ -168,7 +174,7 @@ LINE/Discord 訊息
 
 ## Environment Variables
 
-LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, CODEX_MODEL (optional, 留空=用 codex 預設 gpt-5.5), MONTHLY_BUDGET (optional, 0/不設=不顯示預算進度), DISCORD_BOT_TOKEN (optional), DISCORD_INVOICE_CHANNEL_ID (optional), DISCORD_REPORT_CHANNEL_ID (optional), DISCORD_RECORD_CHANNEL_ID (optional), NGROK_AUTHTOKEN, EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional), GOOGLE_PLACES_SERVER_KEY (美食地圖；後端 Places API New 用), FOOD_INGEST_CHANNEL_ID (美食地圖；#美食輸入 頻道), GOOGLE_MAPS_BROWSER_KEY (美食地圖 Phase 2；前端 Maps JS,限 ngrok referrer), GOOGLE_MAPS_MAP_ID (美食地圖 Phase 2；AdvancedMarker 必需,未申請填 DEMO_MAP_ID)
+LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, CODEX_MODEL (optional, 留空=用 codex 預設 gpt-5.5), MONTHLY_BUDGET (optional, 0/不設=不顯示預算進度), DISCORD_BOT_TOKEN (optional), DISCORD_INVOICE_CHANNEL_ID (optional), DISCORD_REPORT_CHANNEL_ID (optional), DISCORD_RECORD_CHANNEL_ID (optional), NGROK_AUTHTOKEN, EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional), GOOGLE_PLACES_SERVER_KEY (美食地圖；後端 Places API New 用), FOOD_INGEST_CHANNEL_ID (美食地圖；#美食輸入 頻道), RECIPE_INGEST_CHANNEL_ID (optional; #🍳-食譜 頻道；未設則食譜分支不啟用，不影響美食/記帳), GOOGLE_MAPS_BROWSER_KEY (美食地圖 Phase 2；前端 Maps JS,限 ngrok referrer), GOOGLE_MAPS_MAP_ID (美食地圖 Phase 2；AdvancedMarker 必需,未申請填 DEMO_MAP_ID)
 
 > codex 整合：`codex` CLI 裝在 app 映像內（Dockerfile 用 `npm install -g @openai/codex`，**非獨立 container**），登入憑證以 `docker-compose.yml` 把主機 `${HOME}/.codex` 掛到容器 `/root/.codex`（rw，讓 ChatGPT 訂閱 token 自動刷新可寫回）。`auth_mode=chatgpt`=訂閱制，不走單次計費 API。
 
