@@ -20,7 +20,7 @@ from auth import generate_report_token
 from database import SessionLocal
 from models import Transaction, Income
 from food import ingest, pending
-from food.links import detect_links, strip_urls
+from food.links import detect_links, strip_urls, classify_platform
 from food.repo import set_message_id
 
 NGROK_DOMAIN = "your-ngrok-domain.ngrok-free.dev"
@@ -569,47 +569,44 @@ class MoneyBot(discord.Client):
                                  raw_text=text,
                                  missing_reason=missing)
 
+    async def _send_recipe_card(self, channel, rec: dict, *, created: bool) -> None:
+        """送出食譜卡片並記下訊息 ID（給 reply 改名回查）。"""
+        from recipe import repo as recipe_repo
+        sent = await channel.send(embed=recipe_card_embed(rec, created=created))
+        recipe_repo.set_message_id(rec["id"], sent.id)
+
     async def _handle_recipe_message(self, message: discord.Message):
         from recipe import ingest as recipe_ingest, repo as recipe_repo
 
-        # ── a/b/c) reply：先試改名(get_by_message_id) → 再試補名(pending) ──
+        # ── reply：先試改名(get_by_message_id) → 再試補名(pending) → 否則提示 ──
         ref = getattr(message, "reference", None)
         if ref and ref.message_id:
             reply_text = (message.content or "").strip()
-            # a) 命中既有 Recipe 卡片 → 改名
+            # a) 命中既有 Recipe 卡片 + 有文字 → 改名
             existing = recipe_repo.get_by_message_id(ref.message_id)
             if existing and reply_text:
                 updated = recipe_repo.rename(existing["id"], reply_text)
                 if updated:
-                    sent = await message.channel.send(
-                        embed=recipe_card_embed(updated, created=False)
-                    )
-                    recipe_repo.set_message_id(updated["id"], sent.id)
-                return
-            # b) 命中 pending（先前抽不到菜名）→ 用 reply 文字 + source_url 建檔
+                    await self._send_recipe_card(message.channel, updated, created=False)
+                    return
+                # rename 失敗(卡片剛被刪)→ 落到下方提示
+            # b) 命中 pending（先前抽不到菜名）+ 有文字 → 用 reply 文字 + source_url 建檔
             ctx = pending.get(ref.message_id)
             if ctx and reply_text:
-                pending.consume(ref.message_id)
                 source_url = ctx.get("source_url")
-                # platform 由 source_url 重算（pending 沒存 platform），保住卡片平台標籤
-                from food.links import classify_platform
-                platform = classify_platform(source_url) if source_url else None
+                if not source_url:
+                    pending.consume(ref.message_id)
+                    await message.channel.send("這張卡片少了連結，直接重貼連結就好 🍳")
+                    return
+                platform = classify_platform(source_url)
                 async with message.channel.typing():
-                    rec, created = recipe_repo.add_recipe(
-                        reply_text, source_url, platform
-                    )
-                rec["_created"] = created
-                sent = await message.channel.send(
-                    embed=recipe_card_embed(rec, created=rec.get("_created", True))
-                )
-                recipe_repo.set_message_id(rec["id"], sent.id)
+                    rec, created = recipe_repo.add_recipe(reply_text, source_url, platform)
+                pending.consume(ref.message_id)   # 成功才消耗,失敗保留可重試
+                await self._send_recipe_card(message.channel, rec, created=created)
                 return
-            # c) 兩者皆 miss（重啟丟 pending／卡片已被刪）
-            if existing is None and ctx is None:
-                await message.channel.send(
-                    "這張卡片資料過期了，直接重貼連結就好 🍳"
-                )
-                return
+            # c) 收到 reply 但沒能改名/補名（空訊息、卡片過期或已刪）→ 提示,不掉到連結處理
+            await message.channel.send("這張卡片過期了，或要改名請 reply 並附上新菜名就好 🍳")
+            return
 
         # ── 連結 ingest（一連結一卡，多連結平行）─────────────────
         links = detect_links(message.content or "")
@@ -623,16 +620,14 @@ class MoneyBot(discord.Client):
                 )
                 for lk, res in zip(links, results):
                     url = lk["url"]
-                    platform = lk["platform"]
                     if isinstance(res, Exception):
                         rec, reason = None, f"處理失敗：{res}"
                     else:
                         rec, reason = res
                     if rec:
-                        sent = await message.channel.send(
-                            embed=recipe_card_embed(rec, created=rec.get("_created", True))
+                        await self._send_recipe_card(
+                            message.channel, rec, created=rec.get("_created", True)
                         )
-                        recipe_repo.set_message_id(rec["id"], sent.id)
                     else:
                         sent = await message.channel.send(embed=recipe_missing_embed(reason))
                         # 只有「抽不到菜名」才需 reply 補名；gmaps 等不建 pending

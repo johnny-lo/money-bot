@@ -30,6 +30,8 @@ def parse_name_json(raw: str) -> str:
         d = json.loads(t.strip())
     except (ValueError, TypeError):
         return ""
+    if not isinstance(d, dict):
+        return ""
     return (d.get("name") or "").strip()
 
 

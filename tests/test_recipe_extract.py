@@ -32,6 +32,15 @@ def test_parse_invalid_json_returns_empty():
     assert parse_name_json("") == ""
 
 
+def test_parse_non_object_json_returns_empty():
+    # 合法但非物件的 JSON（list/str/number/bool/null）也要回空字串,不可 AttributeError
+    assert parse_name_json("[1,2,3]") == ""
+    assert parse_name_json('"just a string"') == ""
+    assert parse_name_json("42") == ""
+    assert parse_name_json("true") == ""
+    assert parse_name_json("null") == ""
+
+
 import recipe.extract as rx
 
 

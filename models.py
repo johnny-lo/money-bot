@@ -70,6 +70,6 @@ class Recipe(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, index=True)                       # 乾淨菜名（codex 清理後；可被 reply 改名）
     url = Column(String, unique=True, index=True)           # 原始連結（去重鍵）
-    platform = Column(String, nullable=True)                # youtube/instagram/tiktok/facebook/threads/other
+    platform = Column(String, nullable=True)                # youtube/instagram/tiktok/facebook/threads/other（gmaps 在 ingest 被擋,不會入庫）
     discord_message_id = Column(String, nullable=True, index=True)  # 卡片訊息 ID（reply 改名回查）
     created_at = Column(DateTime, default=func.now())
