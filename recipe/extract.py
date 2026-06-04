@@ -31,3 +31,8 @@ def parse_name_json(raw: str) -> str:
     except (ValueError, TypeError):
         return ""
     return (d.get("name") or "").strip()
+
+
+def name_from_text(text: str) -> str:
+    """一段文字 → 乾淨菜名（codex）。抽不到回空字串。"""
+    return parse_name_json(codex_text(_RECIPE_PROMPT.format(text=text)))
