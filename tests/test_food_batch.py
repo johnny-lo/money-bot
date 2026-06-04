@@ -226,3 +226,13 @@ def test_dedupe_keeps_first_fields():
     resolved = [_r("p1", "想去", raw="first"), _r("p1", "去過", raw="second")]
     out = dedupe_resolved(resolved)
     assert out[0]["raw"] == "first"
+
+
+def test_place_list_prompt_format_survives_literal_json_braces():
+    # 回歸測試：_PLACE_LIST_PROMPT 用 .format(lines=...) 組裝,JSON 範例的大括號必須是 {{ }}
+    # 否則 str.format 會把 {"name":...} 當成格式欄位 → KeyError: '"name"'（曾發生的 bug）。
+    from food.extract import _PLACE_LIST_PROMPT
+    out = _PLACE_LIST_PROMPT.format(lines="鼎泰豐\n映客")   # 不可拋例外
+    assert '{"name":' in out          # 字面 JSON 大括號 format 後還原成單括號
+    assert "鼎泰豐" in out and "映客" in out
+    assert "{lines}" not in out        # 佔位符已被取代
