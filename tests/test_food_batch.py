@@ -195,7 +195,7 @@ def _r(place_id, status, name="店", raw="raw"):
     return {
         "place": {"place_id": place_id, "name": name, "city": "台北市"},
         "fields": {"name": name, "area": "信義", "recommended_items": "", "cuisine_type": ""},
-        "area_given": True,
+        "bucket": "ok",
         "status": status,
         "raw": raw,
     }

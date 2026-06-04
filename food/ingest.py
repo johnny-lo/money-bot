@@ -170,7 +170,7 @@ def bucket_line(fields: dict, place: dict | None) -> str:
 def dedupe_resolved(resolved: list[dict]) -> list[dict]:
     """依 place_id 程序內去重(保序),狀態只升級不降級（純函式,spec §6.1 修 TOCTOU）。
 
-    resolved 每筆 = {place, fields, area_given, status, raw}。
+    resolved 每筆 = {bucket, place, fields, status, raw}（與 _resolve_one 回傳同形）。
     同一 place_id 只留第一筆;若任一筆 status=="去過" 則該店升級為去過。
     """
     by_place: dict[str, dict] = {}
@@ -265,7 +265,6 @@ async def batch_from_text(blob: str) -> dict:
         if res["bucket"] == "fail":
             base["fail"].append(res["raw"])
             continue
-        res["area_given"] = bool((res["fields"].get("area") or "").strip())
         resolved.append(res)
 
     # 3b) 程序內依 place_id 去重 + 狀態升級,再統一入庫
@@ -278,11 +277,14 @@ async def batch_from_text(blob: str) -> dict:
                 recommended_items=fields.get("recommended_items") or None,
                 cuisine_type=fields.get("cuisine_type") or None,
             )
-            if r["status"] == "去過":
-                set_visited(p["id"])     # 複用既有;只升級成去過
         except Exception:
-            base["fail"].append(r["raw"])
+            base["fail"].append(r["raw"])     # 真的沒入庫才算找不到
             continue
+        if r["status"] == "去過":
+            try:
+                set_visited(p["id"])          # 複用既有;只升級成去過
+            except Exception:
+                pass                          # 已入庫,標去過失敗不改變「已入庫」事實
         if r["bucket"] == "ok":
             base["ok"] += 1
         else:

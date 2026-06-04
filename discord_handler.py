@@ -289,7 +289,7 @@ def food_batch_summary_embed(buckets: dict) -> discord.Embed:
     lines = [f"✅ 高信心 {buckets['ok']} 家（已入庫）"]
     review = buckets.get("review") or []
     if review:
-        lines.append(f"⚠️ 需確認 {len(review)} 家（沒地區或 Google 沒給城市，請核對）：")
+        lines.append(f"⚠️ 需確認 {len(review)} 家（沒地區，或 Google 沒給城市/國家，請核對）：")
         for r in review[:15]:
             lines.append(f"　· #{r['id']} {r['raw_name']} → {r['resolved_name']}")
         if len(review) > 15:
