@@ -278,6 +278,36 @@ def food_map_embed(url: str) -> discord.Embed:
     )
 
 
+def food_batch_summary_embed(buckets: dict) -> discord.Embed:
+    """批次匯入單張總結卡（spec §6.3）。buckets 來自 ingest.batch_from_text。"""
+    if buckets.get("error"):
+        return error_embed(buckets["error"])
+    total = buckets["total_lines"]
+    title = (f"🍜 批次匯入完成（共 {total} 行 · "
+             f"想去 {buckets['wishlist']} / 去過 {buckets['visited']}）")
+    e = discord.Embed(title=title, color=COLOR_FOOD)
+    lines = [f"✅ 高信心 {buckets['ok']} 家（已入庫）"]
+    review = buckets.get("review") or []
+    if review:
+        lines.append(f"⚠️ 需確認 {len(review)} 家（沒地區或 Google 沒給城市，請核對）：")
+        for r in review[:15]:
+            lines.append(f"　· #{r['id']} {r['raw_name']} → {r['resolved_name']}")
+        if len(review) > 15:
+            lines.append(f"　…還有 {len(review) - 15} 家")
+    fail = buckets.get("fail") or []
+    if fail:
+        lines.append(f"❌ 找不到 {len(fail)} 家（加上地區再重貼）：")
+        for raw in fail[:15]:
+            lines.append(f"　· 「{raw}」")
+        if len(fail) > 15:
+            lines.append(f"　…還有 {len(fail) - 15} 家")
+    if buckets.get("dropped"):
+        lines.append(f"（超過 {ingest.BATCH_LINE_CAP} 行未處理：{buckets['dropped']} 行，請分批再貼）")
+    e.description = "\n".join(lines)[:4000]
+    e.set_footer(text="猜錯分店？用 /美食刪除 編號 砍掉，再 /美食新增 帶地區重加")
+    return e
+
+
 def help_embed() -> discord.Embed:
     e = discord.Embed(title="📖 指令說明", color=COLOR_INFO)
     e.description = (
@@ -466,8 +496,15 @@ class MoneyBot(discord.Client):
 
         # 純文字 ingest
         if message.content and message.content.strip():
+            text = message.content.strip()
+            # 批次偵測：非空行數 ≥ 2 → 批次匯入（單行維持單筆，spec §5/§7）
+            if ingest.is_batch(text):
+                async with message.channel.typing():
+                    buckets = await ingest.batch_from_text(text)
+                await message.channel.send(embed=food_batch_summary_embed(buckets))
+                return
             async with message.channel.typing():
-                p, missing = ingest.from_text(message.content.strip())
+                p, missing = ingest.from_text(text)
             if p:
                 sent = await message.channel.send(
                     embed=food_place_embed(p, created=p.get("_created", True))
@@ -476,7 +513,7 @@ class MoneyBot(discord.Client):
             else:
                 sent = await message.channel.send(embed=food_missing_embed(missing))
                 pending.remember(sent.id, original_message_id=message.id,
-                                 raw_text=message.content.strip(),
+                                 raw_text=text,
                                  missing_reason=missing)
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
@@ -681,6 +718,17 @@ class MoneyBot(discord.Client):
                 await ix.followup.send(embed=error_embed(f"找不到編號 {編號}"))
                 return
             await ix.followup.send(embed=food_place_embed(p, created=False))
+
+        @tree.command(name="美食刪除", description="依編號刪除一家店（修正批次猜錯的分店）")
+        @app_commands.describe(編號="店家編號")
+        async def cmd_food_delete(ix: discord.Interaction, 編號: int):
+            await ix.response.defer()
+            from food.repo import delete_place
+            ok = delete_place(編號)
+            if ok:
+                await ix.followup.send(f"🗑️ 已刪除 #{編號}")
+            else:
+                await ix.followup.send(embed=error_embed(f"找不到編號 {編號}"))
 
         @tree.command(name="美食地圖", description="開啟想去/去過的美食地圖")
         async def cmd_food_map(ix: discord.Interaction):
