@@ -61,3 +61,15 @@ class FoodPlace(Base):
     discord_message_id = Column(String, nullable=True, index=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class Recipe(Base):
+    """食譜收錄：一道菜 + 一個連結"""
+    __tablename__ = "recipes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, index=True)                       # 乾淨菜名（codex 清理後；可被 reply 改名）
+    url = Column(String, unique=True, index=True)           # 原始連結（去重鍵）
+    platform = Column(String, nullable=True)                # youtube/instagram/tiktok/facebook/threads/other
+    discord_message_id = Column(String, nullable=True, index=True)  # 卡片訊息 ID（reply 改名回查）
+    created_at = Column(DateTime, default=func.now())
