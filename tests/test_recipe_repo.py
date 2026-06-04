@@ -87,3 +87,22 @@ def test_add_recipe_returns_existing_when_already_present(monkeypatch):
     assert rec["id"] == 3
     assert rec["name"] == "舊菜"
     assert sess.added == []
+
+
+def test_pick_random_empty(monkeypatch):
+    monkeypatch.setattr(repo, "list_recipes", lambda: [])
+    assert repo.pick_random() is None
+
+
+def test_pick_random_single(monkeypatch):
+    monkeypatch.setattr(repo, "list_recipes",
+                        lambda: [{"id": 1, "name": "唯一菜", "url": "u"}])
+    one = repo.pick_random()
+    assert one["name"] == "唯一菜"
+
+
+def test_pick_random_from_many(monkeypatch):
+    rows = [{"id": i, "name": f"菜{i}", "url": f"u{i}"} for i in range(5)]
+    monkeypatch.setattr(repo, "list_recipes", lambda: rows)
+    picked = repo.pick_random()
+    assert picked in rows
