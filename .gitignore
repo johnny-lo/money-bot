@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 resource/
+
+# 財務資料快照(備份用,不入版控)
+.backups/

@@ -19,6 +19,7 @@ CLI 測試：
 import os
 import re
 import base64
+import calendar
 import asyncio
 from datetime import datetime, timedelta
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
@@ -326,10 +327,82 @@ async def _parse_current_page(page, since_date: str) -> tuple[list[dict], bool]:
     return invoices, stop
 
 
-async def _scrape_carrier(phone: str, password: str, days: int, headless: bool = True) -> list[dict]:
-    """單一載具完整流程：登入 → 搜尋 → 翻頁抓明細。回傳發票列表。"""
-    end_date = datetime.now().date()
-    since = (end_date - timedelta(days=days - 1)).isoformat()
+# 真正的翻頁是 Bootstrap 分頁 a.page-link「下一頁」(父 li 未 disabled);舊版用
+# button[aria-label]/rel=next 從來沒中過,所以多頁時只抓得到第 1 頁。
+_NEXT_PAGE_FIND = r"""() => {
+    const a = Array.from(document.querySelectorAll('a.page-link')).find(a =>
+        a.textContent.includes('下一頁') && !(a.closest('li')?.classList.contains('disabled')));
+    return !!a;
+}"""
+_NEXT_PAGE_CLICK = r"""() => {
+    const a = Array.from(document.querySelectorAll('a.page-link')).find(a =>
+        a.textContent.includes('下一頁') && !(a.closest('li')?.classList.contains('disabled')));
+    if (a) { a.click(); return true; } return false;
+}"""
+# 目前作用中的頁碼(用來判斷「下一頁」有沒有真的前進 —— 最後一頁的下一頁不一定 disabled)
+_ACTIVE_PAGE_JS = r"""() => {
+    const a = document.querySelector('li.page-item.active .page-link, li.active .page-link');
+    return a ? a.textContent.trim() : null;
+}"""
+
+
+async def _click_day_cell(page, day: int) -> bool:
+    """點 vue-datepicker 當前顯示月份裡、非鄰月(offset)的某一天。"""
+    cells = page.locator(".dp__cell_inner.dp__pointer:not(.dp__cell_offset)")
+    for i in range(await cells.count()):
+        c = cells.nth(i)
+        if ((await c.text_content()) or "").strip() == str(day):
+            await c.click()
+            return True
+    return False
+
+
+async def _set_query_month(page, year: int, month: int) -> None:
+    """把『查詢發票日期起迄』設成指定單月 1 號 ~ 月底。
+
+    政府站限制:每次查詢區間須為『同一個月』(跨月會被擋:請一併點選起日及迄日)。
+    操作 vue-datepicker — 點開 → 導覽到目標月 → 點 1 號(起)+ 該月最後一天(迄),
+    auto-apply 自動套用(此站日曆無確認鈕)。導覽用 aria-label 上個月/下個月。
+    """
+    last_day = calendar.monthrange(year, month)[1]
+    await page.click("#dp-input-searchInvoiceDate")
+    await page.wait_for_timeout(600)
+    for _ in range(24):  # 導覽到目標月(上限保護,避免死迴圈)
+        hdr = await page.evaluate(
+            "() => Array.from(document.querySelectorAll('.dp__month_year_select'))"
+            ".map(e=>e.textContent.trim()).join(' ')")
+        mm = re.search(r"(\d+)月", hdr)
+        yy = re.search(r"(\d+)年", hdr)
+        if not (mm and yy):
+            break
+        cur_y, cur_m = int(yy.group(1)), int(mm.group(1))
+        if (cur_y, cur_m) == (year, month):
+            break
+        prev = (year, month) < (cur_y, cur_m)
+        await page.click(f'button.dp--arrow-btn-nav[aria-label="{"上個月" if prev else "下個月"}"]')
+        await page.wait_for_timeout(350)
+    await _click_day_cell(page, 1)          # 起日
+    await page.wait_for_timeout(250)
+    await _click_day_cell(page, last_day)   # 迄日 → auto-apply
+    await page.wait_for_timeout(500)
+    try:
+        await page.wait_for_selector('[class*="dp__menu"]', state="hidden", timeout=4000)
+    except PWTimeout:
+        pass
+
+
+async def _scrape_carrier(phone: str, password: str, days: int, headless: bool = True,
+                          month: tuple[int, int] | None = None) -> list[dict]:
+    """單一載具完整流程：登入 → 搜尋 → 翻頁抓明細。回傳發票列表。
+
+    month=(year, month):回填模式,把查詢區間設成該『單月』(政府站限制同月)抓整月;
+    None:用預設區間(本月),以 days 推算 since 做客端早停(每日同步用)。
+    """
+    if month:
+        since = f"{month[0]}-{month[1]:02d}-01"
+    else:
+        end_date = datetime.now().date()
+        since = (end_date - timedelta(days=days - 1)).isoformat()
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=headless)
@@ -342,6 +415,8 @@ async def _scrape_carrier(phone: str, password: str, days: int, headless: bool =
         try:
             if not await _login(page, phone, password):
                 return []
+            if month:
+                await _set_query_month(page, month[0], month[1])
             await page.locator("button.blue_btn", has_text="查詢").first.click()
             await page.wait_for_timeout(2000)
             try:
@@ -358,33 +433,25 @@ async def _scrape_carrier(phone: str, password: str, days: int, headless: bool =
                 all_invoices.extend(invs)
                 if stop:
                     break
-                # 找下一頁
-                next_btn = None
-                for sel in [
-                    'button[aria-label="下一頁"]:not([disabled])',
-                    'a[rel="next"]',
-                    'button:has-text("下一頁"):not([disabled])',
-                ]:
-                    try:
-                        loc = page.locator(sel).first
-                        if await loc.count() > 0 and await loc.is_enabled():
-                            next_btn = loc
-                            break
-                    except Exception:
-                        continue
-                if not next_btn:
+                if not await page.evaluate(_NEXT_PAGE_FIND):
                     break
+                active_before = await page.evaluate(_ACTIVE_PAGE_JS)
                 try:
-                    await next_btn.click()
+                    await page.evaluate(_NEXT_PAGE_CLICK)
                     await page.wait_for_timeout(1500)
                     try:
                         await page.wait_for_load_state("networkidle", timeout=10000)
                     except PWTimeout:
                         pass
-                    page_no += 1
-                    if page_no > 30:
-                        break
                 except Exception:
+                    break
+                # 最後一頁的「下一頁」不一定會 disabled;若作用中頁碼沒前進 = 已到底,停。
+                # (否則會一直重抓最後一頁,直到撞 page_no 上限 —— 浪費又可能截斷)
+                if active_before is not None and \
+                        await page.evaluate(_ACTIVE_PAGE_JS) == active_before:
+                    break
+                page_no += 1
+                if page_no > 60:
                     break
             return all_invoices
         finally:
