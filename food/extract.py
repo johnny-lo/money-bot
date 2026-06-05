@@ -5,6 +5,8 @@
 - from_image：用 gemini_image 直接從截圖一步到位抽欄位
 """
 import json
+import socket
+import ipaddress
 import urllib.request
 import urllib.parse
 
@@ -150,8 +152,43 @@ def _yt_dlp_blob(url: str) -> str | None:
         return None
 
 
+def _is_safe_fetch_url(url: str) -> bool:
+    """SSRF 守門:只允許抓『公網 http(s)』URL。
+
+    擋掉 file://、非 http(s) scheme,以及解析到 loopback/私有/link-local/保留位址的
+    host(防止被誘導去抓 localhost:8000、169.254.169.254、內網,或讀本機檔案)。
+    註:無法完全防 DNS rebinding(urllib 取用時會再解析一次),但已擋掉直接內網位址。
+    """
+    if not url:
+        return False
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except Exception:
+        return False
+    if parts.scheme not in ("http", "https"):
+        return False
+    host = parts.hostname
+    if not host:
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified):
+            return False
+    return True
+
+
 def _http_get(url: str) -> tuple[str, str] | None:
     """fetch URL → (final_url, body)。失敗回 None。"""
+    if not _is_safe_fetch_url(url):
+        return None
     try:
         req = urllib.request.Request(url, headers={
             "User-Agent": _FETCH_UA,
@@ -227,6 +264,9 @@ def deep_extract_via_codex(url: str, *, hint: str = "") -> dict | None:
 
     codex full-access 看圖 + 搜尋深度振查。失敗回 None。"""
     if not url:
+        return None
+    # SSRF/RCE 收斂:full-access codex 的種子 URL 限定公網 http(s),不讓它被指向內網/localhost
+    if not _is_safe_fetch_url(url):
         return None
     hint_line = f"使用者額外提示: {hint}\n" if hint.strip() else ""
     prompt = _DEEP_PROMPT.format(url=url, hint_line=hint_line)
