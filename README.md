@@ -35,8 +35,12 @@
 - **標去過**：對店家卡片按 ✅ → 立即標「去過」（之後可用 `/去過 編號 [評分] [心得]` 補評分/心得）
 - **推薦**：`/美食推薦 <縣市/國家>` 列想去清單 + 🎲 隨機挑一家；`/美食清單 [想去/去過]`
 - **地圖**（Phase 2）：`/美食地圖` → 產生 30 分鐘有效連結 → Google Maps 網頁，**藍 pin=想去、綠 pin=去過**；點 pin 看詳情（類型/推薦/評分/心得/🔥雷點/地址/Google Maps 連結）；上方「全部/想去/去過」可切換。地圖表面只有色點，雷點只在點開才顯示
-- **貼連結自動記**（Phase 3）：在 `#美食輸入` 貼 IG/YouTube/TikTok/Threads/Facebook/Google Maps/一般網站連結 → bot 用 yt-dlp（主）+ og fetch 爬蟲 UA（備援）抽出 caption/描述 → 自動入庫並貼卡片；一則訊息含多個連結 → 平行處理一次多家入庫；抽不到店名（常見於 Threads/FB：店名在圖不在文字）→ 走 ⚠️ 補件卡（reply 補店名最快）
+- **貼連結自動記**（Phase 3）：在 `#美食輸入` 貼 IG/YouTube/TikTok/Threads/Facebook/Google Maps/一般網站連結 → bot 用 yt-dlp（主）+ og fetch 爬蟲 UA（備援）抽出 caption/描述 → 自動入庫並貼卡片；一則訊息含多個連結 → 平行處理一次多家入庫；抽不到店名（常見於 Threads/FB：店名在圖不在文字）→ 走 ⚠️ 補件卡（reply 補店名最快）。為防 SSRF，只會抓公網連結，內網/localhost/`file://` 等會被擋下
+- **批次匯入**（Batch Import）：在 `#🍜-美食` 貼多行（markdown 待辦清單，`- [ ]`/`- [x]`）→ 一次批次匯入，回 ✅高信心/⚠️需確認/❌找不到 總結卡；`- [x]` 標去過。上限 60 行。
 - **頻道分流**：`#美食輸入` 走美食流程、`#記帳` 走圖片記帳；其他頻道誤丟圖片會回一句指引（同頻道 30 分鐘內只回一次）。未設 `DISCORD_RECORD_CHANNEL_ID` 時圖片記帳退回「任意頻道」舊行為
+
+### 食譜收錄
+食譜收錄 — 把食譜連結丟進 `#🍳-食譜` 頻道，自動抽出乾淨菜名存庫；`/隨機食譜` 解決「今天煮什麼」。同 URL 去重、reply 卡片可改菜名、丟 Google Maps 連結會被擋。
 
 ### AI 功能
 - **Gemini 圖片辨識** — 拍照自動解析消費明細
@@ -57,6 +61,7 @@
 - **週日 21:00** 順序執行「抓發票 → AI 分類 → 週報卡片」一條龍 pipeline，週報推到 `#📊-報表查詢`
 - **手動觸發** — `抓發票`（抓今天）、`抓發票 7`（近 7 天）
 - **CAPTCHA 自動破解** — 用 Gemini Vision 辨識財政部圖形驗證碼
+- **逐品項明細** — 點進每張發票 modal 抓出每一筆品名/金額各寫一筆支出（如超商的零食與生活用品分開記，分類才有意義）；抓不到明細才退化成「賣方＋總額」一筆
 - **去重機制** — 以發票號碼為 key，重跑不會重複寫入
 - **品項代號處理** — 純數字代號（如藥局商品 SKU）會自動加上賣方名前綴方便辨識
 
@@ -90,6 +95,7 @@
 | `DISCORD_REPORT_CHANNEL_ID` | 週報 / 月結通知頻道 ID（選填） |
 | `DISCORD_RECORD_CHANNEL_ID` | 記帳主頻道 ID（選填，預留） |
 | `FOOD_INGEST_CHANNEL_ID` | 美食輸入頻道 ID（美食地圖；丟截圖/文字自動記店） |
+| `RECIPE_INGEST_CHANNEL_ID` | `#🍳-食譜` 頻道 ID；未設則食譜分支不啟用（不影響美食/記帳） |
 | `GOOGLE_PLACES_SERVER_KEY` | 後端 Google Places API (New) 金鑰（美食店名正規化 / 雷點摘要） |
 | `GOOGLE_MAPS_BROWSER_KEY` | 前端 Google Maps JavaScript API 金鑰（美食地圖網頁；限 ngrok referrer + 只開 Maps JS API） |
 | `GOOGLE_MAPS_MAP_ID` | Google Maps Map ID（AdvancedMarker 必需；未申請填 `DEMO_MAP_ID`，會有浮水印） |
@@ -170,3 +176,7 @@ docker compose exec app pytest tests/ -v
 | `/美食清單 [狀態]` | 列出美食清單（想去 / 去過 / 全部） |
 | `/去過 編號 [評分] [心得]` | 將店家標為去過，可記 1-5 星評分與心得 |
 | `/美食地圖` | 產生 Google Maps 網頁連結（藍=想去/綠=去過，點 pin 看詳情，可切換） |
+| `/美食刪除 編號` | 依編號刪除一家店（修正批次猜錯的分店） |
+| `/隨機食譜` | 從收錄的食譜裡隨機抽一道 |
+| `/食譜清單` | 列出所有收錄的食譜 |
+| `/食譜刪除 編號` | 刪除一筆食譜 |

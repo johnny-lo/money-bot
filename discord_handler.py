@@ -20,7 +20,7 @@ from auth import generate_report_token
 from database import SessionLocal
 from models import Transaction, Income
 from food import ingest, pending
-from food.links import detect_links, strip_urls
+from food.links import detect_links, strip_urls, classify_platform
 from food.repo import set_message_id
 
 NGROK_DOMAIN = "your-ngrok-domain.ngrok-free.dev"
@@ -32,6 +32,7 @@ COLOR_INFO    = 0x3498DB   # 藍
 COLOR_PERSONA = 0x9B59B6   # 紫（木須龍）
 COLOR_WARN    = 0xF1C40F   # 黃
 COLOR_FOOD    = 0xE67E22   # 美食橘
+COLOR_RECIPE  = 0x16A085   # 食譜青綠
 
 # 非目標頻道圖片提示的防洗版：{channel_id: last_hint_ts}
 _HINT_DEBOUNCE: dict[int, float] = {}
@@ -278,6 +279,82 @@ def food_map_embed(url: str) -> discord.Embed:
     )
 
 
+def recipe_card_embed(r: dict, *, created: bool = True) -> discord.Embed:
+    title = (f"🍳 已收錄食譜：{r['name']}" if created
+             else f"🍳 你已收錄過：{r['name']}")
+    e = discord.Embed(title=title, color=COLOR_RECIPE)
+    if r.get("platform"):
+        e.add_field(name="📺 平台", value=r["platform"], inline=True)
+    e.add_field(name="編號", value=f"#{r['id']}", inline=True)
+    if r.get("url"):
+        e.add_field(name="連結", value=r["url"], inline=False)
+    e.set_footer(text="🔁 reply 這張卡片可改菜名")
+    return e
+
+
+def recipe_random_embed(r: dict) -> discord.Embed:
+    e = discord.Embed(title=f"🍳 今天就煮：{r['name']}", color=COLOR_RECIPE)
+    if r.get("url"):
+        e.add_field(name="連結", value=f"[👉 點開照做]({r['url']})", inline=False)
+    e.set_footer(text=f"編號 {r['id']}")
+    return e
+
+
+def recipe_list_embed(recipes: list[dict]) -> discord.Embed:
+    e = discord.Embed(title=f"🍳 食譜清單（{len(recipes)} 道）", color=COLOR_RECIPE)
+    if not recipes:
+        e.description = "還沒收錄任何食譜，先去 #🍳-食譜 丟幾個連結。"
+        return e
+    lines = []
+    for r in recipes[:25]:
+        plat = f" `{r['platform']}`" if r.get("platform") else ""
+        lines.append(f"`#{r['id']}` **{r['name']}**{plat}")
+    e.description = "\n".join(lines)
+    if len(recipes) > 25:
+        e.set_footer(text=f"共 {len(recipes)} 道，只顯示前 25")
+    return e
+
+
+def recipe_missing_embed(reason: str) -> discord.Embed:
+    e = discord.Embed(
+        title="⚠️ 沒抽到菜名",
+        description=reason or "抽不到菜名",
+        color=COLOR_WARN,
+    )
+    e.set_footer(text="🔁 直接 reply 這張卡片給我一句菜名即可")
+    return e
+
+
+def food_batch_summary_embed(buckets: dict) -> discord.Embed:
+    """批次匯入單張總結卡（spec §6.3）。buckets 來自 ingest.batch_from_text。"""
+    if buckets.get("error"):
+        return error_embed(buckets["error"])
+    total = buckets["total_lines"]
+    title = (f"🍜 批次匯入完成（共 {total} 行 · "
+             f"想去 {buckets['wishlist']} / 去過 {buckets['visited']}）")
+    e = discord.Embed(title=title, color=COLOR_FOOD)
+    lines = [f"✅ 高信心 {buckets['ok']} 家（已入庫）"]
+    review = buckets.get("review") or []
+    if review:
+        lines.append(f"⚠️ 需確認 {len(review)} 家（沒地區，或 Google 沒給城市/國家，請核對）：")
+        for r in review[:15]:
+            lines.append(f"　· #{r['id']} {r['raw_name']} → {r['resolved_name']}")
+        if len(review) > 15:
+            lines.append(f"　…還有 {len(review) - 15} 家")
+    fail = buckets.get("fail") or []
+    if fail:
+        lines.append(f"❌ 找不到 {len(fail)} 家（加上地區再重貼）：")
+        for raw in fail[:15]:
+            lines.append(f"　· 「{raw}」")
+        if len(fail) > 15:
+            lines.append(f"　…還有 {len(fail) - 15} 家")
+    if buckets.get("dropped"):
+        lines.append(f"（超過 {ingest.BATCH_LINE_CAP} 行未處理：{buckets['dropped']} 行，請分批再貼）")
+    e.description = "\n".join(lines)[:4000]
+    e.set_footer(text="猜錯分店？用 /美食刪除 編號 砍掉，再 /美食新增 帶地區重加")
+    return e
+
+
 def help_embed() -> discord.Embed:
     e = discord.Embed(title="📖 指令說明", color=COLOR_INFO)
     e.description = (
@@ -327,11 +404,17 @@ class MoneyBot(discord.Client):
 
         food_chan = os.getenv("FOOD_INGEST_CHANNEL_ID") or ""
         rec_chan = os.getenv("DISCORD_RECORD_CHANNEL_ID") or ""
+        recipe_chan = os.getenv("RECIPE_INGEST_CHANNEL_ID") or ""
         ch_id = str(message.channel.id)
 
         # ── 1) 美食頻道：reply 補件 / 圖片或文字 ingest ─────────────
         if food_chan and ch_id == food_chan:
             await self._handle_food_message(message)
+            return
+
+        # ── 1.5) 食譜頻道：reply 改名/補名 / 連結 ingest ────────────
+        if recipe_chan and ch_id == recipe_chan:
+            await self._handle_recipe_message(message)
             return
 
         # ── 2) 圖片附件分流 ───────────────────────────────────────
@@ -466,8 +549,15 @@ class MoneyBot(discord.Client):
 
         # 純文字 ingest
         if message.content and message.content.strip():
+            text = message.content.strip()
+            # 批次偵測：非空行數 ≥ 2 → 批次匯入（單行維持單筆，spec §5/§7）
+            if ingest.is_batch(text):
+                async with message.channel.typing():
+                    buckets = await ingest.batch_from_text(text)
+                await message.channel.send(embed=food_batch_summary_embed(buckets))
+                return
             async with message.channel.typing():
-                p, missing = ingest.from_text(message.content.strip())
+                p, missing = ingest.from_text(text)
             if p:
                 sent = await message.channel.send(
                     embed=food_place_embed(p, created=p.get("_created", True))
@@ -476,8 +566,82 @@ class MoneyBot(discord.Client):
             else:
                 sent = await message.channel.send(embed=food_missing_embed(missing))
                 pending.remember(sent.id, original_message_id=message.id,
-                                 raw_text=message.content.strip(),
+                                 raw_text=text,
                                  missing_reason=missing)
+
+    async def _send_recipe_card(self, channel, rec: dict, *, created: bool) -> None:
+        """送出食譜卡片並記下訊息 ID（給 reply 改名回查）。"""
+        from recipe import repo as recipe_repo
+        sent = await channel.send(embed=recipe_card_embed(rec, created=created))
+        recipe_repo.set_message_id(rec["id"], sent.id)
+
+    async def _handle_recipe_message(self, message: discord.Message):
+        from recipe import ingest as recipe_ingest, repo as recipe_repo
+
+        # ── reply：先試改名(get_by_message_id) → 再試補名(pending) → 否則提示 ──
+        ref = getattr(message, "reference", None)
+        if ref and ref.message_id:
+            reply_text = (message.content or "").strip()
+            # a) 命中既有 Recipe 卡片 + 有文字 → 改名
+            existing = recipe_repo.get_by_message_id(ref.message_id)
+            if existing and reply_text:
+                updated = recipe_repo.rename(existing["id"], reply_text)
+                if updated:
+                    await self._send_recipe_card(message.channel, updated, created=False)
+                    return
+                # rename 失敗(卡片剛被刪)→ 落到下方提示
+            # b) 命中 pending（先前抽不到菜名）+ 有文字 → 用 reply 文字 + source_url 建檔
+            ctx = pending.get(ref.message_id)
+            if ctx and reply_text:
+                source_url = ctx.get("source_url")
+                if not source_url:
+                    pending.consume(ref.message_id)
+                    await message.channel.send("這張卡片少了連結，直接重貼連結就好 🍳")
+                    return
+                platform = classify_platform(source_url)
+                async with message.channel.typing():
+                    rec, created = recipe_repo.add_recipe(reply_text, source_url, platform)
+                pending.consume(ref.message_id)   # 成功才消耗,失敗保留可重試
+                await self._send_recipe_card(message.channel, rec, created=created)
+                return
+            # c) 收到 reply 但沒能改名/補名（空訊息、卡片過期或已刪）→ 提示,不掉到連結處理
+            await message.channel.send("這張卡片過期了，或要改名請 reply 並附上新菜名就好 🍳")
+            return
+
+        # ── 連結 ingest（一連結一卡，多連結平行）─────────────────
+        links = detect_links(message.content or "")
+        if links:
+            caption = strip_urls(message.content or "")
+            async with message.channel.typing():
+                results = await asyncio.gather(
+                    *[asyncio.to_thread(recipe_ingest.from_url, lk["url"], caption=caption)
+                      for lk in links],
+                    return_exceptions=True,
+                )
+                for lk, res in zip(links, results):
+                    url = lk["url"]
+                    if isinstance(res, Exception):
+                        rec, reason = None, f"處理失敗：{res}"
+                    else:
+                        rec, reason = res
+                    if rec:
+                        await self._send_recipe_card(
+                            message.channel, rec, created=rec.get("_created", True)
+                        )
+                    else:
+                        sent = await message.channel.send(embed=recipe_missing_embed(reason))
+                        # 只有「抽不到菜名」才需 reply 補名；gmaps 等不建 pending
+                        if reason == "抽不到菜名":
+                            pending.remember(
+                                sent.id,
+                                original_message_id=message.id,
+                                source_url=url,
+                                missing_reason=reason,
+                            )
+            return
+
+        # ── 無連結、非 reply（純文字 / 純圖片）→ 回提示，不建檔 ──
+        await message.channel.send("這個頻道請丟食譜連結 🍳")
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
         # 自己的反應不處理
@@ -682,11 +846,49 @@ class MoneyBot(discord.Client):
                 return
             await ix.followup.send(embed=food_place_embed(p, created=False))
 
+        @tree.command(name="美食刪除", description="依編號刪除一家店（修正批次猜錯的分店）")
+        @app_commands.describe(編號="店家編號")
+        async def cmd_food_delete(ix: discord.Interaction, 編號: int):
+            await ix.response.defer()
+            from food.repo import delete_place
+            ok = delete_place(編號)
+            if ok:
+                await ix.followup.send(f"🗑️ 已刪除 #{編號}")
+            else:
+                await ix.followup.send(embed=error_embed(f"找不到編號 {編號}"))
+
         @tree.command(name="美食地圖", description="開啟想去/去過的美食地圖")
         async def cmd_food_map(ix: discord.Interaction):
             token = generate_report_token(str(ix.user.id))
             url = f"{BASE_URL}/food/map?token={token}"
             await ix.response.send_message(embed=food_map_embed(url))
+
+        @tree.command(name="隨機食譜", description="從收錄的食譜裡隨機抽一道")
+        async def cmd_recipe_random(ix: discord.Interaction):
+            await ix.response.defer()
+            from recipe.repo import pick_random
+            r = pick_random()
+            if not r:
+                await ix.followup.send("還沒收錄任何食譜，先去 #🍳-食譜 丟幾個連結 🍳")
+                return
+            await ix.followup.send(embed=recipe_random_embed(r))
+
+        @tree.command(name="食譜清單", description="列出所有收錄的食譜")
+        async def cmd_recipe_list(ix: discord.Interaction):
+            await ix.response.defer()
+            from recipe.repo import list_recipes
+            await ix.followup.send(embed=recipe_list_embed(list_recipes()))
+
+        @tree.command(name="食譜刪除", description="刪除一筆食譜")
+        @app_commands.describe(編號="食譜編號")
+        async def cmd_recipe_delete(ix: discord.Interaction, 編號: int):
+            await ix.response.defer()
+            from recipe.repo import delete_recipe
+            ok = delete_recipe(編號)
+            if ok:
+                await ix.followup.send(f"🗑️ 已刪除 #{編號}")
+            else:
+                await ix.followup.send(embed=error_embed(f"找不到編號 {編號}"))
 
         @tree.command(name="測試週報", description="立即觸發本週週報推到 #📊-報表查詢")
         async def cmd_test_weekly(ix: discord.Interaction):

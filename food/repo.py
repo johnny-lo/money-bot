@@ -130,3 +130,20 @@ def set_visited_by_message_id(message_id) -> dict | None:
         return to_dict(rec)
     finally:
         db.close()
+
+
+def delete_place(food_id: int) -> bool:
+    """依編號(FoodPlace.id)刪除一家店。刪到回 True、查無回 False。
+
+    回 bool（與 set_visited 的 dict-or-None 不同）：刪除只需成功/失敗布林（spec §7）。
+    """
+    db = SessionLocal()
+    try:
+        rec = db.query(FoodPlace).filter(FoodPlace.id == food_id).first()
+        if rec is None:
+            return False
+        db.delete(rec)
+        db.commit()
+        return True
+    finally:
+        db.close()

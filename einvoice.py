@@ -19,6 +19,7 @@ CLI 測試：
 import os
 import re
 import base64
+import calendar
 import asyncio
 from datetime import datetime, timedelta
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
@@ -180,9 +181,15 @@ async def _login(page, phone: str, password: str) -> bool:
     return False
 
 
+_DETAIL_MODAL = ".modal_barcode_detail.show"
+
+
 async def _fetch_detail_items(page) -> list[dict]:
+    # 明細是開在 Bootstrap modal 裡;限定在「目前開啟的 modal」內找品項表,
+    # 避免抓到底層清單表或上一筆殘留的表。modal 找不到才退回整頁掃描。
     items = await page.evaluate(r"""() => {
-        const tables = Array.from(document.querySelectorAll('table'));
+        const scope = document.querySelector('.modal_barcode_detail.show') || document;
+        const tables = Array.from(scope.querySelectorAll('table'));
         const target = tables.find(t => {
             const headers = Array.from(t.rows[0]?.cells || []).map(c => c.textContent.trim());
             return headers.includes('品名') && headers.includes('數量') &&
@@ -212,6 +219,39 @@ async def _fetch_detail_items(page) -> list[dict]:
         if name:
             cleaned.append({"name": name, "amount": amount})
     return cleaned
+
+
+async def _close_detail_modal(page) -> None:
+    """關閉發票明細 modal(若有開)。
+
+    這是整支爬蟲「只抓得到第一筆明細」的根因修正:明細是開在同一個 SPA URL 上的
+    Bootstrap modal,舊版用 page.go_back() 想退出 → 反而把整個清單頁帶走,
+    後續發票的號碼連結就消失(或被 modal backdrop 擋住點不到)→ items 空 → 退化成
+    只寫「賣方+總額」一筆。正解是關 modal(不換頁)再點下一筆。
+    """
+    try:
+        if await page.locator(_DETAIL_MODAL).count() == 0:
+            return
+        btn = page.locator(f"{_DETAIL_MODAL} a.close_btn[data-bs-dismiss='modal']").first
+        clicked = False
+        if await btn.count() > 0:
+            try:
+                await btn.click(timeout=3000)
+                clicked = True
+            except Exception:
+                pass
+        if not clicked:
+            try:
+                await page.keyboard.press("Escape")
+            except Exception:
+                pass
+        # condition-based 等 modal 收起(class 'show' 消失),別死等固定秒數
+        try:
+            await page.wait_for_selector(_DETAIL_MODAL, state="hidden", timeout=5000)
+        except PWTimeout:
+            pass
+    except Exception:
+        pass
 
 
 async def _parse_current_page(page, since_date: str) -> tuple[list[dict], bool]:
@@ -265,41 +305,104 @@ async def _parse_current_page(page, since_date: str) -> tuple[list[dict], bool]:
         else:
             i += 1
 
-    # 點進每筆抓明細
+    # 點進每筆抓明細:明細開在 Bootstrap modal(同一 SPA URL,不換頁)。
+    # 流程 = 點號碼 → 等 modal 開 → 讀品項 → 關 modal → 下一筆。
+    # 嚴禁 go_back():那會把 SPA 清單整個帶走,只剩第一筆抓得到明細(本次修正的根因)。
     for inv in invoices:
         try:
             link = page.locator(f"a:text-is('{inv['invoice_no']}')").first
             if await link.count() == 0:
                 continue
             await link.click()
-            await page.wait_for_url("**/detail**", timeout=10000)
-            await page.wait_for_timeout(800)
-            try:
-                await page.wait_for_load_state("networkidle", timeout=8000)
-            except PWTimeout:
-                pass
+            # 明細是開 modal,不是換 URL → 等 modal 真的出現
+            await page.wait_for_selector(_DETAIL_MODAL, state="visible", timeout=10000)
+            await page.wait_for_timeout(400)
             inv["items"] = await _fetch_detail_items(page)
             print(f"     {inv['invoice_no']} | {inv['seller'][:14]} | {len(inv['items'])} 品項")
-            await page.go_back()
-            await page.wait_for_timeout(1000)
-            try:
-                await page.wait_for_load_state("networkidle", timeout=8000)
-            except PWTimeout:
-                pass
         except Exception as e:
-            print(f"     ⚠️ {inv['invoice_no']} 抓明細失敗：{type(e).__name__}")
-            try:
-                await page.go_back()
-                await page.wait_for_timeout(1000)
-            except Exception:
-                pass
+            print(f"     ⚠️ {inv['invoice_no']} 抓明細失敗：{type(e).__name__}: {e}")
+        finally:
+            # 不論成功與否都要把 modal 關掉,否則 backdrop 會擋住下一筆的點擊
+            await _close_detail_modal(page)
     return invoices, stop
 
 
-async def _scrape_carrier(phone: str, password: str, days: int, headless: bool = True) -> list[dict]:
-    """單一載具完整流程：登入 → 搜尋 → 翻頁抓明細。回傳發票列表。"""
-    end_date = datetime.now().date()
-    since = (end_date - timedelta(days=days - 1)).isoformat()
+# 真正的翻頁是 Bootstrap 分頁 a.page-link「下一頁」(父 li 未 disabled);舊版用
+# button[aria-label]/rel=next 從來沒中過,所以多頁時只抓得到第 1 頁。
+_NEXT_PAGE_FIND = r"""() => {
+    const a = Array.from(document.querySelectorAll('a.page-link')).find(a =>
+        a.textContent.includes('下一頁') && !(a.closest('li')?.classList.contains('disabled')));
+    return !!a;
+}"""
+_NEXT_PAGE_CLICK = r"""() => {
+    const a = Array.from(document.querySelectorAll('a.page-link')).find(a =>
+        a.textContent.includes('下一頁') && !(a.closest('li')?.classList.contains('disabled')));
+    if (a) { a.click(); return true; } return false;
+}"""
+# 目前作用中的頁碼(用來判斷「下一頁」有沒有真的前進 —— 最後一頁的下一頁不一定 disabled)
+_ACTIVE_PAGE_JS = r"""() => {
+    const a = document.querySelector('li.page-item.active .page-link, li.active .page-link');
+    return a ? a.textContent.trim() : null;
+}"""
+
+
+async def _click_day_cell(page, day: int) -> bool:
+    """點 vue-datepicker 當前顯示月份裡、非鄰月(offset)的某一天。"""
+    cells = page.locator(".dp__cell_inner.dp__pointer:not(.dp__cell_offset)")
+    for i in range(await cells.count()):
+        c = cells.nth(i)
+        if ((await c.text_content()) or "").strip() == str(day):
+            await c.click()
+            return True
+    return False
+
+
+async def _set_query_month(page, year: int, month: int) -> None:
+    """把『查詢發票日期起迄』設成指定單月 1 號 ~ 月底。
+
+    政府站限制:每次查詢區間須為『同一個月』(跨月會被擋:請一併點選起日及迄日)。
+    操作 vue-datepicker — 點開 → 導覽到目標月 → 點 1 號(起)+ 該月最後一天(迄),
+    auto-apply 自動套用(此站日曆無確認鈕)。導覽用 aria-label 上個月/下個月。
+    """
+    last_day = calendar.monthrange(year, month)[1]
+    await page.click("#dp-input-searchInvoiceDate")
+    await page.wait_for_timeout(600)
+    for _ in range(24):  # 導覽到目標月(上限保護,避免死迴圈)
+        hdr = await page.evaluate(
+            "() => Array.from(document.querySelectorAll('.dp__month_year_select'))"
+            ".map(e=>e.textContent.trim()).join(' ')")
+        mm = re.search(r"(\d+)月", hdr)
+        yy = re.search(r"(\d+)年", hdr)
+        if not (mm and yy):
+            break
+        cur_y, cur_m = int(yy.group(1)), int(mm.group(1))
+        if (cur_y, cur_m) == (year, month):
+            break
+        prev = (year, month) < (cur_y, cur_m)
+        await page.click(f'button.dp--arrow-btn-nav[aria-label="{"上個月" if prev else "下個月"}"]')
+        await page.wait_for_timeout(350)
+    await _click_day_cell(page, 1)          # 起日
+    await page.wait_for_timeout(250)
+    await _click_day_cell(page, last_day)   # 迄日 → auto-apply
+    await page.wait_for_timeout(500)
+    try:
+        await page.wait_for_selector('[class*="dp__menu"]', state="hidden", timeout=4000)
+    except PWTimeout:
+        pass
+
+
+async def _scrape_carrier(phone: str, password: str, days: int, headless: bool = True,
+                          month: tuple[int, int] | None = None) -> list[dict]:
+    """單一載具完整流程：登入 → 搜尋 → 翻頁抓明細。回傳發票列表。
+
+    month=(year, month):回填模式,把查詢區間設成該『單月』(政府站限制同月)抓整月;
+    None:用預設區間(本月),以 days 推算 since 做客端早停(每日同步用)。
+    """
+    if month:
+        since = f"{month[0]}-{month[1]:02d}-01"
+    else:
+        end_date = datetime.now().date()
+        since = (end_date - timedelta(days=days - 1)).isoformat()
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=headless)
@@ -312,6 +415,8 @@ async def _scrape_carrier(phone: str, password: str, days: int, headless: bool =
         try:
             if not await _login(page, phone, password):
                 return []
+            if month:
+                await _set_query_month(page, month[0], month[1])
             await page.locator("button.blue_btn", has_text="查詢").first.click()
             await page.wait_for_timeout(2000)
             try:
@@ -328,33 +433,25 @@ async def _scrape_carrier(phone: str, password: str, days: int, headless: bool =
                 all_invoices.extend(invs)
                 if stop:
                     break
-                # 找下一頁
-                next_btn = None
-                for sel in [
-                    'button[aria-label="下一頁"]:not([disabled])',
-                    'a[rel="next"]',
-                    'button:has-text("下一頁"):not([disabled])',
-                ]:
-                    try:
-                        loc = page.locator(sel).first
-                        if await loc.count() > 0 and await loc.is_enabled():
-                            next_btn = loc
-                            break
-                    except Exception:
-                        continue
-                if not next_btn:
+                if not await page.evaluate(_NEXT_PAGE_FIND):
                     break
+                active_before = await page.evaluate(_ACTIVE_PAGE_JS)
                 try:
-                    await next_btn.click()
+                    await page.evaluate(_NEXT_PAGE_CLICK)
                     await page.wait_for_timeout(1500)
                     try:
                         await page.wait_for_load_state("networkidle", timeout=10000)
                     except PWTimeout:
                         pass
-                    page_no += 1
-                    if page_no > 30:
-                        break
                 except Exception:
+                    break
+                # 最後一頁的「下一頁」不一定會 disabled;若作用中頁碼沒前進 = 已到底,停。
+                # (否則會一直重抓最後一頁,直到撞 page_no 上限 —— 浪費又可能截斷)
+                if active_before is not None and \
+                        await page.evaluate(_ACTIVE_PAGE_JS) == active_before:
+                    break
+                page_no += 1
+                if page_no > 60:
                     break
             return all_invoices
         finally:

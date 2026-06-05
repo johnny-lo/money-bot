@@ -112,3 +112,63 @@ def test_parse_og_truncates_long():
     html = f'<meta property="og:description" content="{long}">'
     out = parse_og(html)
     assert len(out["description"]) <= 2000  # 截斷上限
+
+
+# ── SSRF 守門 _is_safe_fetch_url(audit #1 零破壞版)──
+from food.extract import _is_safe_fetch_url
+
+
+def test_safe_fetch_url_allows_public_ip():
+    assert _is_safe_fetch_url("http://8.8.8.8/") is True
+    assert _is_safe_fetch_url("https://1.1.1.1/path?x=1") is True
+
+
+def test_safe_fetch_url_blocks_loopback():
+    assert _is_safe_fetch_url("http://127.0.0.1/") is False
+    assert _is_safe_fetch_url("http://[::1]/") is False
+    assert _is_safe_fetch_url("http://localhost/") is False
+
+
+def test_safe_fetch_url_blocks_private_ranges():
+    assert _is_safe_fetch_url("http://10.0.0.5/") is False
+    assert _is_safe_fetch_url("http://192.168.1.1/") is False
+    assert _is_safe_fetch_url("http://172.16.0.1/") is False
+
+
+def test_safe_fetch_url_blocks_link_local_metadata():
+    # 雲端 metadata endpoint
+    assert _is_safe_fetch_url("http://169.254.169.254/latest/meta-data/") is False
+
+
+def test_safe_fetch_url_blocks_nonhttp_schemes():
+    assert _is_safe_fetch_url("file:///etc/passwd") is False
+    assert _is_safe_fetch_url("ftp://example.com/") is False
+    assert _is_safe_fetch_url("gopher://127.0.0.1:6379/") is False
+
+
+def test_safe_fetch_url_blocks_empty_or_garbage():
+    assert _is_safe_fetch_url("") is False
+    assert _is_safe_fetch_url(None) is False
+    assert _is_safe_fetch_url("not a url") is False
+
+
+def test_http_get_blocks_unsafe_url_without_request(monkeypatch):
+    from food import extract
+    called = {"hit": False}
+    def track(*a, **k):
+        called["hit"] = True
+        raise OSError("blocked")
+    monkeypatch.setattr(extract.urllib.request, "urlopen", track)
+    assert extract._http_get("http://127.0.0.1:8000/admin") is None
+    assert called["hit"] is False  # 守門應在 urlopen 之前就 return
+
+
+def test_deep_extract_blocks_unsafe_url_without_codex(monkeypatch):
+    from food import extract
+    called = {"hit": False}
+    def track(*a, **k):
+        called["hit"] = True
+        raise OSError("blocked")
+    monkeypatch.setattr(extract._subprocess, "run", track)
+    assert extract.deep_extract_via_codex("http://169.254.169.254/") is None
+    assert called["hit"] is False  # full-access codex 不應被叫到
