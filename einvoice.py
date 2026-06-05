@@ -180,9 +180,15 @@ async def _login(page, phone: str, password: str) -> bool:
     return False
 
 
+_DETAIL_MODAL = ".modal_barcode_detail.show"
+
+
 async def _fetch_detail_items(page) -> list[dict]:
+    # 明細是開在 Bootstrap modal 裡;限定在「目前開啟的 modal」內找品項表,
+    # 避免抓到底層清單表或上一筆殘留的表。modal 找不到才退回整頁掃描。
     items = await page.evaluate(r"""() => {
-        const tables = Array.from(document.querySelectorAll('table'));
+        const scope = document.querySelector('.modal_barcode_detail.show') || document;
+        const tables = Array.from(scope.querySelectorAll('table'));
         const target = tables.find(t => {
             const headers = Array.from(t.rows[0]?.cells || []).map(c => c.textContent.trim());
             return headers.includes('品名') && headers.includes('數量') &&
@@ -212,6 +218,39 @@ async def _fetch_detail_items(page) -> list[dict]:
         if name:
             cleaned.append({"name": name, "amount": amount})
     return cleaned
+
+
+async def _close_detail_modal(page) -> None:
+    """關閉發票明細 modal(若有開)。
+
+    這是整支爬蟲「只抓得到第一筆明細」的根因修正:明細是開在同一個 SPA URL 上的
+    Bootstrap modal,舊版用 page.go_back() 想退出 → 反而把整個清單頁帶走,
+    後續發票的號碼連結就消失(或被 modal backdrop 擋住點不到)→ items 空 → 退化成
+    只寫「賣方+總額」一筆。正解是關 modal(不換頁)再點下一筆。
+    """
+    try:
+        if await page.locator(_DETAIL_MODAL).count() == 0:
+            return
+        btn = page.locator(f"{_DETAIL_MODAL} a.close_btn[data-bs-dismiss='modal']").first
+        clicked = False
+        if await btn.count() > 0:
+            try:
+                await btn.click(timeout=3000)
+                clicked = True
+            except Exception:
+                pass
+        if not clicked:
+            try:
+                await page.keyboard.press("Escape")
+            except Exception:
+                pass
+        # condition-based 等 modal 收起(class 'show' 消失),別死等固定秒數
+        try:
+            await page.wait_for_selector(_DETAIL_MODAL, state="hidden", timeout=5000)
+        except PWTimeout:
+            pass
+    except Exception:
+        pass
 
 
 async def _parse_current_page(page, since_date: str) -> tuple[list[dict], bool]:
@@ -265,34 +304,25 @@ async def _parse_current_page(page, since_date: str) -> tuple[list[dict], bool]:
         else:
             i += 1
 
-    # 點進每筆抓明細
+    # 點進每筆抓明細:明細開在 Bootstrap modal(同一 SPA URL,不換頁)。
+    # 流程 = 點號碼 → 等 modal 開 → 讀品項 → 關 modal → 下一筆。
+    # 嚴禁 go_back():那會把 SPA 清單整個帶走,只剩第一筆抓得到明細(本次修正的根因)。
     for inv in invoices:
         try:
             link = page.locator(f"a:text-is('{inv['invoice_no']}')").first
             if await link.count() == 0:
                 continue
             await link.click()
-            await page.wait_for_url("**/detail**", timeout=10000)
-            await page.wait_for_timeout(800)
-            try:
-                await page.wait_for_load_state("networkidle", timeout=8000)
-            except PWTimeout:
-                pass
+            # 明細是開 modal,不是換 URL → 等 modal 真的出現
+            await page.wait_for_selector(_DETAIL_MODAL, state="visible", timeout=10000)
+            await page.wait_for_timeout(400)
             inv["items"] = await _fetch_detail_items(page)
             print(f"     {inv['invoice_no']} | {inv['seller'][:14]} | {len(inv['items'])} 品項")
-            await page.go_back()
-            await page.wait_for_timeout(1000)
-            try:
-                await page.wait_for_load_state("networkidle", timeout=8000)
-            except PWTimeout:
-                pass
         except Exception as e:
-            print(f"     ⚠️ {inv['invoice_no']} 抓明細失敗：{type(e).__name__}")
-            try:
-                await page.go_back()
-                await page.wait_for_timeout(1000)
-            except Exception:
-                pass
+            print(f"     ⚠️ {inv['invoice_no']} 抓明細失敗：{type(e).__name__}: {e}")
+        finally:
+            # 不論成功與否都要把 modal 關掉,否則 backdrop 會擋住下一筆的點擊
+            await _close_detail_modal(page)
     return invoices, stop
 
 
