@@ -6,6 +6,19 @@ import urllib.parse
 
 from food.regions import parse_address_components
 
+# Google API 呼叫計數（給 enrich.backfill_all 控預算用；Places API New 按次計費）
+_api_calls = 0
+
+
+def _count(n: int = 1) -> None:
+    global _api_calls
+    _api_calls += n
+
+
+def api_call_count() -> int:
+    return _api_calls
+
+
 _SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
 _FIELD_MASK = (
     "places.id,places.displayName,places.formattedAddress,"
@@ -18,6 +31,7 @@ def search_text(query: str) -> dict | None:
     key = os.getenv("GOOGLE_PLACES_SERVER_KEY")
     if not key:
         raise RuntimeError("GOOGLE_PLACES_SERVER_KEY 未設定")
+    _count()
     body = json.dumps(
         {"textQuery": query, "languageCode": "zh-TW", "maxResultCount": 1}
     ).encode("utf-8")
@@ -73,6 +87,7 @@ def fetch_reviews(place_id: str) -> list[dict]:
     if not key or not place_id:
         return []
     try:
+        _count()
         req = urllib.request.Request(
             _DETAILS_URL.format(place_id=place_id),
             method="GET",
@@ -146,6 +161,7 @@ def fetch_place_photo(place_id: str, max_px: int = 800) -> tuple[bytes, str] | N
         return None
     try:
         # 1) 先拿 photo 的 resource name（field mask = photos）
+        _count()
         req = urllib.request.Request(
             _DETAILS_URL.format(place_id=place_id), method="GET",
             headers={"X-Goog-Api-Key": key, "X-Goog-FieldMask": "photos"},
@@ -157,6 +173,7 @@ def fetch_place_photo(place_id: str, max_px: int = 800) -> tuple[bytes, str] | N
         if not name:
             return None
         # 2) 下載實際照片 bytes（media endpoint 會轉址到真圖）
+        _count()
         url = _PHOTO_MEDIA_URL.format(name=name) + \
             f"?maxHeightPx={max_px}&key={urllib.parse.quote(key)}"
         with urllib.request.urlopen(url, timeout=30) as r:

@@ -43,19 +43,33 @@ def enrich_place(food_id: int, place_id: str, cur_recommended: str | None = None
     return out
 
 
-def backfill_all() -> None:
-    """補強所有有 place_id 的店（一次性）。印進度。"""
+def _all_rows_with_place_id() -> list[tuple]:
     db = SessionLocal()
     try:
-        rows = [(p.id, p.place_id, p.name, p.recommended_items)
+        return [(p.id, p.place_id, p.name, p.recommended_items)
                 for p in db.query(FoodPlace).filter(FoodPlace.place_id.isnot(None)).all()]
     finally:
         db.close()
 
+
+def backfill_all(max_api_calls: int = 200) -> None:
+    """補強所有有 place_id 的店（一次性）。印進度。
+
+    max_api_calls：本次允許的 Google API 呼叫上限（Places API New 按次計費）。
+    超過就停並回報剩幾家——enrich_place 是 idempotent，改天再跑會從沒補到的接續。
+    """
+    import traceback
+    from food import places
+
+    rows = _all_rows_with_place_id()
     total = len(rows)
-    print(f"backfill {total} 家…", flush=True)
+    print(f"backfill {total} 家…（API 預算 {max_api_calls} 次）", flush=True)
     n_reco = n_photo = 0
+    start = places.api_call_count()
     for i, (fid, pid, name, cur) in enumerate(rows, 1):
+        if places.api_call_count() - start >= max_api_calls:
+            print(f"⛔ 已達 API 預算 {max_api_calls} 次，剩 {total - i + 1} 家未跑（重跑會自動接續）", flush=True)
+            break
         try:
             r = enrich_place(fid, pid, cur)
             if r["recommended"]:
@@ -67,4 +81,6 @@ def backfill_all() -> None:
                   f"photo={'✓' if r['photo'] else '-'}", flush=True)
         except Exception as e:
             print(f"[{i}/{total}] {name} ERROR {e}", flush=True)
-    print(f"done. 補了推薦菜 {n_reco} 家、照片 {n_photo} 家。", flush=True)
+            traceback.print_exc()
+    print(f"done. 補了推薦菜 {n_reco} 家、照片 {n_photo} 家，"
+          f"用了 {places.api_call_count() - start} 次 API。", flush=True)
