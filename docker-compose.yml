@@ -8,6 +8,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     environment:
+      - BASE_URL=${BASE_URL:-https://your-ngrok-domain.ngrok-free.dev}
       - LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
       - LINE_CHANNEL_ACCESS_TOKEN=${LINE_CHANNEL_ACCESS_TOKEN}
       - DATABASE_URL=${DATABASE_URL}

@@ -23,8 +23,7 @@ from food import ingest, pending
 from food.links import detect_links, strip_urls, classify_platform
 from food.repo import set_message_id
 
-NGROK_DOMAIN = "your-ngrok-domain.ngrok-free.dev"
-BASE_URL = f"https://{NGROK_DOMAIN}"
+BASE_URL = os.getenv("BASE_URL", "https://your-ngrok-domain.ngrok-free.dev").rstrip("/")
 
 COLOR_EXPENSE = 0xE74C3C   # 紅
 COLOR_INCOME  = 0x2ECC71   # 綠

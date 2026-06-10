@@ -96,6 +96,7 @@
 | `DISCORD_INVOICE_CHANNEL_ID` | 發票通知頻道 ID（選填） |
 | `DISCORD_REPORT_CHANNEL_ID` | 週報 / 月結通知頻道 ID（選填） |
 | `DISCORD_RECORD_CHANNEL_ID` | 記帳主頻道 ID（選填，預留） |
+| `BASE_URL` | 對外網址（報表/地圖連結用）；未設則用 ngrok 保留域名預設值 |
 | `FOOD_INGEST_CHANNEL_ID` | 美食輸入頻道 ID（美食地圖；丟截圖/文字自動記店） |
 | `RECIPE_INGEST_CHANNEL_ID` | `#🍳-食譜` 頻道 ID；未設則食譜分支不啟用（不影響美食/記帳） |
 | `GOOGLE_PLACES_SERVER_KEY` | 後端 Google Places API (New) 金鑰（美食店名正規化 / 雷點摘要） |

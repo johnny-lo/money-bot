@@ -9,8 +9,7 @@ from core import process_text_message, handle_image
 line_bot_api = LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
 handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
 
-NGROK_DOMAIN = "your-ngrok-domain.ngrok-free.dev"
-BASE_URL = f"https://{NGROK_DOMAIN}"
+BASE_URL = os.getenv("BASE_URL", "https://your-ngrok-domain.ngrok-free.dev").rstrip("/")
 
 
 def register_line_routes(app: FastAPI):
