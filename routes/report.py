@@ -11,7 +11,7 @@ router = APIRouter()
 
 
 @router.get("/api/report/monthly", dependencies=[Depends(require_token)])
-def api_report_monthly(year: int = Query(None), month: int = Query(None), all: bool = Query(False),
+def api_report_monthly(year: int = Query(None, ge=2000, le=2100), month: int = Query(None, ge=1, le=12), all: bool = Query(False),
                        db: Session = Depends(get_db)):
     """每日或每月支出/收入趨勢"""
     now = datetime.now()
@@ -87,7 +87,7 @@ def api_report_monthly(year: int = Query(None), month: int = Query(None), all: b
 
 
 @router.get("/api/report/category", dependencies=[Depends(require_token)])
-def api_report_category(year: int = Query(None), month: int = Query(None), all: bool = Query(False),
+def api_report_category(year: int = Query(None, ge=2000, le=2100), month: int = Query(None, ge=1, le=12), all: bool = Query(False),
                         db: Session = Depends(get_db)):
     """支出分類佔比（單月或全部）"""
     now = datetime.now()
@@ -180,7 +180,7 @@ def api_report_summary(all: bool = Query(False), db: Session = Depends(get_db)):
 
 
 @router.get("/api/report/ledger", dependencies=[Depends(require_token)])
-def api_report_ledger(year: int = Query(None), month: int = Query(None), all: bool = Query(False),
+def api_report_ledger(year: int = Query(None, ge=2000, le=2100), month: int = Query(None, ge=1, le=12), all: bool = Query(False),
                       db: Session = Depends(get_db)):
     """流水帳：回傳所有收支明細"""
     now = datetime.now()

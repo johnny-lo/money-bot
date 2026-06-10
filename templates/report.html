@@ -479,12 +479,19 @@ function setCategoryFilter(cat) {
     renderLedger();
 }
 
+// HTML 跳脫：品名/分類來自發票爬蟲等外部資料，插進 innerHTML 前必過這層（防 stored XSS）
+function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[c]);
+}
+
 function refreshCategoryOptions() {
     const sel = document.getElementById('categoryFilter');
     const cats = [...new Set(ledgerData.map(r => r.category || '未分類'))].sort();
     const current = sel.value;
     sel.innerHTML = '<option value="all">全部分類</option>' +
-        cats.map(c => `<option value="${c}">${c}</option>`).join('');
+        cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
     sel.value = cats.includes(current) || current === 'all' ? current : 'all';
     ledgerCategoryFilter = sel.value;
 }
@@ -503,25 +510,37 @@ function renderLedger() {
         return;
     }
 
-    tbody.innerHTML = filtered.map(r => {
+    ledgerRendered = filtered;  // 給 openModalIdx/deleteRecordIdx 用 index 回查，避免把 JSON 塞進 HTML 屬性
+    tbody.innerHTML = filtered.map((r, i) => {
         const isExp = r.type === 'expense';
         const tagClass = isExp ? 'tag-expense' : 'tag-income';
         const tagText = isExp ? '支出' : '收入';
         const sign = isExp ? '-' : '+';
         const color = isExp ? '#e74c3c' : '#27ae60';
-        const escaped = JSON.stringify(r).replace(/'/g, '&#39;').replace(/"/g, '&quot;');
         return `<tr>
-            <td>${r.created_at}</td>
+            <td>${esc(r.created_at)}</td>
             <td><span class="tag ${tagClass}">${tagText}</span></td>
-            <td>${r.item}</td>
-            <td>${r.category}</td>
-            <td style="text-align:right;color:${color};font-weight:600">${sign}$${r.amount.toLocaleString()}</td>
+            <td>${esc(r.item)}</td>
+            <td>${esc(r.category)}</td>
+            <td style="text-align:right;color:${color};font-weight:600">${sign}$${Number(r.amount).toLocaleString()}</td>
             <td style="text-align:center;white-space:nowrap">
-                <button class="btn-action btn-edit" onclick='openModal(${escaped})'>編輯</button>
-                <button class="btn-action btn-delete" onclick="deleteRecord('${r.type}',${r.id})">刪除</button>
+                <button class="btn-action btn-edit" onclick="openModalIdx(${i})">編輯</button>
+                <button class="btn-action btn-delete" onclick="deleteRecordIdx(${i})">刪除</button>
             </td>
         </tr>`;
     }).join('');
+}
+
+let ledgerRendered = [];
+
+function openModalIdx(i) {
+    const r = ledgerRendered[i];
+    if (r) openModal(r);
+}
+
+function deleteRecordIdx(i) {
+    const r = ledgerRendered[i];
+    if (r) deleteRecord(r.type, r.id);
 }
 
 async function loadLedger() {
