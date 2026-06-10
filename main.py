@@ -42,6 +42,17 @@ try:
             ))
             _conn.commit()
             print("✅ 已自動新增 invoice_no 欄位")
+        # food_photos 補 FK（既有表不會被 create_all 改結構）：先清孤兒列再加約束
+        if _inspector.has_table("food_photos") and not _inspector.get_foreign_keys("food_photos"):
+            _conn.execute(_text(
+                "DELETE FROM food_photos WHERE food_place_id NOT IN (SELECT id FROM food_places)"
+            ))
+            _conn.execute(_text(
+                "ALTER TABLE food_photos ADD CONSTRAINT fk_food_photos_place "
+                "FOREIGN KEY (food_place_id) REFERENCES food_places(id) ON DELETE CASCADE"
+            ))
+            _conn.commit()
+            print("✅ food_photos 已補上 FK（含孤兒清理）")
 except Exception as e:
     print(f"⚠️ 欄位檢查/新增失敗：{e}")
 

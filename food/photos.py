@@ -4,6 +4,7 @@ bot 路與 app 路最後都呼叫 add_photo() → 同一個存檔位置。
 通則:二進位檔案存檔案系統,資料庫只存「指向它的路徑」,別把圖塞進 DB。
 """
 import os
+import shutil
 import uuid
 
 from database import SessionLocal
@@ -36,6 +37,14 @@ def add_photo(food_place_id: int, data: bytes, ext: str = "jpg", source: str = "
         db.commit()
         db.refresh(rec)
         return {"id": rec.id, "url": _url(rec.path), "source": rec.source}
+    except Exception:
+        db.rollback()
+        # DB 沒記到就不能留檔，否則變成沒人指到的孤兒檔案
+        try:
+            os.remove(os.path.join(MEDIA_ROOT, rel_path))
+        except OSError:
+            pass
+        raise
     finally:
         db.close()
 
@@ -75,9 +84,18 @@ def delete_photo(photo_id: int) -> bool:
         try:
             os.remove(os.path.join(MEDIA_ROOT, rec.path))
         except OSError:
-            pass
+            print(f"⚠️ 照片檔案刪除失敗（DB 列仍會刪）：{rec.path}")
         db.delete(rec)
         db.commit()
         return True
     finally:
         db.close()
+
+
+def delete_files_for_place(food_place_id: int) -> None:
+    """刪掉某店整個照片資料夾。
+
+    DB 列由 food_photos 的 FK ON DELETE CASCADE 自動清，檔案系統這裡清。
+    """
+    shutil.rmtree(os.path.join(MEDIA_ROOT, "food", str(food_place_id)),
+                  ignore_errors=True)

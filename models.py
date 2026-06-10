@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, func
+from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, func
 from database import Base
 
 class Transaction(Base):
@@ -80,7 +80,8 @@ class FoodPhoto(Base):
     __tablename__ = "food_photos"
 
     id = Column(Integer, primary_key=True, index=True)
-    food_place_id = Column(Integer, index=True, nullable=False)  # 對應 FoodPlace.id
+    food_place_id = Column(Integer, ForeignKey("food_places.id", ondelete="CASCADE"),
+                           index=True, nullable=False)  # 刪店時 DB 列自動清（檔案由 photos.delete_files_for_place 清）
     path = Column(String, nullable=False)                        # media 根目錄下的相對路徑
     source = Column(String, default="app")                       # app / bot（哪條路傳的）
     created_at = Column(DateTime, default=func.now())

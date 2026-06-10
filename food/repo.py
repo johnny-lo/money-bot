@@ -156,6 +156,9 @@ def delete_place(food_id: int) -> bool:
             return False
         db.delete(rec)
         db.commit()
-        return True
     finally:
         db.close()
+    # DB 刪成功才清照片檔案（DB 列由 FK CASCADE 自動清）
+    from food import photos
+    photos.delete_files_for_place(food_id)
+    return True
