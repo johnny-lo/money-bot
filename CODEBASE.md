@@ -145,7 +145,7 @@ LINE/Discord 訊息
 
 ## Key Patterns
 
-- **SessionLocal pattern**: 所有 DB 操作用 `db = SessionLocal()` + try/finally/db.close()
+- **DB session**: FastAPI 路由用 `db: Session = Depends(get_db)`（database.py）；一般程式可用 `with session_scope() as db:`（成功 commit/例外 rollback/必 close）。core.py 等舊碼仍是手寫 `SessionLocal()` + try/finally（待 core 有測試後再轉換）
 - **LINE handler**: 同步函式，純文字回覆（`line_bot_api.reply_message`），呼叫 `core.handle_*()` 取 `list[str]`
 - **Discord handler**: 非同步，slash commands + embeds，呼叫 `core.*_data()` 取結構化 dict 後組 embed
 - **Auth**: in-memory token store (dict)，30 分鐘過期，非持久化
