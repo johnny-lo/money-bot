@@ -17,6 +17,24 @@ _COUNTRY_ALIAS = {
 }
 _SUFFIXES = ["City", "city", "市", "縣", "都", "府", "県", "区", "區"]
 
+# 簡→繁字元表（Google Places 偶爾回簡體地名，例：桃园/中坜区）。
+# 只收地名常用字，不裝 OpenCC 整套——這個量級查表就夠。
+_S2T = str.maketrans({
+    "园": "園", "湾": "灣", "县": "縣", "岛": "島", "东": "東", "门": "門",
+    "马": "馬", "龙": "龍", "凤": "鳳", "兰": "蘭", "义": "義", "乡": "鄉",
+    "镇": "鎮", "区": "區", "桥": "橋", "滨": "濱", "苏": "蘇", "广": "廣",
+    "庄": "莊", "头": "頭", "屿": "嶼", "阳": "陽", "云": "雲", "营": "營",
+    "兴": "興", "万": "萬", "丰": "豐", "双": "雙", "内": "內", "关": "關",
+    "圆": "圓", "莲": "蓮", "坜": "壢", "冈": "岡", "旧": "舊", "静": "靜",
+    "沪": "滬", "杨": "楊", "陈": "陳", "刘": "劉", "张": "張", "黄": "黃",
+    "宁": "寧", "济": "濟", "汉": "漢", "锦": "錦", "钱": "錢", "贵": "貴",
+})
+
+
+def to_traditional(s: str | None) -> str:
+    """地名簡體字折成繁體（查表，非整套轉換）。"""
+    return (s or "").translate(_S2T)
+
 
 def _strip_suffix(s: str) -> str:
     for suf in _SUFFIXES:
@@ -29,6 +47,7 @@ def canon(s: str | None) -> str:
     """正規化地名：先查別名，未命中則去行政後綴再查一次。回正規名或去後綴字串。"""
     if not s:
         return ""
+    s = to_traditional(s)
     key = s.strip().lower()
     if key in _CITY_ALIAS:
         return _CITY_ALIAS[key]
@@ -75,9 +94,11 @@ def parse_address_components(components: list[dict] | None) -> dict:
         or by_type.get("administrative_area_level_1")
         or by_type.get("administrative_area_level_2")
     )
-    district = by_type.get("sublocality") or by_type.get("administrative_area_level_3")
+    district = to_traditional(
+        by_type.get("sublocality") or by_type.get("administrative_area_level_3")
+    )
     return {
         "country": country or None,
         "city": city or None,
-        "district": district,
+        "district": district or None,
     }

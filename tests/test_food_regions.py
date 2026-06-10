@@ -52,3 +52,38 @@ def test_parse_address_components_prefers_locality():
     out = parse_address_components(comps)
     assert out["country"] == "日本"
     assert out["city"] == "東京"
+
+
+# ── 繁簡正規化（Google Places 偶爾回簡體地名）──────────────────
+
+def test_canon_folds_simplified_to_traditional():
+    from food.regions import canon
+    assert canon("桃园") == "桃園"
+    assert canon("桃园市") == "桃園"          # 折繁 + 去行政後綴
+    assert canon("桃园") == canon("桃園")     # 繁簡殊途同歸
+    assert canon("东京") == "東京"            # 折繁後命中既有別名表
+
+
+def test_to_traditional_district():
+    from food.regions import to_traditional
+    assert to_traditional("中坜区") == "中壢區"
+    assert to_traditional("西區") == "西區"   # 已是繁體不動
+    assert to_traditional("") == ""
+
+
+def test_region_matches_across_scripts():
+    from food.regions import region_matches
+    assert region_matches("桃園", country="台灣", city="桃园") is True
+
+
+def test_parse_address_components_folds_district():
+    from food.regions import parse_address_components
+    comps = [
+        {"longText": "台湾", "types": ["country"]},
+        {"longText": "桃园市", "types": ["administrative_area_level_1"]},
+        {"longText": "中坜区", "types": ["administrative_area_level_3"]},
+    ]
+    out = parse_address_components(comps)
+    assert out["country"] == "台灣"
+    assert out["city"] == "桃園"
+    assert out["district"] == "中壢區"
