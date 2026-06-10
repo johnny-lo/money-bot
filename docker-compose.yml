@@ -42,9 +42,11 @@ services:
     container_name: money-db
     restart: always
     environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=money_db
+      # 預設值=現行設定（postgres 只在首次初始化 volume 時套用密碼；之後改這裡不會改到既有 DB，
+      # 真要換密碼：ALTER USER + 同步改 .env 的 DATABASE_URL）
+      - POSTGRES_USER=${POSTGRES_USER:-user}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
+      - POSTGRES_DB=${POSTGRES_DB:-money_db}
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
