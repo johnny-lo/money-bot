@@ -69,6 +69,9 @@ register_line_routes(app)
 
 # 手機版 PWA（前端 build 後的靜態檔）；對外經 ngrok 走 /m/。沒 build 過則跳過（後端可獨立啟動）
 if os.path.isdir("frontend/dist"):
+    import mimetypes
+    # Python 預設不認識 .webmanifest → 會用 text/plain 回，註冊正確的 MIME type
+    mimetypes.add_type("application/manifest+json", ".webmanifest")
     app.mount("/m", StaticFiles(directory="frontend/dist", html=True), name="mobile")
 
 # 使用者上傳的店家照片（bot/app 兩條路都寫到 media/）

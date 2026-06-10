@@ -39,7 +39,7 @@
 - **批次匯入**（Batch Import）：在 `#🍜-美食` 貼多行（markdown 待辦清單，`- [ ]`/`- [x]`）→ 一次批次匯入，回 ✅高信心/⚠️需確認/❌找不到 總結卡；`- [x]` 標去過。上限 60 行。
 - **頻道分流**：`#美食輸入` 走美食流程、`#記帳` 走圖片記帳；其他頻道誤丟圖片會回一句指引（同頻道 30 分鐘內只回一次）。未設 `DISCORD_RECORD_CHANNEL_ID` 時圖片記帳退回「任意頻道」舊行為
 - **店家照片庫**：照片檔存 `media/food/<店家id>/`、DB（`food_photos`）只記相對路徑與來源（app/bot/google）；`/api/food/places` 每家帶 `photos` 陣列。**自動補強**（enrich）：用 Google 評論萃取推薦菜 + 抓一張 Google 照片，idempotent 可重跑（目前由 `food.enrich.backfill_all()` 手動觸發）
-- **手機版 PWA（開發中）**：前端 React app 放 `frontend/`，build 後由 FastAPI 掛在 `/m/`（沒 build 過會自動跳過掛載）
+- **手機版 PWA（開發中）**：前端 React app 放 `frontend/`，build 後由 FastAPI 掛在 `/m/`（沒 build 過會自動跳過掛載）。已可「加到主畫面」安裝（manifest + service worker）：離線開啟有 app 殼與上次載入的清單、店家照片快取 30 天。改完前端記得 `cd frontend && npm run build` 重新產出 dist/
 
 ### 食譜收錄
 食譜收錄 — 把食譜連結丟進 `#🍳-食譜` 頻道，自動抽出乾淨菜名存庫；`/隨機食譜` 解決「今天煮什麼」。同 URL 去重、reply 卡片可改菜名、丟 Google Maps 連結會被擋。

@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- viewport-fit=cover：讓畫面延伸到瀏海/Home 指示條底下，我們再用 safe-area 避開 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- 手機狀態列配色（美食橘）-->
+    <meta name="theme-color" content="#E67E22" />
+    <!-- iOS 不讀 manifest 的 icons，要用它自己這套 link/meta 才有主畫面圖示與 app 標題 -->
+    <link rel="apple-touch-icon" href="/m/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="生活" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <title>生活</title>
+  </head>
+  <body>
+    <!-- React 會把整個 app 掛進這個空 div -->
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

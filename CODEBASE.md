@@ -59,7 +59,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── report.py        # 報表 API：/api/report/monthly|category|summary|ledger + /report 頁面（year/month Query ge/le 驗證,違規回 422）
 │   ├── record.py        # CRUD API：POST/PUT/DELETE /api/record（供網頁報表使用）
 │   └── food_map.py      # 美食地圖：GET /food/map(HTML,自驗 token,注入 browser key/mapId) + GET /api/food/places(JSON,Depends token,每家帶 photos 陣列)
-├── frontend/            # 手機版 PWA（React+Vite，開發中未入版控）；build 後 dist/ 由 main.py 掛 /m/（目錄不存在自動跳過）
+├── frontend/            # 手機版 PWA（React+Vite+vite-plugin-pwa）：三 tab 殼(地圖/消費/食譜)、美食地圖已實裝。manifest+SW(autoUpdate;API NetworkFirst、media CacheFirst)、icons 在 public/。build:`cd frontend && npm run build`(script 內含 NODE_OPTIONS webcrypto flag,Node 18 需要)→ dist/ 由 main.py 掛 /m/（目錄不存在自動跳過;.webmanifest MIME 已註冊）。node_modules/dist/.env(VITE_* 金鑰) 不入版控
 ├── media/               # 使用者/Google 店家照片（.gitignore 只留 .gitkeep）；main.py 掛 /media/
 └── templates/
     ├── report.html      # 互動式報表 SPA：ECharts 圖表 + 流水帳 CRUD（純前端 JS）。品名/分類經 esc() 跳脫再進 innerHTML（防發票品名 stored XSS）,編輯/刪除用 index 回查不塞 JSON 進屬性

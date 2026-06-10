@@ -1,0 +1,12 @@
+# 下載來的依賴（靠 package.json 重裝即可，不進 git）
+node_modules/
+
+# 每次 build 的產物（可重新產生，不進 git）
+dist/
+
+# 本機祕密（Maps 金鑰等），不進 git
+.env
+
+# 雜項
+*.log
+.DS_Store
