@@ -124,3 +124,17 @@ export async function updateRecord(type, id, payload) {
 export async function deleteRecord(type, id) {
   return authedFetch(`/api/record/${type}/${id}`, { method: 'DELETE' })
 }
+
+// ── 食譜 ─────────────────────────────────────────────────────
+
+export async function getRecipes() {
+  return authedFetch('/api/recipes')
+}
+
+export async function renameRecipe(id, name) {
+  return authedFetch(`/api/recipes/${id}`, { method: 'PUT', json: { name } })
+}
+
+export async function deleteRecipe(id) {
+  return authedFetch(`/api/recipes/${id}`, { method: 'DELETE' })
+}

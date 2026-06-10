@@ -13,6 +13,7 @@ from routes.report import router as report_router
 from routes.record import router as record_router
 from routes.food_map import router as food_map_router
 from routes.device import router as device_router
+from routes.recipes import router as recipes_router
 from line_handler import register_line_routes
 from discordbot import (
     create_discord_bot,
@@ -67,6 +68,7 @@ app.include_router(report_router)
 app.include_router(record_router)
 app.include_router(food_map_router)
 app.include_router(device_router)
+app.include_router(recipes_router)
 register_line_routes(app)
 
 # 手機版 PWA（前端 build 後的靜態檔）；對外經 ngrok 走 /m/。沒 build 過則跳過（後端可獨立啟動）

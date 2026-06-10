@@ -59,8 +59,9 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── report.py        # 報表 API：/api/report/monthly|category|summary|ledger + /report 頁面（year/month Query ge/le 驗證,違規回 422）
 │   ├── record.py        # CRUD API：POST/PUT/DELETE /api/record（供網頁報表使用）
 │   ├── food_map.py      # 美食地圖：GET /food/map(舊 HTML 頁) + GET /api/food/places(每家帶 photos [{id,url,source}]) + PWA 寫操作：POST .../{id}/visited(評分1-5/心得,超範圍當沒給)、POST .../{id}/photos(multipart,5MB/張,10張/店,Content-Type 白名單)、DELETE /api/food/photos/{id}
+│   ├── recipes.py       # 食譜 JSON API（PWA 用）：GET /api/recipes、PUT /api/recipes/{id}(改名,空白名 422)、DELETE /api/recipes/{id}。新增仍走 Discord（要連結抽取 pipeline）；隨機抽在前端做
 │   └── device.py        # POST /api/device-token：用「有效短效 token」換發長效裝置 token（只收短效,洩漏的裝置 token 無法自我繁殖）。前端 api.js ensureAuth 換發後存 localStorage、清掉網址 token,之後走 X-Device-Token header
-├── frontend/            # 手機版 PWA（React+Vite+vite-plugin-pwa）：三 tab 殼(地圖/消費/食譜)、美食地圖+消費已實裝（Spend.jsx 吃 /api/report/ledger 一次抓整月,總額/分類占比前端算;RecordSheet.jsx 新增/編輯/刪除走 /api/record）。manifest+SW(autoUpdate;API NetworkFirst、media CacheFirst)、icons 在 public/。build:`cd frontend && npm run build`(script 內含 NODE_OPTIONS webcrypto flag,Node 18 需要)→ dist/ 由 main.py 掛 /m/（目錄不存在自動跳過;.webmanifest MIME 已註冊）。node_modules/dist/.env(VITE_* 金鑰) 不入版控
+├── frontend/            # 手機版 PWA（React+Vite+vite-plugin-pwa）：**三 tab 全實裝**——美食(Food/FoodList/FoodMap/PlaceSheet)、消費(Spend 吃 /api/report/ledger 整月前端算+RecordSheet CRUD)、食譜(Recipe.jsx 拉霸隨機抽=前端 random+減速動畫,清單/改名/刪除)。manifest+SW(autoUpdate;API NetworkFirst、media CacheFirst)、icons 在 public/。build:`cd frontend && npm run build`(script 內含 NODE_OPTIONS webcrypto flag,Node 18 需要)→ dist/ 由 main.py 掛 /m/（目錄不存在自動跳過;.webmanifest MIME 已註冊）。node_modules/dist/.env(VITE_* 金鑰) 不入版控
 ├── media/               # 使用者/Google 店家照片（.gitignore 只留 .gitkeep）；main.py 掛 /media/
 └── templates/
     ├── report.html      # 互動式報表 SPA：ECharts 圖表 + 流水帳 CRUD（純前端 JS）。品名/分類經 esc() 跳脫再進 innerHTML（防發票品名 stored XSS）,編輯/刪除用 index 回查不塞 JSON 進屬性
