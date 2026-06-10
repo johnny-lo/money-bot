@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Food from './Food.jsx'
+import Spend from './Spend.jsx'
 
 // 底部三個分頁。先用陣列定義，下面用 .map() 一次畫出來。
 const TABS = [
@@ -18,7 +19,7 @@ export default function App() {
       {/* 主畫面：依 tab 決定顯示哪一頁。先放佔位，功能之後接。 */}
       <main className="screen">
         {tab === 'map' && <Food />}
-        {tab === 'spend' && <div className="placeholder">💰 消費（之後做）</div>}
+        {tab === 'spend' && <Spend />}
         {tab === 'recipe' && <div className="placeholder">🍳 食譜（之後做）</div>}
       </main>
 

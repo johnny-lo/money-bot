@@ -102,3 +102,25 @@ export async function uploadPhoto(placeId, file) {
 export async function deletePhoto(photoId) {
   return authedFetch(`/api/food/photos/${photoId}`, { method: 'DELETE' })
 }
+
+// ── 消費（沿用現有報表/CRUD API）─────────────────────────────
+
+// 某月流水帳。回 {records: [{id,type,item,amount,category,created_at}]}（新到舊）。
+export async function getLedger(year, month) {
+  return authedFetch(`/api/report/ledger?year=${year}&month=${month}`)
+}
+
+// 新增一筆。payload = {type:'expense'|'income', item, amount, category?}
+export async function createRecord(payload) {
+  return authedFetch('/api/record', { method: 'POST', json: payload })
+}
+
+// 修改一筆（只送有改的欄位也行）。
+export async function updateRecord(type, id, payload) {
+  return authedFetch(`/api/record/${type}/${id}`, { method: 'PUT', json: payload })
+}
+
+// 刪一筆。
+export async function deleteRecord(type, id) {
+  return authedFetch(`/api/record/${type}/${id}`, { method: 'DELETE' })
+}
