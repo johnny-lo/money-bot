@@ -75,6 +75,20 @@ class Recipe(Base):
     created_at = Column(DateTime, default=func.now())
 
 
+class DeviceToken(Base):
+    """PWA 長效裝置 token：用短效報表 token（邀請函）換發，存 DB 重啟不丟。
+
+    無期限但記 last_used_at；要踢掉某台裝置就刪那列（auth.revoke_device_token）。
+    """
+    __tablename__ = "device_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String, unique=True, index=True, nullable=False)
+    label = Column(String, nullable=True)            # 哪台裝置（前端帶 userAgent 簡述）
+    created_at = Column(DateTime, default=func.now())
+    last_used_at = Column(DateTime, nullable=True)
+
+
 class FoodPhoto(Base):
     """店家照片（一家店多張）：去過=自己拍的食物照。檔案存 media/，這裡只記相對路徑。"""
     __tablename__ = "food_photos"

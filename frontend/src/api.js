@@ -1,20 +1,64 @@
-// 跟後端要資料的小工具。沿用現有的「網址列一次性 token」機制。
+// 跟後端要資料的小工具。
+//
+// 認證兩層：
+// 1. 短效 token（網址列 ?token=...，30 分鐘）＝從 Discord 拿到的「邀請函」
+// 2. 長效裝置 token（localStorage）＝第一次用邀請函開啟時跟後端換發，
+//    之後 API 全走 X-Device-Token header → 釘在主畫面的 PWA 不用一直回 Discord 拿連結
 
-function tokenFromUrl() {
+const DEVICE_TOKEN_KEY = 'deviceToken'
+
+function shortTokenFromUrl() {
   return new URLSearchParams(window.location.search).get('token') || ''
 }
 
-// 拿全部店家（一次抓完，篩選在前端做 → 切 filter 是瞬間的，不用再連線）
-export async function getPlaces() {
-  const params = new URLSearchParams()
-  const token = tokenFromUrl()
-  if (token) params.set('token', token)
+// 確保手上有可用憑證。回傳 {device, short} 其中一個有值。
+export async function ensureAuth() {
+  const device = localStorage.getItem(DEVICE_TOKEN_KEY)
+  if (device) return { device, short: '' }
 
-  const res = await fetch(`/api/food/places?${params}`, {
-    headers: { 'ngrok-skip-browser-warning': 'true' }, // 跳過 ngrok 免費版的攔截頁
-  })
+  const short = shortTokenFromUrl()
+  if (!short) return { device: '', short: '' }   // 兩者皆無 → 呼叫端顯示「請從 Discord 開啟」
+
+  // 用短效 token 換發長效裝置 token（label 帶上裝置簡述，之後好認是誰的手機）
+  try {
+    const label = encodeURIComponent(navigator.userAgent.slice(0, 100))
+    const res = await fetch(`/api/device-token?token=${short}&label=${label}`, {
+      method: 'POST',
+      headers: { 'ngrok-skip-browser-warning': 'true' },
+    })
+    if (res.ok) {
+      const data = await res.json()
+      localStorage.setItem(DEVICE_TOKEN_KEY, data.token)
+      // 把一次性 token 從網址拿掉：之後加入主畫面/分享網址都不會帶到它
+      const url = new URL(window.location)
+      url.searchParams.delete('token')
+      window.history.replaceState({}, '', url)
+      return { device: data.token, short: '' }
+    }
+  } catch { /* 換發失敗就退回用短效 token，本次仍可瀏覽 */ }
+  return { device: '', short }
+}
+
+async function authedFetch(path) {
+  const { device, short } = await ensureAuth()
+  if (!device && !short) {
+    throw new Error('沒有有效憑證，請回 Discord 用 /美食地圖 重新開啟一次。')
+  }
+
+  const headers = { 'ngrok-skip-browser-warning': 'true' }   // 跳過 ngrok 免費版的攔截頁
+  let url = path
+  if (device) headers['X-Device-Token'] = device
+  else url += (path.includes('?') ? '&' : '?') + 'token=' + short
+
+  const res = await fetch(url, { headers })
+
+  // 裝置 token 被撤銷/DB 清掉 → 清掉重來，下次用新邀請函自動再換發
+  if (res.status === 401 && device) {
+    localStorage.removeItem(DEVICE_TOKEN_KEY)
+    throw new Error('這台裝置的授權已失效，請回 Discord 用 /美食地圖 重新開啟一次。')
+  }
+
   const text = await res.text()
-
   if (!res.ok) {
     let detail = res.status
     try { detail = JSON.parse(text).detail || res.status } catch { /* 非 JSON 就用狀態碼 */ }
@@ -25,4 +69,9 @@ export async function getPlaces() {
   } catch {
     throw new Error('資料格式錯誤（可能是 ngrok 攔截頁，請重新整理）')
   }
+}
+
+// 拿全部店家（一次抓完，篩選在前端做 → 切 filter 是瞬間的，不用再連線）
+export async function getPlaces() {
+  return authedFetch('/api/food/places')
 }
