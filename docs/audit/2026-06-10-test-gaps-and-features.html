@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>linebot 測試缺口與功能建議 · 2026-06-10</title>
+<style>
+  :root {
+    --bg: #1a1d23; --card: #242830; --text: #e8e6e3; --muted: #9aa0a8;
+    --orange: #E67E22; --red: #E74C3C; --yellow: #F1C40F; --green: #2ECC71; --blue: #3498DB;
+    --border: #343a44;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+         font-family: "Noto Sans TC", -apple-system, "Segoe UI", sans-serif; line-height: 1.65; }
+  .wrap { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; border-bottom: 3px solid var(--orange); padding-bottom: 8px; }
+  h2 { font-size: 1.15rem; margin-top: 36px; color: var(--orange); }
+  .sub { color: var(--muted); font-size: .9rem; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: .9rem; }
+  th, td { padding: 8px 10px; border: 1px solid var(--border); text-align: left; vertical-align: top; }
+  th { background: #2c313b; }
+  .card { background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--orange);
+          border-radius: 8px; padding: 14px 16px; margin: 14px 0; }
+  .card h3 { margin: 0 0 6px; font-size: 1rem; }
+  .tag { display: inline-block; font-size: .75rem; padding: 1px 8px; border-radius: 10px; margin-right: 6px; }
+  .p1 { background: var(--red); color: #fff; }
+  .p2 { background: var(--yellow); color: #222; }
+  .p3 { background: var(--blue); color: #fff; }
+  .effort { background: #3a3f4a; color: var(--text); }
+  .done { color: var(--green); }
+  code { background: #2c313b; padding: 1px 5px; border-radius: 4px; font-size: .85em; }
+  .why { color: var(--muted); font-size: .88rem; margin-top: 4px; }
+  ul { padding-left: 1.2em; margin: 6px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<h1>🧪 測試缺口 &amp; 💡 功能建議</h1>
+<p class="sub">2026-06-10 · 由整體程式碼審查整理 · 今日已補：<span class="done">test_food_photos（7 個）、test_food_enrich（4 個），全套 193 綠</span></p>
+
+<h2>一、測試缺口（按風險排序）</h2>
+<p class="sub">原則：愈常改、愈核心、壞掉愈難發現的，愈優先補。純函式模組（links / extract / regions / report_helpers / ingest）覆蓋已經很好，缺的集中在「有 DB / 有狀態」的那層。</p>
+
+<table>
+  <tr><th>優先</th><th>目標</th><th>缺什麼</th><th>建議做法</th></tr>
+  <tr>
+    <td><span class="tag p1">P1</span></td>
+    <td><code>core.py</code>（788 行，<b>0 測試</b>）</td>
+    <td>記帳文字解析（<code>handle_record_text</code> 的 regex、多行記帳）、全部 CRUD handler、指令路由 <code>process_text_message</code></td>
+    <td>這是最常被改到的檔案。先測純解析（不碰 DB 的部分），DB 部分用 FakeSession（仿 <code>tests/test_recipe_repo.py</code> 的模式）。<b>補完才能安全地把 core.py 的 55 處 SessionLocal 轉成 session_scope</b>（這次刻意沒動就是因為沒保護網）</td>
+  </tr>
+  <tr>
+    <td><span class="tag p1">P1</span></td>
+    <td><code>routes/record.py</code>、<code>routes/report.py</code></td>
+    <td>API 整合測試：建立/修改/刪除、月份彙總、token 驗證 401</td>
+    <td>FastAPI <code>TestClient</code> + SQLite in-memory（override <code>get_db</code> dependency——這次改成依賴注入後，這件事變得很容易，這是 Depends(get_db) 最大的紅利）</td>
+  </tr>
+  <tr>
+    <td><span class="tag p2">P2</span></td>
+    <td><code>auth.py</code></td>
+    <td>token 生成/驗證/30 分鐘過期/清理</td>
+    <td>純 dict 操作，monkeypatch <code>datetime</code> 即可，半小時的事</td>
+  </tr>
+  <tr>
+    <td><span class="tag p2">P2</span></td>
+    <td><code>recurring.py</code></td>
+    <td>每日固定收支：day_of_month 命中邏輯、active=0 不寫入</td>
+    <td>FakeSession + 指定日期參數化測試。它每天自動寫帳，錯了會默默寫錯一個月</td>
+  </tr>
+  <tr>
+    <td><span class="tag p3">P3</span></td>
+    <td><code>discordbot/ingest_handlers.py</code></td>
+    <td>reply 補件流程、批次/單筆分流、多連結平行</td>
+    <td>拆成 package 後可單獨 import 了；用 fake message 物件測分流決策（不用真的連 Discord）</td>
+  </tr>
+  <tr>
+    <td><span class="tag p3">P3</span></td>
+    <td><code>einvoice.py</code> 整合面</td>
+    <td>登入失敗、CAPTCHA 重試、多載具其中一組壞掉</td>
+    <td>已有 modal/翻頁的 fixture 回歸測試；登入流程要 mock Playwright，成本高，排最後</td>
+  </tr>
+</table>
+
+<h2>二、功能建議（從你們倆共用清單的情境出發）</h2>
+
+<div class="card">
+  <h3><span class="tag p1">推薦先做</span><span class="tag effort">工作量：小</span>/美食補強 slash 指令</h3>
+  <code>food.enrich.backfill_all()</code> 寫好了、今天也加上了 API 預算（預設 200 次封頂），但目前只能 <code>docker exec</code> 跑。加一個 <code>/美食補強</code> 指令（defer → 跑 → 回統計 embed：「補了推薦菜 12 家、照片 9 家、用了 87 次 API」），女友也能自己觸發。
+  <div class="why">為什麼：功能已經存在，差最後一哩的入口。idempotent + 預算保護都齊了，掛上去沒風險。</div>
+</div>
+
+<div class="card">
+  <h3><span class="tag p1">推薦先做</span><span class="tag effort">工作量：小</span>PWA 殼：manifest + service worker + icon</h3>
+  目前 <code>frontend/</code> 沒有 manifest、沒有 service worker、沒有 icon——「加到主畫面」還不能用。<code>vite-plugin-pwa</code> 一個套件搞定：manifest（name/start_url=<code>/m/</code>/theme #E67E22）、離線 fallback、192/512 icon + iOS 180 apple-touch-icon。
+  <div class="why">為什麼：這是「像個 app」的分水嶺。學習價值也高——SW 的 cache 策略是前端必修課。</div>
+</div>
+
+<div class="card">
+  <h3><span class="tag p2">第二批</span><span class="tag effort">工作量：小</span>照片來源標示</h3>
+  <code>FoodPhoto.source</code>（app/bot/google）已經存在 DB，但 <code>/api/food/places</code> 回的 photos 只有 URL 陣列。改回 <code>[{url, source}]</code>，前端顯示「📸 自己拍的 / 🤖 bot 收的 / 🔍 Google 的」。
+  <div class="why">為什麼：「去過」的店配自己拍的食物照，才是兩個人的記錄；Google 圖只是補位。後端一行、前端一個 badge。</div>
+</div>
+
+<div class="card">
+  <h3><span class="tag p2">第二批</span><span class="tag effort">工作量：中</span>PWA 長效 device token</h3>
+  現在 <code>/m/?token=...</code> 30 分鐘過期——PWA 釘在主畫面後，每次打開都要回 Discord 重拿連結，會把人逼瘋。建議：報表連結維持短效；PWA 另發長效 device token（首次用短效連結開啟時換發、存 localStorage、可撤銷）。
+  <div class="why">為什麼：這是 PWA 能不能日常用的關鍵。順便是一堂「session vs token、短效 vs 長效」的認證設計課。</div>
+</div>
+
+<div class="card">
+  <h3><span class="tag p2">第二批</span><span class="tag effort">工作量：中</span>地圖 InfoWindow / 詳情面板帶照片與推薦菜</h3>
+  enrich 補出來的 <code>recommended_items</code> 和照片，目前清單 API 有帶，但地圖點 pin 的資訊卡還沒呈現。詳情面板排版：✅ 必點（Google 評論萃取）→ ⚠️ 雷點 → 🏆 你們的評分 → 💬 心得 → 照片橫滑。
+  <div class="why">為什麼：選店當下「點開就知道要點什麼、避什麼」，這是這個模組的核心體驗。</div>
+</div>
+
+<div class="card">
+  <h3><span class="tag p3">有空再說</span><span class="tag effort">工作量：中</span>資料庫自動備份</h3>
+  現在 <code>.backups/</code> 是手動 HTML dump。建議：cron 每天 <code>pg_dump</code> → gzip → 留 14 天，丟到 NAS 或雲端硬碟。帳務 + 兩年美食記錄是不可重建資料。
+  <div class="why">為什麼：postgres volume 一壞就全沒。一個 systemd timer + 10 行 script 的保險。</div>
+</div>
+
+<div class="card">
+  <h3><span class="tag p3">有空再說</span><span class="tag effort">工作量：小</span>照片上限與孤兒清理</h3>
+  單張照片大小上限（如 5MB）、每店張數上限（如 10 張）；另外寫個 <code>cleanup_orphan_photos()</code>：掃 media/ 裡 DB 沒記錄的檔案（FK 反向的洞今天已用 CASCADE+刪檔補上，剩「檔案在、列不在」的歷史殘留）。
+  <div class="why">為什麼：防磁碟被塞爆，順手收乾淨歷史垃圾。</div>
+</div>
+
+<h2>三、建議的順序</h2>
+<ul>
+  <li><b>PWA 開發路上順手做</b>：manifest/SW → 照片來源標示 → 詳情面板 → device token（都在你既定的「地圖→消費→食譜」路線圖裡）</li>
+  <li><b>回後端時</b>：/美食補強 指令（30 分鐘）→ core.py 測試（這是解鎖 core 重構的前置）</li>
+  <li><b>某個週末</b>：pg_dump 備份 timer</li>
+</ul>
+
+<p class="sub">附註：core.py 拆分與 session_scope 全面轉換，刻意排在「core 有測試之後」——對沒有保護網的核心檔案做大型重構，是回歸風險最高的事。</p>
+
+</div>
+</body>
+</html>
