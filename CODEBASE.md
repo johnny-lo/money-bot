@@ -37,7 +37,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── __init__.py
 │   ├── regions.py       # 地名正規化（純函式）：canon()(含簡→繁折字)、to_traditional()(地名常用字查表,非 OpenCC)、region_matches()、parse_address_components()(city/district 皆折繁)
 │   ├── places.py        # Google Places (New) 整合：search_text(query)→dict|None、maps_url(place_id)→str、fetch_reviews(place_id)→list、caution_for_place_id(place_id)→str(低星評論 AI 雷點摘要)、recommended_for_place_id(place_id)→str(評論萃取推薦菜)、fetch_place_photo(place_id)→(bytes,ext)|None(抓一張 Google 照片)
-│   ├── photos.py        # 店家照片庫：檔案存 media/food/<id>/、DB(food_photos) 只記相對路徑。add_photo()/list_photos()/photos_by_place()(批次防 N+1)/delete_photo()
+│   ├── photos.py        # 店家照片庫：檔案存 media/food/<id>/、DB(food_photos) 只記相對路徑。add_photo()/list_photos()/photos_by_place()(批次防 N+1,回 {id,url,source})/delete_photo()/delete_files_for_place()
 │   ├── enrich.py        # 店家自動補強 orchestrator：enrich_place()(推薦菜空才補、google 照片沒有才抓,idempotent)、backfill_all(max_api_calls=200)(一次性補全部,docker exec 跑;API 呼叫預算超過即停,重跑自動接續)
 │   ├── links.py         # URL 偵測 + 平台判斷（純函式，無 I/O）：find_urls()、classify_platform()(youtube/instagram/threads/tiktok/facebook/gmaps/other,子網域邊界比對防釣魚)、strip_urls()、detect_links()、first_link()
 │   ├── extract.py       # 截圖/文字/連結 → 欄位 JSON：parse_extracted_json()(純函式)、from_image()(Gemini Vision)、from_text()(codex)、parse_video_id()(YouTube 11 碼 ID,純函式)、gmaps_place_name()(Google Maps URL path 解店名,純函式)、parse_og()(HTML body 抽 og:title/description,純函式)、from_url(url, platform)(I/O wrapper,yt-dlp 主 + og fetch 備援,Maps follow redirect→gmaps_place_name；og fetch 用 facebookexternalhit UA 才拿得到 Threads/Meta 平台 og 標籤)、deep_extract_via_codex()(全 access codex CLI 深度振查,看圖+搜尋交叉驗證,前兩層抽不到店名才動用)。**SSRF 守門 `_is_safe_fetch_url`**:`_http_get` 與 `deep_extract_via_codex` 入口都先過它,只放行公網 http(s),擋掉 file://、非 http(s) scheme、localhost/127.x/169.254(metadata)/10.x/192.168.x 等內網位址(防被誘導抓內網或讓 full-access codex 被指向 localhost)。三個 prompt(_TEXT_PROMPT/_IMAGE_PROMPT/_DEEP_PROMPT)精準區分 recommended_items(文中明確稱讚/必點/招牌的具體菜名,例:歐巴豬五花) vs cuisine_type(店家主要販售的料理類型,例:拉麵/咖啡/早午餐),避免把料理類別誤塞進推薦欄 + `parse_place_list`（一次 codex 批解析）
@@ -58,7 +58,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── __init__.py
 │   ├── report.py        # 報表 API：/api/report/monthly|category|summary|ledger + /report 頁面（year/month Query ge/le 驗證,違規回 422）
 │   ├── record.py        # CRUD API：POST/PUT/DELETE /api/record（供網頁報表使用）
-│   ├── food_map.py      # 美食地圖：GET /food/map(HTML,自驗 token,注入 browser key/mapId) + GET /api/food/places(JSON,Depends token,每家帶 photos 陣列)
+│   ├── food_map.py      # 美食地圖：GET /food/map(舊 HTML 頁) + GET /api/food/places(每家帶 photos [{id,url,source}]) + PWA 寫操作：POST .../{id}/visited(評分1-5/心得,超範圍當沒給)、POST .../{id}/photos(multipart,5MB/張,10張/店,Content-Type 白名單)、DELETE /api/food/photos/{id}
 │   └── device.py        # POST /api/device-token：用「有效短效 token」換發長效裝置 token（只收短效,洩漏的裝置 token 無法自我繁殖）。前端 api.js ensureAuth 換發後存 localStorage、清掉網址 token,之後走 X-Device-Token header
 ├── frontend/            # 手機版 PWA（React+Vite+vite-plugin-pwa）：三 tab 殼(地圖/消費/食譜)、美食地圖已實裝。manifest+SW(autoUpdate;API NetworkFirst、media CacheFirst)、icons 在 public/。build:`cd frontend && npm run build`(script 內含 NODE_OPTIONS webcrypto flag,Node 18 需要)→ dist/ 由 main.py 掛 /m/（目錄不存在自動跳過;.webmanifest MIME 已註冊）。node_modules/dist/.env(VITE_* 金鑰) 不入版控
 ├── media/               # 使用者/Google 店家照片（.gitignore 只留 .gitkeep）；main.py 掛 /media/

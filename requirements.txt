@@ -11,3 +11,4 @@ aiohttp
 playwright
 pytest
 yt-dlp
+httpx

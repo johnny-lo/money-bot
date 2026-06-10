@@ -22,7 +22,7 @@ export default function FoodList({ places, onSelect }) {
         <button key={p.id} className="card" onClick={() => onSelect(p)}>
           <div className="card-thumb">
             {p.photos && p.photos.length
-              ? <img src={p.photos[0]} alt="" loading="lazy" />
+              ? <img src={p.photos[0].url} alt="" loading="lazy" />
               : iconFor(p)}
           </div>
           <div className="card-body">

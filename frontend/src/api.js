@@ -39,7 +39,7 @@ export async function ensureAuth() {
   return { device: '', short }
 }
 
-async function authedFetch(path) {
+async function authedFetch(path, { method = 'GET', body = null, json = null } = {}) {
   const { device, short } = await ensureAuth()
   if (!device && !short) {
     throw new Error('沒有有效憑證，請回 Discord 用 /美食地圖 重新開啟一次。')
@@ -50,7 +50,14 @@ async function authedFetch(path) {
   if (device) headers['X-Device-Token'] = device
   else url += (path.includes('?') ? '&' : '?') + 'token=' + short
 
-  const res = await fetch(url, { headers })
+  // json 給一般寫操作；body（FormData）給檔案上傳——FormData 不能自己設 Content-Type，
+  // 要讓瀏覽器帶 multipart boundary
+  if (json !== null) {
+    headers['Content-Type'] = 'application/json'
+    body = JSON.stringify(json)
+  }
+
+  const res = await fetch(url, { method, headers, body })
 
   // 裝置 token 被撤銷/DB 清掉 → 清掉重來，下次用新邀請函自動再換發
   if (res.status === 401 && device) {
@@ -74,4 +81,24 @@ async function authedFetch(path) {
 // 拿全部店家（一次抓完，篩選在前端做 → 切 filter 是瞬間的，不用再連線）
 export async function getPlaces() {
   return authedFetch('/api/food/places')
+}
+
+// 標去過（可帶評分 1-5 / 一句心得）。回 {place}。
+export async function markVisited(placeId, rating, note) {
+  return authedFetch(`/api/food/places/${placeId}/visited`, {
+    method: 'POST',
+    json: { rating: rating || null, note: note || null },
+  })
+}
+
+// 上傳一張店家照片。回 {photo: {id,url,source}}。
+export async function uploadPhoto(placeId, file) {
+  const form = new FormData()
+  form.append('file', file)
+  return authedFetch(`/api/food/places/${placeId}/photos`, { method: 'POST', body: form })
+}
+
+// 刪一張照片。
+export async function deletePhoto(photoId) {
+  return authedFetch(`/api/food/photos/${photoId}`, { method: 'DELETE' })
 }

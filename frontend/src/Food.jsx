@@ -26,6 +26,20 @@ export default function Food() {
       .catch((e) => setError(String(e.message || e)))
   }, [])
 
+  // 寫操作（去過/照片）完成後重抓，並讓打開中的詳情面板同步顯示新狀態
+  async function reload(keepSelectedId) {
+    try {
+      const data = await getPlaces()
+      const fresh = data.places || []
+      setPlaces(fresh)
+      if (keepSelectedId != null) {
+        setSelected(fresh.find((p) => p.id === keepSelectedId) || null)
+      }
+    } catch (e) {
+      setError(String(e.message || e))
+    }
+  }
+
   // 資料裡實際有哪些縣市（給下拉選單用）
   const cities = [...new Set(places.map((p) => p.city).filter(Boolean))]
 
@@ -79,7 +93,7 @@ export default function Food() {
         <FoodMap places={shown} selected={selected} onSelect={setSelected} />
       )}
 
-      <PlaceSheet place={selected} onClose={() => setSelected(null)} />
+      <PlaceSheet place={selected} onClose={() => setSelected(null)} onChanged={reload} />
     </div>
   )
 }

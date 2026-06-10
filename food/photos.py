@@ -62,13 +62,18 @@ def list_photos(food_place_id: int) -> list[dict]:
 
 
 def photos_by_place() -> dict:
-    """一次撈全部,分組成 {place_id: [url,...]}（給清單 API 批次帶上,避免 N+1）。"""
+    """一次撈全部,分組成 {place_id: [{id,url,source},...]}（給清單 API 批次帶上,避免 N+1）。
+
+    帶 id 讓前端能刪、帶 source 讓前端標「📸 自己拍 / 🔍 Google 的」。
+    """
     db = SessionLocal()
     try:
         rows = db.query(FoodPhoto).order_by(FoodPhoto.created_at).all()
         out: dict = {}
         for r in rows:
-            out.setdefault(r.food_place_id, []).append(_url(r.path))
+            out.setdefault(r.food_place_id, []).append(
+                {"id": r.id, "url": _url(r.path), "source": r.source}
+            )
         return out
     finally:
         db.close()

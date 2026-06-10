@@ -161,3 +161,27 @@ body {
   background: var(--brand); color: #fff; text-decoration: none;
   padding: 10px 18px; border-radius: 10px; font-size: 1rem;
 }
+
+/* ── 詳情面板：寫操作（去過/評分/照片）── */
+.photo-wrap { position: relative; flex: 0 0 auto; scroll-snap-align: start; }
+.photo-wrap img { height: 160px; border-radius: 12px; object-fit: cover; display: block; }
+.photo-src {
+  position: absolute; left: 6px; bottom: 6px;
+  font-size: 0.8rem; background: rgba(0,0,0,.45); border-radius: 8px; padding: 1px 5px;
+}
+.photo-del {
+  position: absolute; top: 6px; right: 6px;
+  width: 24px; height: 24px; border: none; border-radius: 50%;
+  background: rgba(0,0,0,.55); color: #fff; font-size: 0.8rem; line-height: 1;
+}
+.visited-form { margin-top: 10px; }
+.stars { display: flex; gap: 4px; margin-bottom: 10px; }
+.stars button {
+  font-size: 1.8rem; line-height: 1; border: none; background: none;
+  color: var(--brand); padding: 4px;   /* 大點擊區，拇指好按 */
+}
+.note-input {
+  width: 100%; padding: 10px 12px; margin-bottom: 10px;
+  border: 1px solid #ddd; border-radius: 10px; font-size: 1rem;
+}
+.sheet-err { color: #c0392b; }
