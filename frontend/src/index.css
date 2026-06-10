@@ -69,9 +69,12 @@ body {
 .card-thumb {
   flex: 0 0 64px; width: 64px; height: 64px; border-radius: 10px;
   background: #f3f3f3; display: flex; align-items: center; justify-content: center;
-  font-size: 1.8rem; overflow: hidden;
+  font-size: 1.8rem; overflow: hidden; position: relative;
 }
-.card-thumb img { width: 100%; height: 100%; object-fit: cover; }
+/* 照片疊在 emoji 上面：載入完成才蓋住、失敗(onError 移除)就露出 emoji */
+.card-thumb img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+}
 .card-body { flex: 1; min-width: 0; }
 .card-title { font-size: 1.05rem; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 .card-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

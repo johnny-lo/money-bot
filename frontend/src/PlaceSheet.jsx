@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { markVisited, uploadPhoto, deletePhoto } from './api'
+import { shrinkImage } from './image'
 
 // 照片來源標示：自己拍的才是回憶，Google 圖只是補位
 const SRC_BADGE = { app: '📸', bot: '🤖', google: '🔍' }
@@ -52,7 +53,7 @@ export default function PlaceSheet({ place, onClose, onChanged }) {
   const onPickFile = (e) => {
     const file = e.target.files?.[0]
     e.target.value = ''   // 清掉，讓同一張圖能再選一次
-    if (file) run(() => uploadPhoto(placeId, file))
+    if (file) run(async () => uploadPhoto(placeId, await shrinkImage(file)))
   }
 
   const removePhoto = (photo) => {

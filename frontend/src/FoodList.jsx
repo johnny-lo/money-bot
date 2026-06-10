@@ -20,10 +20,13 @@ export default function FoodList({ places, onSelect }) {
     <div className="food-list">
       {places.map((p) => (
         <button key={p.id} className="card" onClick={() => onSelect(p)}>
+          {/* emoji 永遠墊底：照片還在載=先看到 emoji；載入失敗=img 自移除、emoji 留下 */}
           <div className="card-thumb">
-            {p.photos && p.photos.length
-              ? <img src={p.photos[0].url} alt="" loading="lazy" />
-              : iconFor(p)}
+            <span className="thumb-icon">{iconFor(p)}</span>
+            {p.photos && p.photos.length > 0 && (
+              <img src={p.photos[0].url} alt="" loading="lazy"
+                   onError={(e) => e.currentTarget.remove()} />
+            )}
           </div>
           <div className="card-body">
             <div className="card-title">
