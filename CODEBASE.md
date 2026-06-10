@@ -14,7 +14,13 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── main.py              # 入口：FastAPI app 建立、DB 初始化、APScheduler 排程、Discord Bot 啟動
 ├── core.py              # 核心業務邏輯：文字指令解析/處理、圖片記帳、訊息路由 + Data API（Discord embeds 用）
 ├── line_handler.py      # LINE Bot：webhook /callback、文字/圖片訊息事件處理（純文字介面）
-├── discord_handler.py   # Discord Bot：21 個 Slash Commands + Embeds、圖片附件 on_message 處理
+├── discordbot/          # Discord Bot package（原 discord_handler.py 拆分，邏輯不變；不能叫 discord 會遮蔽套件）
+│   ├── bot.py           # MoneyBot client：on_message 頻道分流、on_raw_reaction_add(✅ 標去過)、create_discord_bot
+│   ├── commands.py      # 28 個 slash commands 註冊（記帳/查詢/固定收支/美食/食譜/測試報表）；BASE_URL 在此
+│   ├── embeds.py        # 全部 embed builders + 顏色常數 + fmt_money/fmt_dt（純呈現層）
+│   ├── ingest_handlers.py # 美食/食譜/圖片記帳的 on_message 處理（handle_food_message/handle_recipe_message/do_image_recording）
+│   ├── reports.py       # 週報/月報/發票通知：_query_period 彙總 + _generate_ai_comment + notify_*
+│   └── bridge.py        # sync→async 橋接：set_bot/post_embeds_sync（排程 thread 投遞 embeds）
 ├── gemini.py            # Gemini API 封裝：gemini_image()（影像辨識：拍照記帳、CAPTCHA，用 MODEL_NAME）、gemini_text()（保留作後備）、generate_persona_comment()（木須龍記帳評論，走 Gemini 文字）
 ├── codex_cli.py         # codex_text(prompt)：shell 出去呼叫本機 `codex exec`（ChatGPT 訂閱制，預設 gpt-5.5），用 --output-last-message 取乾淨輸出。供「分類 + 週/月報評語」的文字生成用，取代計費的 Gemini 文字 API（CODEX_MODEL env 可覆蓋模型）
 ├── database.py          # SQLAlchemy engine/SessionLocal/Base 建立（讀 DATABASE_URL）
@@ -77,7 +83,7 @@ main.py 啟動時自動 `CREATE TABLE` + 檢查/補上 category / invoice_no 欄
 
 ```
 LINE/Discord 訊息
-  → line_handler.py / discord_handler.py
+  → line_handler.py / discordbot/bot.py
     → core.process_text_message(msg)  # 文字指令路由
     → core.handle_image(bytes)        # 圖片記帳
       → gemini.py (AI 呼叫)
@@ -154,7 +160,7 @@ LINE/Discord 訊息
   - LINE 用 `core.handle_*()` 系列 → 回 `list[str]`（既有純文字風格）
   - Discord 用 `core.*_data()` 系列 → 回 `dict` / `list[dict]`（給 embed builder 組卡片）
 
-## Discord Bot Architecture (discord_handler.py)
+## Discord Bot Architecture (discordbot/ package)
 
 - **MoneyBot(discord.Client)** + `app_commands.CommandTree`
 - 27 個 slash commands 全用中文名稱（`/記帳`, `/查詢`, `/最近`, `/測試週報`, `/測試月報`, `/美食新增`, `/美食推薦`, `/美食清單`, `/去過`, `/美食地圖`, `/美食刪除`, `/隨機食譜`, `/食譜清單`, `/食譜刪除` 等）
@@ -191,6 +197,6 @@ BASE_URL (對外網址，報表/地圖連結用；未設=ngrok 保留域名), LI
   - Phase 1A（slash）：`/美食新增`、`/美食推薦`（含🎲隨機）、`/美食清單`、`/去過`，手動建清單 + 縣市/國家推薦
   - Phase 1B（自動）：`#美食輸入` 頻道丟截圖/文字 → `food.ingest`（extract → Places 正規化 → upsert → 低星負評 AI 雷點摘要 best-effort）→ 卡片；抽不到走 `food.pending` reply 補件；✅ 反應標去過
   - Phase 2（地圖網頁）：`/美食地圖` → token 連結 → `routes/food_map.py` + `templates/food_map.html`，Google Maps JS、想去藍/去過綠 AdvancedMarker、點 pin InfoWindow（含雷點）、想去/去過 toggle。`food.map_data.build_map_places` 整形、過濾無座標。browser key 限 ngrok referrer
-  - Phase 3（連結來源）：`#美食輸入` 貼 IG/YouTube/TikTok/Threads/Facebook/Google Maps/一般網站連結 → `food.links` 偵測 + 平台分類 → `food.extract.from_url` 抽 blob（**yt-dlp `--skip-download` 主力**抽 caption/title/description；Threads/一般網站走 og fetch + `facebookexternalhit` UA；Google Maps follow redirect → 直接解 URL path 店名）→ codex `from_text` 解店名/地區 → 抽不到再 `deep_extract_via_codex`（全 access、看圖+搜尋交叉驗證）→ `_from_fields` 入庫。`discord_handler._handle_food_message` 在純文字 ingest **之前**插入連結分流，多連結用 `asyncio.gather` + `asyncio.to_thread` **平行處理一次多家入庫**；抽不到店名（常見於 Threads/FB 店名在圖不在文字）→ 走 `pending` 補件卡（reply 補店名最快）
+  - Phase 3（連結來源）：`#美食輸入` 貼 IG/YouTube/TikTok/Threads/Facebook/Google Maps/一般網站連結 → `food.links` 偵測 + 平台分類 → `food.extract.from_url` 抽 blob（**yt-dlp `--skip-download` 主力**抽 caption/title/description；Threads/一般網站走 og fetch + `facebookexternalhit` UA；Google Maps follow redirect → 直接解 URL path 店名）→ codex `from_text` 解店名/地區 → 抽不到再 `deep_extract_via_codex`（全 access、看圖+搜尋交叉驗證）→ `_from_fields` 入庫。`discordbot.ingest_handlers.handle_food_message` 在純文字 ingest **之前**插入連結分流，多連結用 `asyncio.gather` + `asyncio.to_thread` **平行處理一次多家入庫**；抽不到店名（常見於 Threads/FB 店名在圖不在文字）→ 走 `pending` 補件卡（reply 補店名最快）
   - 設計見 `docs/superpowers/specs/2026-05-23-food-map-module-design.md`
   - **關鍵接合點**：`on_message` 依 `FOOD_INGEST_CHANNEL_ID` / `DISCORD_RECORD_CHANNEL_ID` 分流（後者未設則退回舊的任意頻道記帳），避免美食截圖被「拍照記帳」誤記成支出

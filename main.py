@@ -13,7 +13,7 @@ from routes.report import router as report_router
 from routes.record import router as record_router
 from routes.food_map import router as food_map_router
 from line_handler import register_line_routes
-from discord_handler import (
+from discordbot import (
     create_discord_bot,
     notify_invoice_sync,
     notify_monthly_summary,
