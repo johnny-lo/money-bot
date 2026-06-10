@@ -111,3 +111,59 @@ def caution_for_place_id(place_id: str) -> str:
         return codex_text(prompt).strip()[:200]
     except Exception:
         return ""
+
+
+def recommended_for_place_id(place_id: str) -> str:
+    """從評論萃取『大家推薦點什麼』。沒評論/沒提到餐點/失敗皆回空字串。"""
+    from codex_cli import codex_text
+    reviews = fetch_reviews(place_id)
+    lines = []
+    for r in reviews:
+        text = (r.get("text") or {}).get("text") or (r.get("originalText") or {}).get("text") or ""
+        if text:
+            lines.append(text)
+    if not lines:
+        return ""
+    prompt = (
+        "以下是某餐廳的 Google 評論。請歸納『大家最常推薦點的餐點』，"
+        "只回菜名、用頓號(、)分隔、最多 5 樣，不要解釋、不要標題、不要評分；"
+        "評論裡沒提到任何具體餐點就回空字串：\n\n"
+        + "\n\n".join(lines[:5])
+    )
+    try:
+        return codex_text(prompt).strip()[:200]
+    except Exception:
+        return ""
+
+
+_PHOTO_MEDIA_URL = "https://places.googleapis.com/v1/{name}/media"
+
+
+def fetch_place_photo(place_id: str, max_px: int = 800) -> tuple[bytes, str] | None:
+    """抓該店第一張 Google 照片的 bytes。回 (data, 'jpg') 或 None。"""
+    key = os.getenv("GOOGLE_PLACES_SERVER_KEY")
+    if not key or not place_id:
+        return None
+    try:
+        # 1) 先拿 photo 的 resource name（field mask = photos）
+        req = urllib.request.Request(
+            _DETAILS_URL.format(place_id=place_id), method="GET",
+            headers={"X-Goog-Api-Key": key, "X-Goog-FieldMask": "photos"},
+        )
+        with urllib.request.urlopen(req, timeout=20) as r:
+            data = json.loads(r.read())
+        photos = data.get("photos") or []
+        name = (photos[0].get("name") if photos else None)
+        if not name:
+            return None
+        # 2) 下載實際照片 bytes（media endpoint 會轉址到真圖）
+        url = _PHOTO_MEDIA_URL.format(name=name) + \
+            f"?maxHeightPx={max_px}&key={urllib.parse.quote(key)}"
+        with urllib.request.urlopen(url, timeout=30) as r:
+            data = r.read()
+            ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        ext = {"image/jpeg": "jpg", "image/png": "png",
+               "image/webp": "webp", "image/gif": "gif"}.get(ctype, "jpg")
+        return data, ext
+    except Exception:
+        return None

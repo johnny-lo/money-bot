@@ -59,6 +59,6 @@ def test_output_fields_and_empty():
          "my_note": "讚", "address": "台北市", "caution_summary": "雷"},
     ])
     assert set(out[0].keys()) == {
-        "id", "name", "status", "visited", "lat", "lng", "cuisine_type",
+        "id", "name", "status", "visited", "lat", "lng", "city", "place_id", "cuisine_type",
         "recommended_items", "my_rating", "my_note", "address", "caution_summary", "maps_url",
     }

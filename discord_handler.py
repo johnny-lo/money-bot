@@ -860,7 +860,7 @@ class MoneyBot(discord.Client):
         @tree.command(name="美食地圖", description="開啟想去/去過的美食地圖")
         async def cmd_food_map(ix: discord.Interaction):
             token = generate_report_token(str(ix.user.id))
-            url = f"{BASE_URL}/food/map?token={token}"
+            url = f"{BASE_URL}/m/?token={token}"
             await ix.response.send_message(embed=food_map_embed(url))
 
         @tree.command(name="隨機食譜", description="從收錄的食譜裡隨機抽一道")

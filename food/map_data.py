@@ -22,6 +22,8 @@ def build_map_places(places: list[dict]) -> list[dict]:
             "name": p.get("name"),
             "status": p.get("status"),
             "visited": p.get("status") == "去過",
+            "city": p.get("city"),
+            "place_id": place_id,
             "lat": lat,
             "lng": lng,
             "cuisine_type": p.get("cuisine_type"),

@@ -6,15 +6,20 @@ from fastapi.responses import HTMLResponse
 from auth import validate_report_token, require_token
 from food.repo import list_places
 from food.map_data import build_map_places
+from food.photos import photos_by_place
 
 router = APIRouter()
 
 
 @router.get("/api/food/places", dependencies=[Depends(require_token)])
 def api_food_places(status: str = Query(None)):
-    """回傳地圖用的店家清單。status 選填（想去/去過），省略=全部。"""
+    """回傳店家清單（每家帶上自己的照片）。status 選填（想去/去過），省略=全部。"""
     s = status if status in ("想去", "去過") else None
-    return {"places": build_map_places(list_places(s))}
+    places = build_map_places(list_places(s))
+    photos = photos_by_place()  # {place_id: [url,...]} 一次撈,避免 N+1
+    for p in places:
+        p["photos"] = photos.get(p["id"], [])
+    return {"places": places}
 
 
 @router.get("/food/map", response_class=HTMLResponse)

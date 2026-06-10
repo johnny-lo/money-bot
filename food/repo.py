@@ -113,6 +113,18 @@ def update_caution(food_id: int, caution: str) -> None:
         db.close()
 
 
+def update_recommended(food_id: int, text: str) -> None:
+    """事後補上推薦菜（Google 評論萃取）。"""
+    db = SessionLocal()
+    try:
+        rec = db.query(FoodPlace).filter(FoodPlace.id == food_id).first()
+        if rec is not None:
+            rec.recommended_items = text
+            db.commit()
+    finally:
+        db.close()
+
+
 def set_visited_by_message_id(message_id) -> dict | None:
     """從 Discord 卡片訊息 ID 反查 FoodPlace，標為去過。查無回 None。"""
     db = SessionLocal()

@@ -5,3 +5,7 @@ resource/
 
 # 財務資料快照(備份用,不入版控)
 .backups/
+
+# 使用者上傳的食物照片(只留資料夾,內容不入版控)
+media/*
+!media/.gitkeep

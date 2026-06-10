@@ -73,3 +73,14 @@ class Recipe(Base):
     platform = Column(String, nullable=True)                # youtube/instagram/tiktok/facebook/threads/other（gmaps 在 ingest 被擋,不會入庫）
     discord_message_id = Column(String, nullable=True, index=True)  # 卡片訊息 ID（reply 改名回查）
     created_at = Column(DateTime, default=func.now())
+
+
+class FoodPhoto(Base):
+    """店家照片（一家店多張）：去過=自己拍的食物照。檔案存 media/，這裡只記相對路徑。"""
+    __tablename__ = "food_photos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    food_place_id = Column(Integer, index=True, nullable=False)  # 對應 FoodPlace.id
+    path = Column(String, nullable=False)                        # media 根目錄下的相對路徑
+    source = Column(String, default="app")                       # app / bot（哪條路傳的）
+    created_at = Column(DateTime, default=func.now())
