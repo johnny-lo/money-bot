@@ -15,6 +15,11 @@ export default defineConfig({
     VitePWA({
       // autoUpdate：偵測到新版 build 就背景更新，下次開啟生效（另一選項 prompt = 跳「有新版」讓使用者按）
       registerType: 'autoUpdate',
+      // injectManifest：SW 改用我們自己寫的 src/sw.js（generateSW 的 schema 不給加自訂
+      // fetch header，而 /media 需要帶 ngrok 跳過攔截頁的 header —— 詳見 src/sw.js）
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.js',
       // public/ 裡不在 manifest icons 清單、但也要進 precache 的檔案
       includeAssets: ['apple-touch-icon.png'],
       manifest: {
@@ -37,32 +42,7 @@ export default defineConfig({
           { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
         ],
       },
-      workbox: {
-        // 離線時的導覽 fallback：使用者在離線狀態開 /m/ → 回快取的 app 殼
-        navigateFallback: '/m/index.html',
-        runtimeCaching: [
-          {
-            // API 走 NetworkFirst：先打網路（5 秒沒回應或離線 → 退回上次快取的結果）
-            // → 離線時還看得到「上次載入的美食清單」
-            urlPattern: /\/api\/.*/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api',
-              networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 50, maxAgeSeconds: 24 * 60 * 60 },
-            },
-          },
-          {
-            // 店家照片走 CacheFirst：圖片內容不會變（檔名是 uuid），抓過一次就用快取
-            urlPattern: /\/media\/.*/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'media',
-              expiration: { maxEntries: 200, maxAgeSeconds: 30 * 24 * 60 * 60 },
-            },
-          },
-        ],
-      },
+      // 快取策略（precache / API NetworkFirst / media CacheFirst+header）全在 src/sw.js
     }),
   ],
   server: {
