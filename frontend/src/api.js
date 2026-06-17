@@ -138,3 +138,25 @@ export async function renameRecipe(id, name) {
 export async function deleteRecipe(id) {
   return authedFetch(`/api/recipes/${id}`, { method: 'DELETE' })
 }
+
+// ── 歷史影片 ─────────────────────────────────────────────────
+
+export async function getVideos() {
+  return authedFetch('/api/videos')
+}
+
+export async function updateVideo(id, payload) {
+  return authedFetch(`/api/videos/${id}`, { method: 'PUT', json: payload })
+}
+
+export async function addVideoTag(id, tag) {
+  return authedFetch(`/api/videos/${id}/tags`, { method: 'POST', json: { tag } })
+}
+
+export async function removeVideoTag(id, tag) {
+  return authedFetch(`/api/videos/${id}/tags/${encodeURIComponent(tag)}`, { method: 'DELETE' })
+}
+
+export async function deleteVideo(id) {
+  return authedFetch(`/api/videos/${id}`, { method: 'DELETE' })
+}

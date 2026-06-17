@@ -2,12 +2,14 @@ import { useState } from 'react'
 import Food from './Food.jsx'
 import Spend from './Spend.jsx'
 import Recipe from './Recipe.jsx'
+import Videos from './Videos.jsx'
 
-// 底部三個分頁。先用陣列定義，下面用 .map() 一次畫出來。
+// 底部分頁。先用陣列定義，下面用 .map() 一次畫出來。
 const TABS = [
   { key: 'map', icon: '🍜', label: '美食' },
   { key: 'spend', icon: '💰', label: '消費' },
   { key: 'recipe', icon: '🍳', label: '食譜' },
+  { key: 'video', icon: '🎥', label: '歷史' },
 ]
 
 export default function App() {
@@ -22,6 +24,7 @@ export default function App() {
         {tab === 'map' && <Food />}
         {tab === 'spend' && <Spend />}
         {tab === 'recipe' && <Recipe />}
+        {tab === 'video' && <Videos />}
       </main>
 
       {/* 底部分頁列：拇指區。用 .map() 把 TABS 畫成三顆按鈕。 */}
