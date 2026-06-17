@@ -99,3 +99,27 @@ class FoodPhoto(Base):
     path = Column(String, nullable=False)                        # media 根目錄下的相對路徑
     source = Column(String, default="app")                       # app / bot（哪條路傳的）
     created_at = Column(DateTime, default=func.now())
+
+
+class HistoryVideo(Base):
+    """歷史教學影片：一支影片 + 一個連結。topic=主分類書架（一支一個）。"""
+    __tablename__ = "history_videos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, index=True)                      # yt-dlp 標題，LLM 清乾淨；可被 reply 改名
+    url = Column(String, unique=True, index=True)           # 原始連結（去重鍵）
+    topic = Column(String, nullable=True, index=True)       # 主分類/書架
+    channel = Column(String, nullable=True)                 # 講師/頻道名（yt-dlp uploader）
+    platform = Column(String, nullable=True)                # youtube / other …
+    discord_message_id = Column(String, nullable=True, index=True)  # 卡片訊息 ID（reply 編輯回查）
+    created_at = Column(DateTime, default=func.now())
+
+
+class VideoTag(Base):
+    """影片標籤（去正規化多對多）：一支影片多個標籤，標籤直接存字串。"""
+    __tablename__ = "video_tags"
+
+    id = Column(Integer, primary_key=True, index=True)
+    video_id = Column(Integer, ForeignKey("history_videos.id", ondelete="CASCADE"),
+                      index=True, nullable=False)            # 刪影片時 DB 列自動清
+    tag = Column(String, index=True, nullable=False)
