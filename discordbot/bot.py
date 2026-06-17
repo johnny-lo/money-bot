@@ -47,6 +47,12 @@ class MoneyBot(discord.Client):
             await ingest_handlers.handle_recipe_message(message)
             return
 
+        # ── 1.6) 歷史影片頻道：reply 編輯 / 連結 ingest / help ──────
+        video_chan = os.getenv("HISTORY_VIDEO_INGEST_CHANNEL_ID") or ""
+        if video_chan and ch_id == video_chan:
+            await ingest_handlers.handle_video_message(message)
+            return
+
         # ── 2) 圖片附件分流 ───────────────────────────────────────
         if message.attachments:
             images = [a for a in message.attachments

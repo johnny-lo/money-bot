@@ -12,6 +12,7 @@ from .embeds import (
     persona_embed, error_embed, image_recorded_embed,
     food_place_embed, food_missing_embed, food_batch_summary_embed,
     recipe_card_embed, recipe_missing_embed,
+    video_card_embed, video_help_embed, video_missing_embed,
 )
 
 
@@ -217,3 +218,63 @@ async def handle_recipe_message(message: discord.Message):
 
     # ── 無連結、非 reply（純文字 / 純圖片）→ 回提示，不建檔 ──
     await message.channel.send("這個頻道請丟食譜連結 🍳")
+
+
+async def _send_video_card(channel, v: dict, *, created: bool) -> None:
+    """送出影片卡片並記下訊息 ID（給 reply 編輯回查）。"""
+    from video import repo as video_repo
+    sent = await channel.send(embed=video_card_embed(v, created=created))
+    video_repo.set_message_id(v["id"], sent.id)
+
+
+async def handle_video_message(message: discord.Message):
+    from video import ingest as video_ingest, repo as video_repo
+    from video.commands import parse_reply_command
+
+    # ── reply：編輯既有卡片（改名 / 設主題 / 加刪標籤）──
+    ref = getattr(message, "reference", None)
+    if ref and ref.message_id:
+        existing = video_repo.get_by_message_id(ref.message_id)
+        if not existing:
+            await message.channel.send("這張卡片過期了，或重貼連結就好 🎥")
+            return
+        cmd = parse_reply_command(message.content or "")
+        if cmd["mode"] == "rename":
+            video_repo.rename(existing["id"], cmd["title"])
+        elif cmd["mode"] == "edit":
+            if cmd["topic"] is not None:
+                video_repo.set_topic(existing["id"], cmd["topic"])
+            for t in cmd["remove"]:
+                video_repo.remove_tag(existing["id"], t)
+            for t in cmd["add"]:
+                video_repo.add_tag(existing["id"], t)
+        else:  # noop
+            await message.channel.send(embed=video_help_embed())
+            return
+        updated = video_repo.get(existing["id"])
+        await _send_video_card(message.channel, updated, created=False)
+        return
+
+    # ── 連結 ingest（一連結一卡，多連結平行）──
+    links = detect_links(message.content or "")
+    if links:
+        caption = strip_urls(message.content or "")
+        async with message.channel.typing():
+            results = await asyncio.gather(
+                *[asyncio.to_thread(video_ingest.from_url, lk["url"], caption=caption)
+                  for lk in links],
+                return_exceptions=True,
+            )
+            for lk, res in zip(links, results):
+                if isinstance(res, Exception):
+                    v, reason = None, f"處理失敗：{res}"
+                else:
+                    v, reason = res
+                if v:
+                    await _send_video_card(message.channel, v, created=v.get("_created", True))
+                else:
+                    await message.channel.send(embed=video_missing_embed(reason))
+        return
+
+    # ── help / ? / 純文字 → 發小抄（越笨越好）──
+    await message.channel.send(embed=video_help_embed())

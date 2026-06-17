@@ -10,6 +10,7 @@ COLOR_PERSONA = 0x9B59B6   # 紫（木須龍）
 COLOR_WARN    = 0xF1C40F   # 黃
 COLOR_FOOD    = 0xE67E22   # 美食橘
 COLOR_RECIPE  = 0x16A085   # 食譜青綠
+COLOR_VIDEO   = 0x8E44AD   # 歷史影片紫
 
 
 def fmt_money(n: int) -> str:
@@ -350,6 +351,32 @@ def help_embed() -> discord.Embed:
         "`/抓發票 [天數]` — 同步電子發票\n"
         "`/說明` — 顯示這份說明"
     )
+    return e
+
+
+def video_card_embed(v: dict, *, created: bool = True) -> discord.Embed:
+    from video.commands import CHEAT_SHEET
+    title = (f"🎥 已收錄：{v['title']}" if created else f"🎥 你已收錄過：{v['title']}")
+    e = discord.Embed(title=title, color=COLOR_VIDEO)
+    e.add_field(name="📚 主題", value=v.get("topic") or "（未分類）", inline=True)
+    e.add_field(name="編號", value=f"#{v['id']}", inline=True)
+    tags = v.get("tags") or []
+    if tags:
+        e.add_field(name="🏷️ 標籤", value="、".join(tags), inline=False)
+    if v.get("url"):
+        e.add_field(name="連結", value=v["url"], inline=False)
+    e.add_field(name="✏️ 怎麼整理", value=CHEAT_SHEET, inline=False)
+    return e
+
+
+def video_help_embed() -> discord.Embed:
+    from video.commands import CHEAT_SHEET
+    return discord.Embed(title="🎥 歷史影片：怎麼用", description=CHEAT_SHEET, color=COLOR_VIDEO)
+
+
+def video_missing_embed(reason: str) -> discord.Embed:
+    e = discord.Embed(title="⚠️ 沒收進來", description=reason or "抽不到影片資訊", color=COLOR_WARN)
+    e.set_footer(text="🔁 重貼連結，或 reply 這張卡片給我新標題")
     return e
 
 
