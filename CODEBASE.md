@@ -51,6 +51,12 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── extract.py       # blob/文字→乾淨菜名：parse_name_json 純函式 + name_from_text codex
 │   ├── repo.py          # Recipe DB 存取：add_recipe url 去重+IntegrityError 防護 / list / pick_random / delete / rename / set_message_id / get_by_message_id
 │   └── ingest.py        # 連結→菜名→入庫 orchestrator：gmaps 略過 + None/空白-blob guard
+├── video/               # 歷史教學影片（連結收集器；複用 food.extract yt-dlp）
+│   ├── __init__.py
+│   ├── extract.py       # 純函式：parse_video_meta(LLM JSON→{topic,tags},安全降級) + meta_from_text codex + youtube_thumbnail(複用 food.extract.parse_video_id)
+│   ├── commands.py      # 純函式 parse_reply_command（#主題/+標籤/-標籤/改標題/noop）+ CHEAT_SHEET 小抄文字（卡片 footer 與 help 共用單一真相）
+│   ├── repo.py          # HistoryVideo+VideoTag DB 存取：add_video url 去重 / list_videos(附 tags) / rename / set_topic / add_tag(冪等)/remove_tag / tags_by_video(批次防 N+1) / delete / set_message_id / get_by_message_id
+│   └── ingest.py        # 連結→{topic,tags}+標題→入庫+掛標籤 orchestrator：AI 失敗不擋入庫(標題退 blob 第一行)
 ├── requirements.txt     # Python 依賴
 ├── Dockerfile           # python:3.11-slim，pip install → uvicorn 啟動
 ├── docker-compose.yml   # 三個服務：app(127.0.0.1:8000)、db(PostgreSQL，僅 docker network；帳密可由 .env POSTGRES_* 覆蓋,預設沿用舊值)、ngrok(127.0.0.1:4040 inspector + tunnel)
@@ -60,8 +66,9 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── record.py        # CRUD API：POST/PUT/DELETE /api/record（供網頁報表使用）
 │   ├── food_map.py      # 美食地圖：GET /food/map(舊 HTML 頁) + GET /api/food/places(每家帶 photos [{id,url,source}]) + PWA 寫操作：POST .../{id}/visited(評分1-5/心得,超範圍當沒給)、POST .../{id}/photos(multipart,5MB/張,10張/店,Content-Type 白名單)、DELETE /api/food/photos/{id}
 │   ├── recipes.py       # 食譜 JSON API（PWA 用）：GET /api/recipes、PUT /api/recipes/{id}(改名,空白名 422)、DELETE /api/recipes/{id}。新增仍走 Discord（要連結抽取 pipeline）；隨機抽在前端做
+│   ├── videos.py        # 影片 JSON API（PWA 🎥 用）：GET /api/videos(附 tags+thumbnail) / PUT /api/videos/{id}(改標題或設主題,空白名 422) / POST .../{id}/tags(加標籤) / DELETE .../{id}/tags/{tag}(刪標籤) / DELETE .../{id}。新增走 Discord
 │   └── device.py        # POST /api/device-token：用「有效短效 token」換發長效裝置 token（只收短效,洩漏的裝置 token 無法自我繁殖）。前端 api.js ensureAuth 換發後存 localStorage、清掉網址 token,之後走 X-Device-Token header
-├── frontend/            # 手機版 PWA（React+Vite+vite-plugin-pwa）：**三 tab 全實裝**——美食(Food/FoodList/FoodMap/PlaceSheet)、消費(Spend 吃 /api/report/ledger 整月前端算+RecordSheet CRUD)、食譜(Recipe.jsx 拉霸隨機抽=前端 random+減速動畫,清單/改名/刪除)。manifest+SW(injectManifest 自製 src/sw.js:precache+API NetworkFirst+media CacheFirst-v2 帶 ngrok 跳過 header——img 標籤帶不了 header,SW 重發才繞得過攔截頁)、icons 在 public/。build:`cd frontend && npm run build`(script 內含 NODE_OPTIONS webcrypto flag,Node 18 需要)→ dist/ 由 main.py 掛 /m/（目錄不存在自動跳過;.webmanifest MIME 已註冊）。node_modules/dist/.env(VITE_* 金鑰) 不入版控
+├── frontend/            # 手機版 PWA（React+Vite+vite-plugin-pwa）：**四 tab 全實裝**——美食(Food/FoodList/FoodMap/PlaceSheet)、消費(Spend 吃 /api/report/ledger 整月前端算+RecordSheet CRUD)、食譜(Recipe.jsx 拉霸隨機抽=前端 random+減速動畫,清單/改名/刪除)、歷史(Videos.jsx 主題書架 chips+標籤/關鍵字搜尋,useMemo 衍生過濾,點卡片 sheet 改主題/加刪標籤/開連結/刪除)。manifest+SW(injectManifest 自製 src/sw.js:precache+API NetworkFirst+media CacheFirst-v2 帶 ngrok 跳過 header——img 標籤帶不了 header,SW 重發才繞得過攔截頁)、icons 在 public/。build:`cd frontend && npm run build`(script 內含 NODE_OPTIONS webcrypto flag,Node 18 需要)→ dist/ 由 main.py 掛 /m/（目錄不存在自動跳過;.webmanifest MIME 已註冊）。node_modules/dist/.env(VITE_* 金鑰) 不入版控
 ├── media/               # 使用者/Google 店家照片（.gitignore 只留 .gitkeep）；main.py 掛 /media/
 └── templates/
     ├── report.html      # 互動式報表 SPA：ECharts 圖表 + 流水帳 CRUD（純前端 JS）。品名/分類經 esc() 跳脫再進 innerHTML（防發票品名 stored XSS）,編輯/刪除用 index 回查不塞 JSON 進屬性
@@ -79,6 +86,8 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 | `recipes` | id(PK), name(str), url(str, UNIQUE 去重鍵), discord_message_id(str?, index), created_at | 食譜收錄；url UNIQUE 防重複收錄；discord_message_id 供 reply 卡片更名用 |
 | `device_tokens` | id(PK), token(UNIQUE index), label?, created_at, last_used_at? | PWA 長效裝置 token；撤銷=刪列（auth.revoke_device_token） |
 | `food_photos` | id(PK), food_place_id(FK→food_places.id, ON DELETE CASCADE, index), path(str, media/ 相對路徑), source("app"/"bot"/"google"), created_at | 店家照片；檔案在 media/，DB 只記路徑 |
+| `history_videos` | id(PK), title(str), url(str, UNIQUE 去重鍵), topic(str?, index, 主分類書架), channel(str?, v1 不自動填), platform(str?), discord_message_id(str?, index), created_at | 歷史教學影片；topic=單一書架 |
+| `video_tags` | id(PK), video_id(FK→history_videos.id, ON DELETE CASCADE, index), tag(str, index) | 影片標籤（去正規化多對多）：標籤直接存字串，查=WHERE tag=?、全部=DISTINCT tag |
 
 main.py 啟動時自動 `CREATE TABLE` + 檢查/補上 category / invoice_no 欄位。
 
@@ -170,7 +179,7 @@ LINE/Discord 訊息
 - 每個 command callback 流程：(1) `await ix.response.defer()` 必要時、(2) 呼叫 `core.*_data()`、(3) 用對應 embed builder 組卡片、(4) `ix.followup.send(embeds=...)`
 - 慢 commands（`/記帳`, `/收入`, `/分類`, `/抓發票`）必 defer 避免 3 秒超時
 - 配色：支出 `#E74C3C` / 收入 `#2ECC71` / 查詢 `#3498DB` / 木須龍 `#9B59B6` / 警告 `#F1C40F`
-- 圖片附件走 `on_message`，依頻道分流：`RECIPE_INGEST_CHANNEL_ID` → `_handle_recipe_message()`（連結→食譜入庫 + `_send_recipe_card` reply 卡片；gmaps 連結擋掉）；`FOOD_INGEST_CHANNEL_ID` → `_handle_food_message()`（截圖/文字 ingest、reply 補件）；`DISCORD_RECORD_CHANNEL_ID` → `_do_image_recording()`（圖片記帳）；**未設 RECORD 頻道則退回「任意頻道圖片記帳」舊行為**；其他頻道圖片回指引（`_HINT_DEBOUNCE` 30 分鐘防洗版）。recipe 分支複用 `food.links.classify_platform` / `food.extract.from_url` / `food.pending`；3 個 recipe slash 指令（`/隨機食譜`, `/食譜清單`, `/食譜刪除`）+ 4 個 recipe_*_embed embed builders
+- 圖片附件走 `on_message`，依頻道分流：`RECIPE_INGEST_CHANNEL_ID` → `_handle_recipe_message()`（連結→食譜入庫 + `_send_recipe_card` reply 卡片；gmaps 連結擋掉）；`FOOD_INGEST_CHANNEL_ID` → `_handle_food_message()`（截圖/文字 ingest、reply 補件）；`HISTORY_VIDEO_INGEST_CHANNEL_ID` → `handle_video_message()`（連結→影片入庫+AI 判主題標籤；reply 卡片 `#主題`/`+標籤`/`-標籤`/改標題編輯；help/純文字回小抄）；`DISCORD_RECORD_CHANNEL_ID` → `_do_image_recording()`（圖片記帳）；**未設 RECORD 頻道則退回「任意頻道圖片記帳」舊行為**；其他頻道圖片回指引（`_HINT_DEBOUNCE` 30 分鐘防洗版）。recipe 分支複用 `food.links.classify_platform` / `food.extract.from_url` / `food.pending`；3 個 recipe slash 指令（`/隨機食譜`, `/食譜清單`, `/食譜刪除`）+ 4 個 recipe_*_embed embed builders
 - `on_raw_reaction_add`：在 `#美食輸入` 對店家卡片按 ✅ → `set_visited_by_message_id()` 標去過 + 追問評分/心得
 - **Sync→Async 橋接**：`set_bot()`/`post_embeds_sync()`(discordbot/bridge.py) 讓 APScheduler 排程（同步 thread）能投遞 embeds 到 Discord。原理：把 coroutine 用 `asyncio.run_coroutine_threadsafe(coro, bot.loop)` 排到 bot 的 event loop
 - **頻道結構**（由一次性 setup 腳本建立）：
@@ -188,7 +197,7 @@ LINE/Discord 訊息
 
 ## Environment Variables
 
-BASE_URL (對外網址，報表/地圖連結用；未設=ngrok 保留域名), LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, CODEX_MODEL (optional, 留空=用 codex 預設 gpt-5.5), MONTHLY_BUDGET (optional, 0/不設=不顯示預算進度), DISCORD_BOT_TOKEN (optional), DISCORD_INVOICE_CHANNEL_ID (optional), DISCORD_REPORT_CHANNEL_ID (optional), DISCORD_RECORD_CHANNEL_ID (optional), NGROK_AUTHTOKEN, EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional), GOOGLE_PLACES_SERVER_KEY (美食地圖；後端 Places API New 用), FOOD_INGEST_CHANNEL_ID (美食地圖；#美食輸入 頻道), RECIPE_INGEST_CHANNEL_ID (optional; #🍳-食譜 頻道；未設則食譜分支不啟用，不影響美食/記帳), GOOGLE_MAPS_BROWSER_KEY (美食地圖 Phase 2；前端 Maps JS,限 ngrok referrer), GOOGLE_MAPS_MAP_ID (美食地圖 Phase 2；AdvancedMarker 必需,未申請填 DEMO_MAP_ID)
+BASE_URL (對外網址，報表/地圖連結用；未設=ngrok 保留域名), LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, CODEX_MODEL (optional, 留空=用 codex 預設 gpt-5.5), MONTHLY_BUDGET (optional, 0/不設=不顯示預算進度), DISCORD_BOT_TOKEN (optional), DISCORD_INVOICE_CHANNEL_ID (optional), DISCORD_REPORT_CHANNEL_ID (optional), DISCORD_RECORD_CHANNEL_ID (optional), NGROK_AUTHTOKEN, EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional), GOOGLE_PLACES_SERVER_KEY (美食地圖；後端 Places API New 用), FOOD_INGEST_CHANNEL_ID (美食地圖；#美食輸入 頻道), RECIPE_INGEST_CHANNEL_ID (optional; #🍳-食譜 頻道；未設則食譜分支不啟用，不影響美食/記帳), HISTORY_VIDEO_INGEST_CHANNEL_ID (optional; #📜-歷史教學 頻道；未設則影片分支不啟用), GOOGLE_MAPS_BROWSER_KEY (美食地圖 Phase 2；前端 Maps JS,限 ngrok referrer), GOOGLE_MAPS_MAP_ID (美食地圖 Phase 2；AdvancedMarker 必需,未申請填 DEMO_MAP_ID)
 
 > codex 整合：`codex` CLI 裝在 app 映像內（Dockerfile 用 `npm install -g @openai/codex`，**非獨立 container**），登入憑證以 `docker-compose.yml` 把主機 `${HOME}/.codex` 掛到容器 `/root/.codex`（rw，讓 ChatGPT 訂閱 token 自動刷新可寫回）。`auth_mode=chatgpt`=訂閱制，不走單次計費 API。
 

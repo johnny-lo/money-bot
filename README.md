@@ -44,6 +44,9 @@
 ### 食譜收錄
 食譜收錄 — 把食譜連結丟進 `#🍳-食譜` 頻道，自動抽出乾淨菜名存庫；`/隨機食譜` 解決「今天煮什麼」。同 URL 去重、reply 卡片可改菜名、丟 Google Maps 連結會被擋。
 
+### 歷史教學影片 🎥
+歷史教學影片圖書館 — 把影片連結（YouTube 為主）丟進 `#📜-歷史教學` 頻道：yt-dlp 抓標題、AI 一次判**主題**（單一書架，如「世界史」）＋**標籤**（多個跨切，如「農業／戰爭／制度」）入庫。**三層編輯共用同一個 repo**：① AI 首判 ② Discord 回覆卡片增量微調（`#主題` 設書架、`+標籤`/`-標籤` 加刪、直接打字改標題；每張卡片底部固定附「越笨越好」回覆小抄，打 `help`/`?` 也回小抄）③ PWA 🎥 分頁主力編輯。資料用「主分類 + 去正規化多對多標籤」（`history_videos` + `video_tags`）。同 URL 去重，YouTube 縮圖免費當圖文清單。**PWA 🎥 分頁**：頂部主題書架 chips + 標題/標籤搜尋框，清單卡片帶縮圖，點卡片 → sheet 改主題/加刪標籤/開連結/刪除。
+
 ### AI 功能
 - **Gemini 圖片辨識** — 拍照自動解析消費明細
 - **AI 自動分類** — 每週日 21:00 自動將未分類帳目分類（也可手動觸發 `分類`），走 codex CLI（ChatGPT 訂閱制）。13 細類分 6 大組：
@@ -100,6 +103,7 @@
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | （選填）覆蓋 db 容器帳密；未設沿用預設。注意 postgres 只在 volume 首次初始化時套用密碼 |
 | `FOOD_INGEST_CHANNEL_ID` | 美食輸入頻道 ID（美食地圖；丟截圖/文字自動記店） |
 | `RECIPE_INGEST_CHANNEL_ID` | `#🍳-食譜` 頻道 ID；未設則食譜分支不啟用（不影響美食/記帳） |
+| `HISTORY_VIDEO_INGEST_CHANNEL_ID` | `#📜-歷史教學` 頻道 ID；未設則影片分支不啟用（不影響其他模組） |
 | `GOOGLE_PLACES_SERVER_KEY` | 後端 Google Places API (New) 金鑰（美食店名正規化 / 雷點摘要） |
 | `GOOGLE_MAPS_BROWSER_KEY` | 前端 Google Maps JavaScript API 金鑰（美食地圖網頁；限 ngrok referrer + 只開 Maps JS API） |
 | `GOOGLE_MAPS_MAP_ID` | Google Maps Map ID（AdvancedMarker 必需；未申請填 `DEMO_MAP_ID`，會有浮水印） |
