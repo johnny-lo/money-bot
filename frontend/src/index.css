@@ -141,6 +141,10 @@ body {
      （之前用 absolute，只有 .food 有 position:relative 當錨；消費/歷史的根容器
      沒定位，sheet 改去貼 layout viewport，手機上關閉把手收不乾淨。）*/
   position: fixed; inset: 0; z-index: 10;
+  /* 自己裁掉被 translateY(100%) 推到框外（螢幕底緣以下）的關閉卡片。
+     不能只靠「推到視窗底緣以下＝看不到」——iOS 26+ 的可見區會延伸到底緣以下，
+     沒裁的話關閉的 .sheet-handle 會露出來。overflow:hidden 由 sheet 自己保證藏好。*/
+  overflow: hidden;
   background: rgba(0, 0, 0, 0); pointer-events: none;   /* 預設透明、不可點 */
   transition: background 0.25s ease;
 }

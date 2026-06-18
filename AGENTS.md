@@ -110,13 +110,18 @@
 - **驗證限制**：手機 CSS 算繪**沒有自動化測試**（本 repo 無視覺/DOM 測試框架）→ 改完要**使用者親眼確認**，
   不可擅自宣稱修好（遵守 verification-before-completion）。
 
-### 坑：bottom sheet 關閉時把手露在底部（只有某些分頁）
-- **根因**：`.sheet` 用 `position: absolute`，定位錨是「最近有 position 的祖先」。只有 `.food`
-  有 `position: relative`；`.spend`/`.video` 根容器沒定位 → sheet 改去貼 layout viewport，
-  手機上關閉的 `translateY(100%)` 收不到螢幕外、露出 `.sheet-handle`，看起來像「可往上拉的新增鈕」。
-- **解法**：`.sheet { position: fixed }`（錨定視窗本身，不依賴容器 position/捲動，四分頁一致）。
-  **別**改成「逐一補 `position: relative`」——`.spend`/`.recipe` 本身會捲動，補了 sheet 會跟內容捲走。
-- **教訓**：全螢幕 modal/bottom-sheet 用 `position: fixed`，不要 `absolute` + 靠某個祖先當錨（脆、不一致）。
+### 坑：bottom sheet 關閉時把手露在底部（iOS 26+ 尤其明顯）
+- **錯誤假設**：以為 `.sheet-card { translateY(100%) }`（推到框底緣以下）＝看不到。
+  **iOS 26+ 可見區會延伸到底緣以下**（`viewport-fit=cover` + 新底部安全區），推下去根本沒藏住。
+- **為什麼只有某些分頁中招**：`.sheet` 原本 `position: absolute`，錨「最近有 position 的祖先」。
+  美食 `.food` 的 sheet 剛好被 `.screen { overflow:auto }` 裁掉所以沒露；消費/歷史的根容器沒定位，
+  sheet 錨到 layout viewport、沒人裁 → 關閉的 `.sheet-handle` 露在底部，像「可往上拉的新增鈕」。
+- **解法（兩件一起）**：`.sheet { position: fixed; inset: 0; overflow: hidden }`。
+  fixed＝錨定視窗、四分頁一致、不受容器捲動影響；**`overflow: hidden`＝sheet 自己裁掉被推到框外的關閉卡片**，
+  不靠「視窗底緣會幫你裁」（iOS 26 不會）。
+- **別**改成逐一補 `position: relative`——`.spend`/`.recipe` 本身會捲動，補了 sheet 會跟內容捲走。
+- **教訓**：① 全螢幕 modal/bottom-sheet 用 `position: fixed` 而非 `absolute`+靠祖先當錨；
+  ② 隱藏靠**自己 `overflow: hidden` 裁**，別假設「推到視窗外＝看不到」（手機可見區會變）。
 
 ### 坑：ngrok 免費版攔截頁污染
 - **根因**：ngrok 免費版對瀏覽器導覽回攔截頁；`<img>` 帶不了 header。
