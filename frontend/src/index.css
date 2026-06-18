@@ -136,7 +136,11 @@ body {
 
 /* ── bottom sheet ── */
 .sheet {
-  position: absolute; inset: 0; z-index: 10;
+  /* fixed＝錨定視窗本身，不依賴容器有沒有 position/捲動 → 四分頁一致、
+     關閉時 .sheet-card 的 translateY(100%) 一定收到螢幕外（不會露出把手）。
+     （之前用 absolute，只有 .food 有 position:relative 當錨；消費/歷史的根容器
+     沒定位，sheet 改去貼 layout viewport，手機上關閉把手收不乾淨。）*/
+  position: fixed; inset: 0; z-index: 10;
   background: rgba(0, 0, 0, 0); pointer-events: none;   /* 預設透明、不可點 */
   transition: background 0.25s ease;
 }
