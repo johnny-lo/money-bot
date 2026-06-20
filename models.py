@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, ForeignKey, func
+from sqlalchemy import Column, Integer, String, DateTime, Date, Float, ForeignKey, func
 from database import Base
 
 class Transaction(Base):
@@ -123,3 +123,12 @@ class VideoTag(Base):
     video_id = Column(Integer, ForeignKey("history_videos.id", ondelete="CASCADE"),
                       index=True, nullable=False)            # 刪影片時 DB 列自動清
     tag = Column(String, index=True, nullable=False)
+
+
+class InvoiceSyncState(Base):
+    """發票同步打卡高水位（單列，id 恆 = 1）。"""
+    __tablename__ = "invoice_sync_state"
+
+    id = Column(Integer, primary_key=True)             # 永遠 1
+    last_covered_date = Column(Date, nullable=True)    # 已成功涵蓋到的最後一天（含）；NULL=尚未 bootstrap
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
