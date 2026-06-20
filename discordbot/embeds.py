@@ -380,6 +380,20 @@ def video_missing_embed(reason: str) -> discord.Embed:
     return e
 
 
+def invoice_sync_failed_embed(result: dict) -> discord.Embed:
+    """發票同步失敗卡（發到 #🧾-發票通知）。"""
+    e = discord.Embed(title="⚠️ 發票同步失敗", color=COLOR_WARN)
+    e.description = f"```\n{result.get('summary', '')[:3500]}\n```"
+    last = result.get("last_covered")
+    retry = result.get("retry_from")
+    note = f"涵蓋進度未推進（仍停在 {last if last else '無紀錄'}）"
+    if retry:
+        note += f"\n→ 下次自動重抓 {retry} ~ 今天"
+    e.add_field(name="狀態", value=note, inline=False)
+    e.set_footer(text="🐉 發票補拓")
+    return e
+
+
 def build_items_embed(new_items: list[dict]) -> discord.Embed | None:
     """把新增的發票品項排版成 embed（超過 4000 字裁切）。沒有就回 None。"""
     if not new_items:

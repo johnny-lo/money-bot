@@ -14,6 +14,7 @@ from .bot import MoneyBot, create_discord_bot
 from .bridge import set_bot, post_embeds_sync
 from .reports import (
     notify_invoice_sync,
+    notify_invoice_failure,
     notify_weekly_summary,
     notify_monthly_summary,
 )
@@ -21,5 +22,6 @@ from .reports import (
 __all__ = [
     "MoneyBot", "create_discord_bot",
     "set_bot", "post_embeds_sync",
-    "notify_invoice_sync", "notify_weekly_summary", "notify_monthly_summary",
+    "notify_invoice_sync", "notify_invoice_failure",
+    "notify_weekly_summary", "notify_monthly_summary",
 ]

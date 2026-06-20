@@ -10,7 +10,7 @@ from models import Transaction, Income
 from .bridge import post_embeds_sync
 from .embeds import (
     COLOR_EXPENSE, COLOR_INCOME, COLOR_WARN,
-    fmt_money, build_items_embed,
+    fmt_money, build_items_embed, invoice_sync_failed_embed,
 )
 
 
@@ -169,6 +169,14 @@ def notify_invoice_sync(summary: str, new_items: list[dict] | None = None) -> No
     if items_embed:
         embeds.append(items_embed)
     post_embeds_sync(int(chan_id), embeds)
+
+
+def notify_invoice_failure(result: dict) -> None:
+    """發票同步失敗 → 發失敗卡到 #🧾-發票通知。"""
+    chan_id = os.getenv("DISCORD_INVOICE_CHANNEL_ID")
+    if not chan_id:
+        return
+    post_embeds_sync(int(chan_id), [invoice_sync_failed_embed(result)])
 
 
 def notify_weekly_summary() -> None:
