@@ -1,5 +1,6 @@
 import os
 import asyncio
+from datetime import datetime, timedelta
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
@@ -9,6 +10,7 @@ from database import engine, Base
 from categorize import run_weekly_categorization
 from recurring import run_daily_recurring
 from einvoice import sync_invoices as run_invoice_sync
+from invoice_backfill import sync_with_backfill
 from routes.report import router as report_router
 from routes.record import router as record_router
 from routes.food_map import router as food_map_router
@@ -19,6 +21,7 @@ from line_handler import register_line_routes
 from discordbot import (
     create_discord_bot,
     notify_invoice_sync,
+    notify_invoice_failure,
     notify_monthly_summary,
     notify_weekly_summary,
 )
@@ -90,17 +93,25 @@ app.mount("/media", StaticFiles(directory="media"), name="media")
 from apscheduler.schedulers.background import BackgroundScheduler
 
 
+def _notify_invoice_result(result, *, quiet_if_empty=False):
+    """全成功→成功摘要（quiet_if_empty 時 0 新增不發）；失敗→失敗卡。"""
+    if not result["ok"]:
+        notify_invoice_failure(result)
+    elif result["new_items"] or not quiet_if_empty:
+        notify_invoice_sync(result["summary"], result["new_items"])
+
+
 def _daily_invoice_with_notify():
-    """週一到週六 21:00 抓發票後自動通知 Discord #🧾-發票通知 頻道。"""
-    result = run_invoice_sync(days=2)
-    notify_invoice_sync(result["summary"], result.get("new_items", []))
+    """週一到週六 21:00 補拓同步後自動通知 Discord #🧾-發票通知 頻道。"""
+    result = sync_with_backfill()
+    _notify_invoice_result(result)
 
 
 def _weekly_pipeline():
     """週日 21:00：發票同步 → AI 分類 → 週報 →（每月第一個週日多推上月月結）。"""
     try:
-        result = run_invoice_sync(days=2)
-        notify_invoice_sync(result["summary"], result.get("new_items", []))
+        result = sync_with_backfill()
+        _notify_invoice_result(result)
     except Exception as e:
         print(f"⚠️ 週日發票同步失敗：{e}")
     try:
@@ -131,14 +142,23 @@ scheduler.add_job(
 scheduler.add_job(_weekly_pipeline, "cron", day_of_week="sun", hour=21, minute=0, id="weekly_pipeline")
 
 
+def _startup_catchup():
+    """開機後背景補拓一次（機器關了又開時盡快追上）；開機只在有新發票或失敗才發卡。"""
+    result = sync_with_backfill()
+    _notify_invoice_result(result, quiet_if_empty=True)
+
+
 @app.on_event("startup")
 async def startup_event():
     scheduler.start()
+    scheduler.add_job(_startup_catchup, "date",
+                      run_date=datetime.now() + timedelta(minutes=3), id="startup_catchup")
     print(
         "⏰ 排程已啟動："
         "每日 00:05 固定收支 / "
-        "週一~週六 21:00 抓發票+Discord 通知 / "
-        "週日 21:00 抓發票→分類→週報（每月第一個週日多推上月月結）"
+        "週一~週六 21:00 發票補拓+Discord 通知 / "
+        "週日 21:00 補拓→分類→週報（每月第一個週日多推上月月結）/ "
+        "開機後 3 分鐘背景發票補拓"
     )
 
     # 啟動 Discord Bot（如果有設定 token）
