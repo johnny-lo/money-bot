@@ -59,7 +59,28 @@ try:
             ))
             _conn.commit()
             print("✅ food_photos 已補上 FK（含孤兒清理）")
+        # food_places 補料理兩層分類欄 + district 索引（既有表 create_all 不會加欄）
+        if _inspector.has_table("food_places"):
+            _fp_cols = [c["name"] for c in _inspector.get_columns("food_places")]
+            if "cuisine_major" not in _fp_cols:
+                _conn.execute(_text("ALTER TABLE food_places ADD COLUMN cuisine_major VARCHAR"))
+                _conn.execute(_text(
+                    "CREATE INDEX IF NOT EXISTS ix_food_places_cuisine_major "
+                    "ON food_places (cuisine_major)"
+                ))
+                _conn.commit()
+                print("✅ 已自動新增 food_places.cuisine_major 欄位")
+            if "cuisine_minor" not in _fp_cols:
+                _conn.execute(_text("ALTER TABLE food_places ADD COLUMN cuisine_minor VARCHAR"))
+                _conn.commit()
+                print("✅ 已自動新增 food_places.cuisine_minor 欄位")
+            _conn.execute(_text(
+                "CREATE INDEX IF NOT EXISTS ix_food_places_district ON food_places (district)"
+            ))
+            _conn.commit()
 except Exception as e:
+    # ⚠️ 這裡吞例外：ALTER 失敗會靜默，然後每次 food 查詢都 SELECT 不存在的欄位而炸。
+    #    重啟後務必 `docker logs money-bot | grep -E '✅|⚠️'` 確認。
     print(f"⚠️ 欄位檢查/新增失敗：{e}")
 
 # -----------------------------------------------

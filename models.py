@@ -50,8 +50,10 @@ class FoodPlace(Base):
     place_id = Column(String, unique=True, index=True)      # Google Place 唯一 ID（去重）
     country = Column(String, index=True, nullable=True)
     city = Column(String, index=True, nullable=True)        # 台灣=縣市，國外=城市，可空
-    district = Column(String, nullable=True)
-    cuisine_type = Column(String, nullable=True, index=True)
+    district = Column(String, nullable=True, index=True)   # 鄉鎮市區（中壢區/竹北市）；永不是里
+    cuisine_type = Column(String, nullable=True, index=True)  # LLM 原始自由文字，稽核用，不直接顯示
+    cuisine_major = Column(String, nullable=True, index=True)  # 大類（12 選 1，見 food/cuisine.MAJORS）
+    cuisine_minor = Column(String, nullable=True)              # 細類（拉麵/牛肉麵/法式甜點）
     recommended_items = Column(String, nullable=True)
     caution_summary = Column(String, nullable=True)         # 雷點摘要（後續階段才填）
     status = Column(String, default="想去", index=True)      # 想去 / 去過
