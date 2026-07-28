@@ -174,8 +174,10 @@ def classify(raw: str | None, *, name: str = "", items: str = "") -> tuple[str, 
             if hit is None:
                 continue
             idx, kw, major = hit
-            # 大類判自「◯式」國別詞且它就在開頭 → 細類不重複它（日式燒肉 → 日式 + 燒肉）
-            if tables is _NATION and idx == 0 and kw.endswith("式"):
+            # 只有「大類已經把這個詞講完了」才剝掉前綴，否則會弄丟資訊：
+            #   日式燒肉 → 大類就是「日式」，細類再寫一次沒意義 → 剝成「燒肉」
+            #   泰式料理 → 大類是「東南亞」（涵蓋泰/越/馬/印度），剝掉就看不出是泰國菜 → 留著
+            if idx == 0 and kw == major:
                 minor = _clean_minor(display_raw[len(kw):])
             return major, minor
 
