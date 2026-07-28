@@ -56,8 +56,13 @@ def fold(s: str | None) -> str:
 
 
 def _strip_suffix(s: str) -> str:
+    """去掉行政後綴，但**剝完至少要留兩個字**。
+
+    「東區」剝成「東」之後，region_matches 規則 3 的雙向包含會讓「台東」
+    命中所有東區的店。單一個字不是地名。
+    """
     for suf in _SUFFIXES:
-        if s.endswith(suf) and len(s) > len(suf):
+        if s.endswith(suf) and len(s) - len(suf) >= 2:
             return s[: -len(suf)].strip()
     return s.strip()
 

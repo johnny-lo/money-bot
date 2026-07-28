@@ -147,7 +147,10 @@
         function buildContent(pl) {
             let h = '<div class="iw">';
             h += '<h3>' + esc(pl.name) + '</h3>';
-            if (pl.cuisine_type) h += '<p>🍽️ ' + esc(pl.cuisine_type) + '</p>';
+            const kind = [pl.cuisine_major, pl.cuisine_minor].filter(Boolean).join(' · ') || pl.cuisine_type;
+            if (kind) h += '<p>🍽️ ' + esc(kind) + '</p>';
+            const where = [pl.city, pl.district].filter(Boolean).join(' ');
+            if (where) h += '<p>🗺️ ' + esc(where) + '</p>';
             if (pl.recommended_items) h += '<p>👍 ' + esc(pl.recommended_items) + '</p>';
             if (pl.my_rating) h += '<p>⭐ ' + '★'.repeat(pl.my_rating) + '</p>';
             if (pl.my_note) h += '<p>📝 ' + esc(pl.my_note) + '</p>';

@@ -182,6 +182,25 @@ def test_region_matches_帶後綴就要精確():
     assert region_matches("新竹縣", "台灣", "新竹市") is False
 
 
+def test_canon_不把地名剝成單一個字():
+    """「東區」剝成「東」之後，規則 3 的雙向包含會讓「台東」命中所有東區的店。
+
+    單字不是地名 —— 剝到只剩一個字就別剝。
+    """
+    assert canon("東區") == "東區"
+    assert canon("南區") == "南區"
+    assert canon("中區") == "中區"
+    assert canon("中壢區") == "中壢"      # 剝完還有兩個字，照剝
+    assert canon("竹東鎮") == "竹東鎮"    # 鎮/鄉 本來就不在後綴表裡，靠包含比對命中
+
+
+def test_region_matches_台東不會撈到新竹市東區():
+    assert region_matches("台東", "台灣", "新竹市", "東區") is False
+    assert region_matches("竹東", "台灣", "新竹市", "東區") is False
+    assert region_matches("台東", "台灣", "台東縣", "台東市") is True
+    assert region_matches("竹東", "台灣", "新竹縣", "竹東鎮") is True
+
+
 def test_region_matches_不帶後綴維持刻意的模糊():
     """已知取捨：打「新竹」兩邊都撈。這是現有契約，釘住它是刻意行為而非未爆彈。"""
     assert region_matches("新竹", "台灣", "新竹市") is True

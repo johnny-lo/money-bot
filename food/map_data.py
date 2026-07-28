@@ -23,9 +23,13 @@ def build_map_places(places: list[dict]) -> list[dict]:
             "status": p.get("status"),
             "visited": p.get("status") == "去過",
             "city": p.get("city"),
+            "district": p.get("district"),
             "place_id": place_id,
             "lat": lat,
             "lng": lng,
+            "cuisine_major": p.get("cuisine_major"),
+            "cuisine_minor": p.get("cuisine_minor"),
+            # 原始文字仍然帶出去：舊的 PWA 殼（SW 快取）還在讀這個 key
             "cuisine_type": p.get("cuisine_type"),
             "recommended_items": p.get("recommended_items"),
             "my_rating": p.get("my_rating"),

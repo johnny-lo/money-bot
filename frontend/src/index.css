@@ -49,6 +49,17 @@ body {
 }
 .chips { display: flex; gap: 6px; }
 .bar-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+/* 第二列：地區選單 + 12 個大類 chip，一行塞不下 → 橫向捲。
+   flex-shrink:0 是必要的，否則 flex 會把每個 chip 壓扁成兩行字。 */
+.food-bar2 {
+  display: flex; align-items: center; gap: 6px;
+  padding: 0 12px 8px; background: #fff; border-bottom: 1px solid #eee;
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.food-bar2::-webkit-scrollbar { display: none; }
+.food-bar2 > * { flex: 0 0 auto; }
+.bar-divider { width: 1px; height: 20px; background: #e5e5e5; margin: 0 2px; }
 .city-select {
   border: 1px solid #ddd; border-radius: 8px; padding: 5px 6px;
   font-size: 0.85rem; background: #fff; max-width: 96px;

@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { markVisited, uploadPhoto, deletePhoto } from './api'
+import { kindLabel } from './cuisine'
 import { shrinkImage } from './image'
 
 // 照片來源標示：自己拍的才是回憶，Google 圖只是補位
@@ -83,7 +84,8 @@ export default function PlaceSheet({ place, onClose, onChanged }) {
             <h3>{place.name}</h3>
             <div className="sheet-meta">
               {place.status && <span className="badge">{place.status}</span>}
-              {place.cuisine_type && <span>🍽️ {place.cuisine_type}</span>}
+              {kindLabel(place) && <span>🍽️ {kindLabel(place)}</span>}
+              {place.city && <span>🗺️ {place.city}{place.district ? ` ${place.district}` : ''}</span>}
               {place.my_rating ? <span>{'★'.repeat(place.my_rating)}</span> : null}
             </div>
             {place.recommended_items && <p>👍 {place.recommended_items}</p>}

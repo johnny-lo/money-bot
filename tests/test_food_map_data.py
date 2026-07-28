@@ -59,6 +59,17 @@ def test_output_fields_and_empty():
          "my_note": "讚", "address": "台北市", "caution_summary": "雷"},
     ])
     assert set(out[0].keys()) == {
-        "id", "name", "status", "visited", "lat", "lng", "city", "place_id", "cuisine_type",
+        "id", "name", "status", "visited", "lat", "lng", "city", "district", "place_id",
+        "cuisine_type", "cuisine_major", "cuisine_minor",
         "recommended_items", "my_rating", "my_note", "address", "caution_summary", "maps_url",
     }
+
+
+def test_帶出行政區與兩層分類():
+    out = build_map_places([
+        {"id": 1, "name": "店", "status": "想去", "lat": 24.9, "lng": 121.2, "place_id": "p1",
+         "city": "新竹縣", "district": "竹北市",
+         "cuisine_type": "日式燒肉", "cuisine_major": "日式", "cuisine_minor": "燒肉"},
+    ])
+    assert out[0]["district"] == "竹北市"
+    assert (out[0]["cuisine_major"], out[0]["cuisine_minor"]) == ("日式", "燒肉")

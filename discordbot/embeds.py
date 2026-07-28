@@ -177,6 +177,12 @@ def image_recorded_embed(d: dict) -> discord.Embed:
     return e
 
 
+def food_kind(p: dict) -> str:
+    """類型顯示字串：`大類 · 細類`。兩層都沒有才退回 LLM 原始文字。"""
+    parts = [x for x in (p.get("cuisine_major"), p.get("cuisine_minor")) if x]
+    return " · ".join(parts) or (p.get("cuisine_type") or "")
+
+
 def food_place_embed(p: dict, *, created: bool = True) -> discord.Embed:
     from food.places import maps_url
     name = p.get("name") or "(未知店名)"
@@ -187,9 +193,11 @@ def food_place_embed(p: dict, *, created: bool = True) -> discord.Embed:
     else:
         title = f"🍜 已更新（這家記過了）：{name}"
     e = discord.Embed(title=title, color=COLOR_FOOD)
-    if p.get("cuisine_type"):
-        e.add_field(name="類型", value=p["cuisine_type"], inline=True)
-    region = " / ".join(x for x in (p.get("country"), p.get("city")) if x) or "—"
+    kind = food_kind(p)
+    if kind:
+        e.add_field(name="類型", value=kind, inline=True)
+    region = " / ".join(
+        x for x in (p.get("country"), p.get("city"), p.get("district")) if x) or "—"
     e.add_field(name="地區", value=region, inline=True)
     e.add_field(name="狀態", value=p.get("status", "想去"), inline=True)
     if p.get("address"):
@@ -211,7 +219,9 @@ def food_list_embed(places: list[dict], title: str) -> discord.Embed:
         return e
     lines = []
     for p in places[:20]:
-        cat = f" `{p['cuisine_type']}`" if p.get("cuisine_type") else ""
+        # 一行清單要短 → 只放大類（沒有才退回原始文字）
+        short = p.get("cuisine_major") or p.get("cuisine_type") or ""
+        cat = f" `{short}`" if short else ""
         items = f" — {p['recommended_items']}" if p.get("recommended_items") else ""
         lines.append(f"`#{p['id']}` **{p['name']}**{cat}{items}")
     e.description = "\n".join(lines)
