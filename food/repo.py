@@ -1,6 +1,13 @@
-"""FoodPlace 的 DB 存取（沿用 SessionLocal 慣例）。"""
+"""FoodPlace 的 DB 存取（沿用 SessionLocal 慣例）。
+
+`upsert_place` 是 city/district/cuisine_* 的**唯一寫入咽喉點**
+（/美食新增、單筆匯入、批次匯入三條路都經過這裡）→ 正規化放在這裡而非呼叫端，
+混格式的列就結構性不可能出現。
+"""
 from database import SessionLocal
 from models import FoodPlace
+from food import cuisine
+from food.regions import normalize_city, normalize_district
 
 
 def to_dict(rec: FoodPlace) -> dict:
@@ -16,6 +23,8 @@ def to_dict(rec: FoodPlace) -> dict:
         "city": rec.city,
         "district": rec.district,
         "cuisine_type": rec.cuisine_type,
+        "cuisine_major": rec.cuisine_major,
+        "cuisine_minor": rec.cuisine_minor,
         "recommended_items": rec.recommended_items,
         "caution_summary": rec.caution_summary,
         "status": rec.status,
@@ -24,6 +33,18 @@ def to_dict(rec: FoodPlace) -> dict:
         "source_url": rec.source_url,
         "created_at": rec.created_at.isoformat() if rec.created_at else "",
     }
+
+
+def normalize_region(place: dict) -> tuple[str | None, str | None, str | None]:
+    """(country, city, district)：台灣收斂成縣市全名 + 該縣市的合法鄉鎮市區。
+
+    國外原樣放行 —— 國外是開放詞彙，硬套台灣的表只會把「新宿區」洗掉。
+    """
+    raw_city = place.get("city")
+    city = normalize_city(raw_city)
+    if city:
+        return place.get("country"), city, (normalize_district(city, place.get("district")) or None)
+    return place.get("country"), raw_city, place.get("district")
 
 
 def upsert_place(place: dict, *, recommended_items=None, cuisine_type=None,
@@ -36,19 +57,38 @@ def upsert_place(place: dict, *, recommended_items=None, cuisine_type=None,
         if rec is None:
             rec = FoodPlace(place_id=place["place_id"], status="想去")
             db.add(rec)
-        rec.name = place["name"]
-        rec.address = place.get("address")
-        rec.lat = place.get("lat")
-        rec.lng = place.get("lng")
-        rec.country = place.get("country")
-        rec.city = place.get("city")
-        rec.district = place.get("district")
+
+        # 非空不被空覆寫：一次退化的 Places 回應（缺 addressComponents）
+        # 不該把既有的好資料抹成 NULL。
+        country, city, district = normalize_region(place)
+        for field, value in (
+            ("name", place.get("name")), ("address", place.get("address")),
+            ("lat", place.get("lat")), ("lng", place.get("lng")),
+            ("country", country), ("city", city), ("district", district),
+        ):
+            if value not in (None, ""):
+                setattr(rec, field, value)
+
         if recommended_items:
             rec.recommended_items = recommended_items
         if cuisine_type:
             rec.cuisine_type = cuisine_type
         if source_url:
             rec.source_url = source_url
+
+        # 大類只在原始文字被（重）寫、或這是新店時重算 —— 否則每次重新匯入
+        # 都會把手動修正過的分類打回規則推導值。空字串永不覆蓋既有值。
+        if created or cuisine_type:
+            major, minor = cuisine.classify(
+                rec.cuisine_type,
+                name=rec.name or "",
+                items=rec.recommended_items or "",
+            )
+            if major:
+                rec.cuisine_major = major
+            if minor:
+                rec.cuisine_minor = minor
+
         db.commit()
         db.refresh(rec)
         return to_dict(rec), created
