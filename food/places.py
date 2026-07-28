@@ -4,7 +4,7 @@ import json
 import urllib.request
 import urllib.parse
 
-from food.regions import parse_address_components
+from food.regions import resolve_region
 
 # Google API 呼叫計數（給 enrich.backfill_all 控預算用；Places API New 按次計費）
 _api_calls = 0
@@ -51,7 +51,8 @@ def search_text(query: str) -> dict | None:
     p = places[0]
     if not p.get("id"):
         return None  # 沒有 place_id 無法去重/導航，視同查無
-    region = parse_address_components(p.get("addressComponents"))
+    # 台灣以地址文字為真相（Google 的行政區 component 時有時無），國外走 components
+    region = resolve_region(p.get("formattedAddress"), p.get("addressComponents"))
     loc = p.get("location") or {}
     return {
         "place_id": p.get("id"),

@@ -183,8 +183,8 @@ def register_commands(bot) -> None:
             return
         await ix.followup.send(embed=food_place_embed(p, created=created))
 
-    @tree.command(name="美食推薦", description="依縣市/國家推薦想去的店")
-    @app_commands.describe(地區="縣市或國家，例如 台中 / 日本")
+    @tree.command(name="美食推薦", description="依縣市/鄉鎮市區/國家推薦想去的店")
+    @app_commands.describe(地區="縣市 / 鄉鎮市區 / 國家，例如 中壢 / 新竹市 / 日本")
     async def cmd_food_reco(ix: discord.Interaction, 地區: str):
         await ix.response.defer()
         from food.repo import list_places

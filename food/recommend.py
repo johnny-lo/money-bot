@@ -5,11 +5,11 @@ from food.regions import region_matches
 
 
 def filter_for_recommendation(places: list[dict], query: str) -> list[dict]:
-    """只留『想去』且國家或城市命中查詢的店。"""
+    """只留『想去』且國家/縣市/行政區命中查詢的店。"""
     return [
         p for p in places
         if p.get("status") == "想去"
-        and region_matches(query, p.get("country"), p.get("city"))
+        and region_matches(query, p.get("country"), p.get("city"), p.get("district"))
     ]
 
 
