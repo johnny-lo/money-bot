@@ -73,6 +73,32 @@ body {
   border-radius: 8px; font-size: 0.9rem;
 }
 
+/* ── 附近：範圍滑桿 + 料理磚塊 ── */
+.geo-banner {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 6px 12px; background: #fff8e1; color: #8a6d3b; font-size: 0.85rem;
+}
+/* 磚塊與卡片同屬一個捲動容器：兩個都要 flex:1 會互搶高度，
+   所以由外層負責捲動，內層清單取消自己的捲動。 */
+.nearby-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.nearby-scroll .food-list { flex: none; overflow: visible; }
+.nearby { padding: 12px; }
+.range-row { display: flex; align-items: center; gap: 10px; }
+.range-slider { flex: 1; accent-color: var(--brand); }
+.range-caption { margin: 8px 2px 14px; font-size: 0.85rem; color: #777; }
+.tile-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px;
+}
+.tile {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  background: #fff; border: 1px solid #eee; border-radius: 14px;
+  padding: 14px 8px; cursor: pointer;
+}
+.tile.active { border-color: var(--brand); background: #fff7f0; }
+.tile-icon { font-size: 1.6rem; }
+.tile-name { font-size: 0.9rem; color: #333; }
+.tile-count { font-size: 0.8rem; color: #999; }
+
 /* ── 卡片清單 ── */
 .food-list { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 10px; }
 .list-empty { padding: 40px; text-align: center; color: #999; }
