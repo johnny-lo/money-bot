@@ -31,11 +31,15 @@ export default function Food() {
   const [geoState, setGeoState] = useState('locating')  // locating | ready | denied
   const [selected, setSelected] = useState(null)
   const [error, setError] = useState('')
+  // 分辨「還沒載完」與「載完了但真的是空的」——沒有這個旗標，
+  // 定位比 API 先回來時會閃一下「範圍內沒有店家」，叫使用者去拉大範圍。
+  const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
     getPlaces()
       .then((data) => setPlaces(data.places || []))
       .catch((e) => setError(String(e.message || e)))
+      .finally(() => setLoaded(true))
   }, [])
 
   // 定位失敗一律**自動退回清單**，不彈窗擋路 —— 使用者永遠看得到自己的清單。
@@ -51,6 +55,9 @@ export default function Food() {
       (pos) => {
         setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude })
         setGeoState('ready')
+        // 拿到定位就切去附近 —— 按 banner 的「重試」唯一的動機就是想看附近，
+        // 成功了卻停在清單會讓人以為沒反應。（其他呼叫點本來就在附近模式，無副作用）
+        setView('nearby')
       },
       () => {
         setGeoState('denied')
@@ -196,8 +203,8 @@ export default function Food() {
       {error && <div className="food-error">{error}</div>}
 
       {view === 'nearby' ? (
-        geoState === 'locating' ? (
-          <div className="list-empty">正在定位…</div>
+        geoState === 'locating' || !loaded ? (
+          <div className="list-empty">{loaded ? '正在定位…' : '載入中…'}</div>
         ) : (
           <div className="nearby-scroll">
             <Nearby
