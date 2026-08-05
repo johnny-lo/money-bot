@@ -83,22 +83,33 @@ export default function Food() {
     }
   }
 
-  // 選項一律從資料長出來，不寫死 —— 沒有店家的縣市/分類不該出現在選單裡
-  const cities = [...new Set(places.map((p) => p.city).filter(Boolean))].sort()
-  const districts =
-    city === 'all'
-      ? []
-      : [...new Set(
-          places.filter((p) => p.city === city).map((p) => p.district).filter(Boolean),
-        )].sort()
+  // 選項一律從資料長出來，不寫死 —— 沒有店家的縣市/分類不該出現在選單裡。
+  // 縣市 → 該縣市有店的行政區，給下面的分組選單用。
+  const byCity = new Map()
+  for (const p of places) {
+    if (!p.city) continue
+    if (!byCity.has(p.city)) byCity.set(p.city, new Set())
+    if (p.district) byCity.get(p.city).add(p.district)
+  }
+  const cities = [...byCity.keys()].sort()
+
   const present = new Set(places.map((p) => p.cuisine_major).filter(Boolean))
   const majors = MAJORS.filter((m) => present.has(m))
 
-  // 換縣市一定要把行政區歸零：否則選了「中壢區」再切到台北市，
-  // 清單會永遠空白，而且畫面上看不出原因。
-  function changeCity(next) {
-    setCity(next)
-    setDistrict('all')
+  // 地區用**一個**分組選單而不是「縣市 + 行政區」兩個級聯選單。
+  // 兩個的話行政區被兩道關卡擋著（要先選縣市才會被渲染出來），使用者
+  // 根本找不到；而且還要處理「換縣市忘了重置行政區」那類 bug。
+  // 一個控制項＝一個真相來源，那整類問題直接消失。
+  const regionValue = district !== 'all' ? `d:${city}:${district}` : city !== 'all' ? `c:${city}` : 'all'
+  function changeRegion(raw) {
+    if (raw === 'all') {
+      setCity('all')
+      setDistrict('all')
+      return
+    }
+    const [kind, c, d] = raw.split(':')
+    setCity(c)
+    setDistrict(kind === 'd' ? d : 'all')
   }
 
   function cycleView() {
@@ -153,24 +164,21 @@ export default function Food() {
           還列出附近根本沒有的類別）。 */}
       {view !== 'nearby' && (
         <div className="food-bar2">
-          <select className="city-select" value={city} onChange={(e) => changeCity(e.target.value)}>
-            <option value="all">全部縣市</option>
+          <select
+            className="city-select region-select"
+            value={regionValue}
+            onChange={(e) => changeRegion(e.target.value)}
+          >
+            <option value="all">全部地區</option>
             {cities.map((c) => (
-              <option key={c} value={c}>{c}</option>
+              <optgroup key={c} label={c}>
+                <option value={`c:${c}`}>{c} 全部</option>
+                {[...byCity.get(c)].sort().map((d) => (
+                  <option key={d} value={`d:${c}:${d}`}>{d}</option>
+                ))}
+              </optgroup>
             ))}
           </select>
-          {districts.length > 0 && (
-            <select
-              className="city-select"
-              value={district}
-              onChange={(e) => setDistrict(e.target.value)}
-            >
-              <option value="all">全部地區</option>
-              {districts.map((d) => (
-                <option key={d} value={d}>{d}</option>
-              ))}
-            </select>
-          )}
           {majors.length > 0 && (
             <>
               <span className="bar-divider" />
