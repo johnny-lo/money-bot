@@ -188,6 +188,15 @@ def test_爭議條目(raw, major):
     assert classify(raw)[0] == major
 
 
+def test_北歐菜系落西式():
+    """實際踩到：新增 IKEA 瑞典餐廳，cuisine_type=「瑞典料理」卻判不出大類。
+
+    12 大類沒有北歐桶，落最近的「西式」——比留空有用。
+    """
+    assert classify("瑞典料理")[0] == "西式"
+    assert classify("北歐料理")[0] == "西式"
+
+
 def test_麵食太籠統不猜():
     """「麵食」可能是牛肉麵店也可能是刀削麵館 —— 讓店名決定比硬猜好。"""
     assert classify("麵食")[0] == ""
