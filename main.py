@@ -104,6 +104,25 @@ if os.path.isdir("frontend/dist"):
     mimetypes.add_type("application/manifest+json", ".webmanifest")
     app.mount("/m", StaticFiles(directory="frontend/dist", html=True), name="mobile")
 
+    # PWA 能不能更新，關鍵在這裡。StaticFiles 只給 etag/last-modified、**不給
+    # Cache-Control**；沒有 Cache-Control 時瀏覽器會套用「啟發式快取」（約
+    # Last-Modified 距今時間的 10%）。而 service worker 的更新檢查是**經過 HTTP
+    # 快取**的 → sw.js 還在啟發式新鮮期內時，瀏覽器根本不會去拿新的 SW，
+    # 舊 SW 就一直餵舊的殼。（症狀：電腦看得到新版、手機怎麼重開都還是舊的；
+    # main.jsx 的 controllerchange 自動重整要等「拿到新 SW」才會觸發，救不了這段。）
+    @app.middleware("http")
+    async def pwa_cache_headers(request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path == "/m" or path.startswith("/m/"):
+            if "/assets/" in path:
+                # Vite 產物檔名帶內容雜湊 → 內容一變檔名就變，可以放心永久快取
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            else:
+                # 殼 / sw.js / manifest 一律每次回源驗證；有 etag，沒變就回 304 很便宜
+                response.headers["Cache-Control"] = "no-cache"
+        return response
+
 # 使用者上傳的店家照片（bot/app 兩條路都寫到 media/）
 os.makedirs("media", exist_ok=True)
 app.mount("/media", StaticFiles(directory="media"), name="media")
