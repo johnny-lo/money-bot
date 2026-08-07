@@ -47,6 +47,14 @@
 - **已實作**：`main.jsx` 加了 `controllerchange` 監聽——新 SW 接管時**自動重整一次**，未來前端部署免手動清快取
   （只有「載入時已被舊 SW 控制」才掛、`refreshing` 旗標防迴圈 → 首次安裝不會多閃）。
   注意：這次部署你**仍要手動清一次**快取拿到含此邏輯的新殼；之後才自動。
+- **⚠️ 但上面那條救不了「瀏覽器根本沒去拿新 SW」的情況**（症狀：**電腦看得到新版、手機怎麼重開都是舊的**）。
+  **根因**：`StaticFiles` 只給 `etag`/`last-modified`、**不給 `Cache-Control`**；沒有 `Cache-Control` 時
+  瀏覽器套用**啟發式快取**（約 Last-Modified 距今時間的 10%），而 **SW 的更新檢查是經過 HTTP 快取的**
+  → `sw.js` 還在啟發式新鮮期內就不會回源，舊 SW 一直餵舊的殼。`controllerchange` 要等「拿到新 SW」
+  才觸發，所以**叫使用者多重開幾次完全沒用**。
+  **已修**（`main.py` 的 `pwa_cache_headers` middleware）：殼/`sw.js`/manifest → `no-cache`（有 etag，
+  沒變回 304 很便宜）；`/m/assets/*` → `immutable`（Vite 檔名帶內容雜湊）。
+  **診斷指令**：`curl -sI http://127.0.0.1:8000/m/sw.js | grep -i cache-control` —— 沒有輸出就是又退化了。
 
 ### 坑：「改了看不到」也可能不是快取，而是功能被預設值藏起來
 - **背景**：上一條說「看不到 ≈ 99% 是 SW 快取」。**這是那 1%**，別查到「伺服器端是新的」就停手。
