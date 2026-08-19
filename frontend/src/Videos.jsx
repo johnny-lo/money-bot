@@ -10,17 +10,24 @@ export default function Videos() {
   const [editing, setEditing] = useState(null) // 點某支 → 編輯 sheet
   const [newTag, setNewTag] = useState('')
   const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(true)
 
   async function load() {
     try { setVideos((await getVideos()).videos || []) }
     catch (e) { setError(String(e.message || e)) }
+    finally { setLoading(false) }
   }
   useEffect(() => { load() }, [])
 
-  // 書架 = 所有出現過的 topic（去重）；標籤建議 = 所有出現過的 tag（去重）
+  // 書架 = 出現過的 topic，**依影片數由多到少排**並帶上數量。
+  // 為什麼要排：33 支影片散在 21 個書架，大半只有 1 支。照資料庫回傳順序的話，
+  // 真正有東西的書架會被埋在一堆只有一支的書架後面，得橫捲很久才找得到。
+  // 帶數量則是讓「這個書架值不值得點」一眼看得出來，不用逐個點進去試。
   const topics = useMemo(() => {
-    const s = [...new Set(videos.map((v) => v.topic).filter(Boolean))]
-    return ['全部', ...s]
+    const n = new Map()
+    for (const v of videos) if (v.topic) n.set(v.topic, (n.get(v.topic) || 0) + 1)
+    const sorted = [...n.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    return [['全部', videos.length], ...sorted]
   }, [videos])
   const allTags = useMemo(
     () => [...new Set(videos.flatMap((v) => v.tags || []))], [videos])
@@ -53,9 +60,11 @@ export default function Videos() {
       {/* 書架 chips + 搜尋 */}
       <div className="video-bar">
         <div className="chips">
-          {topics.map((t) => (
+          {topics.map(([t, n]) => (
             <button key={t} className={t === topic ? 'chip active' : 'chip'}
-                    onClick={() => setTopic(t)}>{t}</button>
+                    onClick={() => setTopic(t)}>
+              {t}<span className="chip-n">{n}</span>
+            </button>
           ))}
         </div>
         <input className="video-search" placeholder="🔍 搜尋標題或標籤"
@@ -65,6 +74,14 @@ export default function Videos() {
       {/* 清單 */}
       <div className="video-list">
         <div className="recipe-count">{shown.length} 支影片</div>
+        {loading && <div className="video-empty">載入中…</div>}
+        {!loading && shown.length === 0 && (
+          <div className="video-empty">
+            {videos.length === 0
+              ? '還沒有影片。把 YouTube 連結丟進 Discord 的 #📜-歷史教學 頻道就會自動收錄。'
+              : '這個條件下沒有影片，換個書架或清掉搜尋字看看。'}
+          </div>
+        )}
         {shown.map((v) => (
           <button key={v.id} className="video-card" onClick={() => { setEditing(v); setNewTag('') }}>
             <div className="video-thumb">
@@ -103,7 +120,7 @@ export default function Videos() {
                        }} />
               </label>
               <datalist id="topic-list">
-                {topics.filter((t) => t !== '全部').map((t) => <option key={t} value={t} />)}
+                {topics.filter(([t]) => t !== '全部').map(([t]) => <option key={t} value={t} />)}
               </datalist>
 
               {/* 標籤 chips：點 ✕ 刪 */}

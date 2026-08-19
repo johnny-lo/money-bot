@@ -208,6 +208,21 @@
 - **解法**：所有 API/fetch 帶 `ngrok-skip-browser-warning: true`；圖片靠 SW 攔截後重發帶 header
   （`sw.js` 的 `media-v2` CacheFirst + `ngrokBypassPlugin`）。`media-v2` 的 `v2` 是因為 v1 被攔截頁毒過、整鍋拋棄。
 
+### 坑：共用的 CSS class 壞掉時，是三個畫面一起壞（只是你先看到最明顯的那個）
+- **現象**：使用者回報「手機版歷史頁 UI 爛掉」。
+- **根因**：`.chips` 只有 `display:flex; gap:6px`——**沒有 `flex-wrap`、沒有 `overflow-x`，
+  `.chip` 也沒有 `flex:0 0 auto`**。flex item 預設可壓縮，chip 一多就被擠成幾十 px、字疊在一起。
+- **關鍵**：`.chips` 被**三個畫面共用**——歷史(21 主題+全部)、美食(12 大類+全部)、記帳表單(15 分類)。
+  歷史頁 chip 最多所以最先被發現，但三個都是壞的。修 class 而不是修單一頁面。
+- **解法**：`.chips` 改 `overflow-x:auto` + `.chip { flex:0 0 auto }`（**後者才是關鍵**，
+  沒有它光加 overflow 也不會捲、只會繼續被壓扁）；表單那排要一次看完，另給 `.chips.wrap`。
+- **順帶**：21 個書架配 33 支影片＝平均 1.6 支，橫捲也難找。所以 chips **依影片數排序並顯示數量**，
+  讓「哪個書架真的有東西」不用逐個點進去試。
+- **教訓**：① 收到「某頁 UI 壞了」先 `grep className="<那個 class>"` 看還有誰在用；
+  ② flex 容器裡的東西預設會被壓縮，橫向列表一定要 `flex:0 0 auto` + `overflow-x`。
+- **驗證限制**：手機 CSS 沒有自動化測試，改完仍需使用者親眼確認（本次瀏覽器工具連不到本機，
+  無法自行截圖）。
+
 ## 5. Discord 的坑
 - **`tree.sync()` 是 GLOBAL，傳播慢**。要立刻能用時，**改指既有指令**而非加新指令。
 - **頻道分流**在 `discordbot/bot.py` 的 `on_message`，比對 `os.getenv("*_CHANNEL_ID")`。

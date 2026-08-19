@@ -52,7 +52,7 @@ export default function RecordSheet({ record, knownCats, onSave, onDelete, onClo
         <h3>{isEdit ? '編輯紀錄' : '新增紀錄'}</h3>
 
         {/* 支出/收入切換（編輯時鎖定 —— 換類型等於換資料表，請刪掉重記） */}
-        <div className="chips" style={{ marginBottom: 10 }}>
+        <div className="chips wrap" style={{ marginBottom: 10 }}>
           <button className={type === 'expense' ? 'chip active' : 'chip'} disabled={isEdit}
                   onClick={() => setType('expense')}>💸 支出</button>
           <button className={type === 'income' ? 'chip active' : 'chip'} disabled={isEdit}

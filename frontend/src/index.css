@@ -47,7 +47,23 @@ body {
   padding: calc(8px + env(safe-area-inset-top)) 12px 8px;
   background: #fff; border-bottom: 1px solid #eee;
 }
-.chips { display: flex; gap: 6px; }
+/* chips 列：美食(12 大類)、歷史(21 主題)、記帳表單(15 分類) 三處共用。
+   原本只有 display:flex，chip 是可壓縮的 flex item → 一多就被擠成幾十 px 寬、
+   字疊在一起（歷史頁 22 個 chip 最明顯）。關鍵是 .chip 的 flex:0 0 auto。 */
+.chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;   /* 橫捲到底不要連帶把整頁往回帶 */
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;            /* Firefox */
+  padding-bottom: 2px;              /* 避免 active chip 的陰影被裁掉 */
+}
+.chips::-webkit-scrollbar { display: none; }
+
+/* 記帳表單那排要一次看完所有分類（是表單不是導覽），所以改成換行 */
+.chips.wrap { flex-wrap: wrap; overflow-x: visible; }
 .bar-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 /* 第二列：地區選單 + 12 個大類 chip，一行塞不下 → 橫向捲。
    flex-shrink:0 是必要的，否則 flex 會把每個 chip 壓扁成兩行字。 */
@@ -153,8 +169,12 @@ body {
 .chip {
   border: none; border-radius: 9px; padding: 6px 14px; font-size: 0.9rem;
   background: #eee; color: #444; cursor: pointer;
+  flex: 0 0 auto;        /* ★ 不准被壓扁——沒有這行整排就會擠成一團 */
+  white-space: nowrap;   /* 主題名不要被拆成兩行 */
 }
 .chip.active { background: var(--brand); color: #fff; }
+/* 數量：讓「哪個書架真的有東西」一眼看得出來，不用逐個點進去試 */
+.chip-n { opacity: 0.55; font-size: 0.8em; margin-left: 4px; }
 
 .map-error {
   position: absolute; top: 66px; left: 50%; transform: translateX(-50%);
@@ -322,6 +342,7 @@ body {
 .video-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .mini-tag { font-size: 11px; background: #f0e8f5; color: #8E44AD; border-radius: 6px; padding: 1px 6px; }
 .mini-tag.removable { cursor: pointer; }
+.video-empty { text-align: center; color: #999; font-size: 0.85rem; padding: 28px 16px; line-height: 1.6; }
 .video-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #666; margin: 8px 0; }
 .sheet-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .tag-add { display: flex; gap: 6px; align-items: center; }
