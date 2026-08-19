@@ -10,7 +10,7 @@
 
 注意：package 不能命名為 `discord`，會遮蔽 discord.py 套件。
 """
-from .bot import MoneyBot, create_discord_bot
+from .bot import MoneyBot, create_discord_bot, run_discord_bot
 from .bridge import set_bot, post_embeds_sync
 from .reports import (
     notify_invoice_sync,
@@ -20,7 +20,7 @@ from .reports import (
 )
 
 __all__ = [
-    "MoneyBot", "create_discord_bot",
+    "MoneyBot", "create_discord_bot", "run_discord_bot",
     "set_bot", "post_embeds_sync",
     "notify_invoice_sync", "notify_invoice_failure",
     "notify_weekly_summary", "notify_monthly_summary",

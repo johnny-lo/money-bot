@@ -1,4 +1,5 @@
 """MoneyBot：Discord client 本體（事件路由）＋ create_discord_bot 工廠。"""
+import asyncio
 import os
 import time
 
@@ -26,7 +27,8 @@ class MoneyBot(discord.Client):
         await self.tree.sync()
 
     async def on_ready(self):
-        print(f"🐉 Discord Bot 已上線：{self.user}")
+        # flush=True：stdout 在 container 內是塊緩衝，健康訊號要即時可見（AGENTS.md 健康檢查靠這行）
+        print(f"🐉 Discord Bot 已上線：{self.user}", flush=True)
 
     async def on_message(self, message: discord.Message):
         if message.author == self.user:
@@ -103,3 +105,30 @@ def create_discord_bot() -> MoneyBot:
     bot = MoneyBot()
     set_bot(bot)
     return bot
+
+
+async def run_discord_bot(token: str, *, create_bot=create_discord_bot,
+                         sleep=asyncio.sleep) -> None:
+    """監管式啟動：暫時性失敗（DNS/連線/gateway 耗盡）退避重試，永久性失敗（壞 token）停手。
+
+    取代 `asyncio.create_task(bot.start(token))` 那種無監管一次性 task——後者一拋例外就
+    永久離線且沒人重啟（開機瞬間 DNS 未 ready 就中過這雷）。每次重試重建 bot，
+    `create_discord_bot()` 內建 set_bot() → 排程通知的橋接自動指向活著的實例。
+    create_bot / sleep 可注入，方便測試不碰真網路。
+    """
+    backoff = 5
+    while True:
+        bot = create_bot()
+        try:
+            await bot.start(token)  # 內含 discord.py 自身 reconnect=True
+            return                  # 正常關閉（如 shutdown）→ 不再重啟
+        except discord.LoginFailure as e:
+            print(f"❌ Discord 登入失敗（token 無效？），停止重試：{e}", flush=True)
+            return
+        except Exception as e:      # 網路/DNS/gateway 等暫時性 → 退避重試
+            print(f"⚠️ Discord 連線失敗，{backoff}s 後重試：{type(e).__name__}: {e}", flush=True)
+        finally:
+            if not bot.is_closed():
+                await bot.close()   # 收掉 aiohttp session，避免跨重試洩漏
+        await sleep(backoff)
+        backoff = min(backoff * 2, 300)  # 指數退避，cap 5 分鐘

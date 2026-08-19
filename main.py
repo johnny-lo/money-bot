@@ -19,7 +19,7 @@ from routes.recipes import router as recipes_router
 from routes.videos import router as videos_router
 from line_handler import register_line_routes
 from discordbot import (
-    create_discord_bot,
+    run_discord_bot,
     notify_invoice_sync,
     notify_invoice_failure,
     notify_monthly_summary,
@@ -204,8 +204,9 @@ async def startup_event():
     # 啟動 Discord Bot（如果有設定 token）
     discord_token = os.getenv("DISCORD_BOT_TOKEN")
     if discord_token:
-        bot = create_discord_bot()
-        asyncio.create_task(bot.start(discord_token))
+        # 監管式啟動：暫時性失敗自動重試（見 discordbot/bot.py:run_discord_bot），
+        # 不再像舊版無監管 task 一拋例外就永久離線。
+        asyncio.create_task(run_discord_bot(discord_token))
         print("🎮 Discord Bot 啟動中...")
     else:
         print("ℹ️ 未設定 DISCORD_BOT_TOKEN，跳過 Discord Bot")
