@@ -39,7 +39,7 @@ def register_commands(bot) -> None:
     @app_commands.describe(品名="支出項目", 金額="花費金額")
     async def cmd_expense(ix: discord.Interaction, 品名: str, 金額: int):
         await ix.response.defer()
-        data = record_expense_data(品名, 金額)
+        data = record_expense_data(品名, 金額, source="discord")
         if not data["success"]:
             await ix.followup.send(embed=error_embed(data["error"]))
             return

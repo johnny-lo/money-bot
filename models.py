@@ -10,6 +10,12 @@ class Transaction(Base):
     price = Column(Integer)
     category = Column(String, nullable=True, index=True)  # AI 自動分類欄位
     invoice_no = Column(String, nullable=True, index=True)  # 發票號碼，einvoice 自動帶入；手動記帳為 NULL
+    # 資料來源通道：載具1 / 載具2 / discord / line / app / recurring。
+    # 兩組載具分別屬於兩個人，所以這個欄位同時回答了「這筆是誰花的」（發票佔多數）。
+    source = Column(String, nullable=True, index=True)
+    # 1 = 兩人共同分攤（例：房租、車貸）。DB 存**全額**，算「我的份」時才除以 2，
+    # 這樣家庭總支出仍然正確，日後改分攤比例也不必重寫歷史資料。
+    shared = Column(Integer, default=0)
     created_at = Column(DateTime, default=func.now())
 
 
@@ -35,6 +41,7 @@ class RecurringRecord(Base):
     category = Column(String, nullable=True)
     day_of_month = Column(Integer, nullable=False)  # 每月幾號 (1-28)
     active = Column(Integer, default=1)             # 1=啟用, 0=停用
+    shared = Column(Integer, default=0)             # 1=共同分攤，產生的 Transaction 會繼承
     created_at = Column(DateTime, default=func.now())
 
 

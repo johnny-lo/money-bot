@@ -36,7 +36,8 @@ def api_create_record(body: RecordCreate, db: Session = Depends(get_db)):
         if body.type == "income":
             record = Income(item=body.item, amount=body.amount, category=body.category)
         else:
-            record = Transaction(item=body.item, price=body.amount, category=body.category)
+            record = Transaction(item=body.item, price=body.amount, category=body.category,
+                                 source="app")
         db.add(record)
         db.commit()
         db.refresh(record)

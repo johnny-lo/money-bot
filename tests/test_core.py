@@ -98,12 +98,12 @@ def test_route_report_needs_context(monkeypatch):
     monkeypatch.setattr(core, "handle_report", lambda uid, base: f"{uid}@{base}")
     assert core.process_text_message("報表", user_id="u1", base_url="https://x") == ["u1@https://x"]
     # 沒帶 user_id/base_url（理論上不會發生）→ 落到一般記帳 → None
-    monkeypatch.setattr(core, "handle_record_text", lambda m: None)
+    monkeypatch.setattr(core, "handle_record_text", lambda m, **__: None)
     assert core.process_text_message("報表") is None
 
 
 def test_route_fallback_to_record(monkeypatch):
-    monkeypatch.setattr(core, "handle_record_text", lambda m: ["記了"])
+    monkeypatch.setattr(core, "handle_record_text", lambda m, **__: ["記了"])
     assert core.process_text_message("午餐 150") == ["記了"]
 
 

@@ -51,7 +51,8 @@ def _reply(event, messages: list[str]):
 
 def handle_message(event):
     msg = event.message.text.strip()
-    result = process_text_message(msg, user_id=event.source.user_id, base_url=BASE_URL)
+    result = process_text_message(msg, user_id=event.source.user_id, base_url=BASE_URL,
+                                 source="line")
     if result:
         _reply(event, result)
 
@@ -63,7 +64,7 @@ def handle_image_message(event):
         for chunk in message_content.iter_content():
             image_bytes += chunk
 
-        result = handle_image(image_bytes)
+        result = handle_image(image_bytes, source="line")
         _reply(event, result)
     except Exception as e:
         _reply(event, [f"💥 視覺大腦處理失敗：{str(e)}"])

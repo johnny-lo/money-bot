@@ -291,7 +291,7 @@ def handle_update_expense(target_id: int, new_item: str, new_price: int) -> str:
         db.close()
 
 
-def handle_record_text(msg: str) -> list[str] | None:
+def handle_record_text(msg: str, source: str | None = None) -> list[str] | None:
     """處理一般記帳文字（支援多行）。回傳 [記帳結果, AI回應] 或 None（非記帳訊息）。"""
     lines = msg.split('\n')
     success_records = []
@@ -320,7 +320,7 @@ def handle_record_text(msg: str) -> list[str] | None:
             if match:
                 item_name = match.group(1).strip()
                 price_val = int(match.group(2))
-                new_transaction = Transaction(item=item_name, price=price_val)
+                new_transaction = Transaction(item=item_name, price=price_val, source=source)
                 db.add(new_transaction)
                 db.flush()
                 success_records.append(f"💸 支出 ID:{new_transaction.id} | {item_name}：{price_val} 元")
@@ -341,7 +341,7 @@ def handle_record_text(msg: str) -> list[str] | None:
         db.close()
 
 
-def handle_image(image_bytes: bytes) -> list[str]:
+def handle_image(image_bytes: bytes, source: str | None = None) -> list[str]:
     """處理圖片記帳。回傳 [記帳結果, AI回應]。"""
     prompt = """這是一張消費明細或發票。請幫我列出上面所有的「消費項目」與對應的「金額」。
     請嚴格只回傳 JSON 陣列 (Array) 格式，不要包含任何其他文字或 Markdown 標籤。
@@ -389,7 +389,7 @@ def handle_image(image_bytes: bytes) -> list[str]:
                 discount_records.append(f"🏷️ 收入 ID:{new_income.id} | {item_name}：-{discount_amount}")
                 continue
 
-            new_transaction = Transaction(item=item_name, price=price_val)
+            new_transaction = Transaction(item=item_name, price=price_val, source=source)
             db.add(new_transaction)
             db.flush()
             success_records.append(f"✅ ID:{new_transaction.id} | {item_name}：{price_val}")
@@ -421,7 +421,8 @@ def handle_image(image_bytes: bytes) -> list[str]:
         db.close()
 
 
-def process_text_message(msg: str, user_id: str = None, base_url: str = None) -> list[str] | None:
+def process_text_message(msg: str, user_id: str = None, base_url: str = None,
+                         source: str | None = None) -> list[str] | None:
     """統一處理文字訊息的路由。回傳回覆訊息列表，或 None（無法識別的訊息）。"""
     msg = msg.strip()
 
@@ -487,7 +488,7 @@ def process_text_message(msg: str, user_id: str = None, base_url: str = None) ->
         )]
 
     # 一般記帳
-    return handle_record_text(msg)
+    return handle_record_text(msg, source=source)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -601,10 +602,10 @@ def query_recent_data(limit: int = 5) -> list[dict]:
         db.close()
 
 
-def record_expense_data(item: str, price: int) -> dict:
+def record_expense_data(item: str, price: int, source: str | None = None) -> dict:
     db = SessionLocal()
     try:
-        tx = Transaction(item=item, price=price)
+        tx = Transaction(item=item, price=price, source=source)
         db.add(tx)
         db.commit()
         db.refresh(tx)
@@ -770,7 +771,7 @@ def delete_recurring_data(target_id: int) -> dict:
         db.close()
 
 
-def handle_image_data(image_bytes: bytes) -> dict:
+def handle_image_data(image_bytes: bytes, source: str | None = None) -> dict:
     """處理圖片記帳，回傳結構化資料。"""
     prompt = """這是一張消費明細或發票。請幫我列出上面所有的「消費項目」與對應的「金額」。
     請嚴格只回傳 JSON 陣列 (Array) 格式，不要包含任何其他文字或 Markdown 標籤。
@@ -813,7 +814,7 @@ def handle_image_data(image_bytes: bytes) -> dict:
                 db.flush()
                 discounts.append({"id": inc.id, "item": item_name, "amount": amt})
                 continue
-            tx = Transaction(item=item_name, price=price_val)
+            tx = Transaction(item=item_name, price=price_val, source=source)
             db.add(tx)
             db.flush()
             expenses.append({"id": tx.id, "item": item_name, "amount": price_val})

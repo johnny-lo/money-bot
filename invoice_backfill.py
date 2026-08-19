@@ -102,7 +102,7 @@ def sync_with_backfill(headless: bool = True, today: date | None = None) -> dict
         for entry in plan:
             try:
                 invs = _scrape_one(phone, password, entry, headless)
-                new_inv, new_items, added = _save_invoices(invs)
+                new_inv, new_items, added = _save_invoices(invs, source=f"載具{label}")
                 total_new_inv += new_inv
                 all_added.extend(added)
                 lines.append(f"  載具{label} {masked} {_entry_label(entry)}："

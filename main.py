@@ -48,6 +48,28 @@ try:
             ))
             _conn.commit()
             print("✅ 已自動新增 invoice_no 欄位")
+        # transactions 補 source / shared（既有表 create_all 不會加欄）
+        for _col, _ddl in (
+            ("source", "ALTER TABLE transactions ADD COLUMN source VARCHAR"),
+            ("shared", "ALTER TABLE transactions ADD COLUMN shared INTEGER DEFAULT 0"),
+        ):
+            if _col not in _columns:
+                _conn.execute(_text(_ddl))
+                _conn.commit()
+                print(f"✅ 已自動新增 transactions.{_col} 欄位")
+        _conn.execute(_text(
+            "CREATE INDEX IF NOT EXISTS ix_transactions_source ON transactions (source)"
+        ))
+        _conn.commit()
+        # recurring_records 補 shared
+        if _inspector.has_table("recurring_records"):
+            _rr_cols = [c["name"] for c in _inspector.get_columns("recurring_records")]
+            if "shared" not in _rr_cols:
+                _conn.execute(_text(
+                    "ALTER TABLE recurring_records ADD COLUMN shared INTEGER DEFAULT 0"
+                ))
+                _conn.commit()
+                print("✅ 已自動新增 recurring_records.shared 欄位")
         # food_photos 補 FK（既有表不會被 create_all 改結構）：先清孤兒列再加約束
         if _inspector.has_table("food_photos") and not _inspector.get_foreign_keys("food_photos"):
             _conn.execute(_text(

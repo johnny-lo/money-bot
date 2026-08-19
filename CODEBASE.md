@@ -25,8 +25,8 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── codex_cli.py         # codex_text(prompt)：shell 出去呼叫本機 `codex exec`（ChatGPT 訂閱制，預設 gpt-5.5），用 --output-last-message 取乾淨輸出。供「分類 + 週/月報評語」的文字生成用，取代計費的 Gemini 文字 API（CODEX_MODEL env 可覆蓋模型）
 ├── database.py          # SQLAlchemy engine/SessionLocal/Base 建立（讀 DATABASE_URL）
 ├── models.py            # ORM 模型：Transaction(支出)、Income(收入)、RecurringRecord(固定收支)
-├── categorize.py        # AI 分類（走 codex_text / 訂閱制）：CATEGORIES(14 細類,含投資)/CATEGORY_GROUPS(細→大組)/GROUP_ORDER、run_weekly_categorization()(只處理 NULL)、run_full_recategorization()(清掉全部重跑)、category_group()。AI 分批 50 筆送，避免單次 prompt 太長
-├── report_helpers.py    # 報表純函式（無 DB / 無網路）：compare(對比)、top_n_expenses、detect_anomalies、sparkline/daily_heatmap、savings_rate、budget_status、日期工具(week_range/month_range/is_first_sunday 等)。全部由 tests/test_report_helpers.py 覆蓋（49 個測試）。**另有三桶水位純函式**：`CATEGORY_BUCKETS`(細類→投資/生活/爽,跟 6 大組是不同的軸——大組答「花在什麼」,桶答「該不該花」)、`parse_bucket_ratios`(「1:1:1」→正規化,寫壞退回三等分)、`bucket_totals`(回 (每桶金額, **未分類金額**);未分類要單獨回,因為記帳當下 category 是 NULL、要等週日 AI 分類才落桶,不揭露會讓水位低估)、`format_bucket_context`(組給 AI 角色讀的文字,income<=0 回 None)
+├── categorize.py        # AI 分類（走 codex_text / 訂閱制）：CATEGORIES(15 細類,含投資與家電3C)/CATEGORY_GROUPS(細→大組)/GROUP_ORDER、run_weekly_categorization()(只處理 NULL)、run_full_recategorization()(清掉全部重跑)、category_group()。AI 分批 50 筆送，避免單次 prompt 太長
+├── report_helpers.py    # 報表純函式（無 DB / 無網路）：compare(對比)、top_n_expenses、detect_anomalies、sparkline/daily_heatmap、savings_rate、budget_status、日期工具(week_range/month_range/is_first_sunday 等)。全部由 tests/test_report_helpers.py 覆蓋（49 個測試）。**另有三桶水位純函式**：`CATEGORY_BUCKETS`(細類→投資/固定/生活/爽,跟 6 大組是不同的軸——大組答「花在什麼」,桶答「該不該花」)、`parse_bucket_ratios`(「1:1:1」→正規化,寫壞退回三等分)、`bucket_totals`(回 (每桶金額, **未分類金額**);未分類要單獨回,因為記帳當下 category 是 NULL、要等週日 AI 分類才落桶,不揭露會讓水位低估)、`format_bucket_context`(組給 AI 角色讀的文字,income<=0 回 None)
 ├── tests/               # pytest 測試。跑法：`docker compose exec app pytest tests/ -v`
 ├── recurring.py         # 固定收支：run_daily_recurring() 每日自動寫入到期項目
 ├── auth.py              # 認證兩層：短效報表 token(30min,in-memory)generate/validate_report_token + PWA 長效裝置 token(DB,無期限,記 last_used_at)create/validate/revoke_device_token。require_token 收 query token 或 X-Device-Token header 擇一
@@ -86,9 +86,9 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 
 | Table | Columns | Notes |
 |-------|---------|-------|
-| `transactions` | id(PK), item(str), price(int), category(str?), invoice_no(str?), created_at(datetime) | 支出。invoice_no 是發票去重 key（einvoice 自動帶入；手動記帳為 NULL） |
+| `transactions` | id(PK), item(str), price(int), category(str?), invoice_no(str?), **source(str?, index)**, **shared(int, 預設0)**, created_at(datetime) | 支出。invoice_no 是發票去重 key。**source＝資料通道**（`載具1`/`載具2`/`discord`/`line`/`app`/`recurring`）——兩組載具分屬兩人，所以它同時回答「這筆是誰花的」；載具編號在 einvoice 同步時就知道，接進 `_save_invoices(source=...)` 即全自動。**shared=1＝兩人共同分攤**，DB 存**全額**，算「我的份」時才除以 2（家庭總支出仍正確，改分攤比例不必重寫歷史） |
 | `incomes` | id(PK), item(str), amount(int), category(str?), created_at(datetime) | 收入 |
-| `recurring_records` | id(PK), type("expense"/"income"), item, amount, category?, day_of_month(1-28), active(1/0), created_at | 固定收支 |
+| `recurring_records` | id(PK), type("expense"/"income"), item, amount, category?, day_of_month(1-28), active(1/0), **shared(int)**, created_at | 固定收支；shared 會被每月自動產生的 Transaction 繼承 |
 | `food_places` | id(PK), place_id(str?), name, address?, lat?, lng?, country?, city?, district?, cuisine_type?, recommended_items?, caution_summary?, status("想去"/"去過"), my_rating(int?), my_note?, source_url?, updated_at, created_at | 美食地圖（Phase 1A+） |
 | `recipes` | id(PK), name(str), url(str, UNIQUE 去重鍵), discord_message_id(str?, index), created_at | 食譜收錄；url UNIQUE 防重複收錄；discord_message_id 供 reply 卡片更名用 |
 | `device_tokens` | id(PK), token(UNIQUE index), label?, created_at, last_used_at? | PWA 長效裝置 token；撤銷=刪列（auth.revoke_device_token） |
@@ -133,14 +133,14 @@ LINE/Discord 訊息
 
 ## Category Schema (categorize.py)
 
-14 細類 → 7 大組對應，封閉清單（AI 必須從中選一）：
+15 細類 → 7 大組對應，封閉清單（AI 必須從中選一）：
 
 | 大組 | 細類 |
 |---|---|
 | 固定 | 居住水電、分期保險 |
 | 交通 | 交通 |
 | 飲食 | 三餐、聚餐、飲料零食、食材、超商 |
-| 生活 | 日用品、醫療、服飾 |
+| 生活 | 日用品、家電3C、醫療、服飾 |
 | 娛樂 | 娛樂 |
 | 投資 | 投資 |
 | 其他 | 其他 |

@@ -6,6 +6,7 @@
 import pytest
 
 from report_helpers import (
+    BUCKET_FIXED,
     BUCKET_FUN,
     BUCKET_INVEST,
     BUCKET_LIVING,
@@ -17,25 +18,26 @@ from report_helpers import (
 
 # ── parse_bucket_ratios ──────────────────────────────────────
 
-def test_三分法正規化成三等份():
-    a, b, c = parse_bucket_ratios("1:1:1")
-    assert a == pytest.approx(1 / 3) and b == pytest.approx(1 / 3) and c == pytest.approx(1 / 3)
+def test_四等分():
+    assert parse_bucket_ratios("1:1:1:1") == pytest.approx((0.25, 0.25, 0.25, 0.25))
 
 
 def test_任意比例都正規化到加總為一():
-    ratios = parse_bucket_ratios("2:5:3")
+    ratios = parse_bucket_ratios("2:4:2:2")
     assert sum(ratios) == pytest.approx(1.0)
-    assert ratios[0] == pytest.approx(0.2) and ratios[1] == pytest.approx(0.5)
+    assert ratios[0] == pytest.approx(0.2) and ratios[1] == pytest.approx(0.4)
 
 
 def test_斜線也接受():
-    assert parse_bucket_ratios("1/1/1") == parse_bucket_ratios("1:1:1")
+    assert parse_bucket_ratios("1/1/1/1") == parse_bucket_ratios("1:1:1:1")
 
 
-@pytest.mark.parametrize("bad", [None, "", "1:2", "abc:1:1", "1:1:1:1", "-1:1:1", "0:0:0"])
+@pytest.mark.parametrize("bad", [None, "", "1:2", "abc:1:1:1", "1:1:1", "-1:1:1:1", "0:0:0:0"])
 def test_設定寫壞就退回等分而不是壞掉(bad):
-    """設定打錯不該讓整個功能消失——退回三等份，行為可預測。"""
-    assert parse_bucket_ratios(bad) == pytest.approx((1 / 3, 1 / 3, 1 / 3))
+    """設定打錯不該讓整個功能消失——退回等分，行為可預測。
+    注意 "1:1:1"（舊的三桶格式）也算寫壞：桶數變了就該退回等分而不是硬套。
+    """
+    assert parse_bucket_ratios(bad) == pytest.approx((0.25,) * 4)
 
 
 # ── bucket_totals ────────────────────────────────────────────
@@ -45,14 +47,27 @@ def test_細類正確落桶():
         {"name": "投資", "amount": 10000},
         {"name": "三餐", "amount": 3000},
         {"name": "居住水電", "amount": 15000},
+        {"name": "分期保險", "amount": 13611},
         {"name": "娛樂", "amount": 800},
         {"name": "飲料零食", "amount": 400},
     ]
     totals, uncategorized = bucket_totals(cats)
     assert totals[BUCKET_INVEST] == 10000
-    assert totals[BUCKET_LIVING] == 18000
+    assert totals[BUCKET_FIXED] == 28611      # 房租 + 車貸：不可壓縮
+    assert totals[BUCKET_LIVING] == 3000
     assert totals[BUCKET_FUN] == 1200
     assert uncategorized == 0
+
+
+def test_大額家電歸爽桶不歸生活():
+    """一台 23,900 的電視是想要不是需要。混在日用品裡會把生活桶灌爆，
+    然後助理就會在你買洗衣精的時候唸你（真實踩過）。"""
+    totals, _ = bucket_totals([
+        {"name": "家電3C", "amount": 23900},
+        {"name": "日用品", "amount": 109},
+    ])
+    assert totals[BUCKET_FUN] == 23900
+    assert totals[BUCKET_LIVING] == 109
 
 
 def test_未分類單獨回報不併入任何桶():
@@ -82,7 +97,7 @@ def test_空清單不炸():
 
 # ── format_bucket_context ────────────────────────────────────
 
-_R = (1 / 3, 1 / 3, 1 / 3)
+_R = (0.25, 0.25, 0.25, 0.25)
 
 
 def test_沒有收入基準就回_None():
@@ -97,8 +112,8 @@ def test_算得出每桶的用量與百分比():
         day_of_month=15, days_in_month=30,
     )
     assert "$60,000" in out
-    assert "🎉 爽：$10,000 / $20,000（50%）" in out
-    assert "🏦 投資：$0 / $20,000（0%）" in out
+    assert "🎉 爽：$10,000 / $15,000（67%）" in out
+    assert "🏦 投資：$0 / $15,000（0%）" in out
     assert "月份進度：15/30 天（50%）" in out
 
 
@@ -108,6 +123,7 @@ def test_有未分類就明講低估():
         day_of_month=1, days_in_month=31,
     )
     assert "尚未分類 $3,000" in out and "低估" in out
+    assert "本月4桶水位" in out, "桶數要跟著 BUCKET_ORDER 走，不能寫死"
 
 
 def test_沒有未分類就不出現那行():
@@ -143,3 +159,16 @@ def test_每個細類都必須有對應的桶():
 def test_桶的值只能是三個合法桶():
     from report_helpers import BUCKET_ORDER, CATEGORY_BUCKETS
     assert set(CATEGORY_BUCKETS.values()) <= set(BUCKET_ORDER)
+
+
+def test_固定桶要標註不看進度():
+    """房租月初一次付清，1 號就 100%。拿它跟月份進度比會得出「你花太快」的荒謬結論，
+    所以要明白告訴角色：這桶不看進度、也不用唸。"""
+    out = format_bucket_context(
+        60000, [{"name": "居住水電", "amount": 12000}], _R,
+        day_of_month=1, days_in_month=31,
+    )
+    fixed_line = [l for l in out.split("\n") if l.startswith("🏠")][0]
+    assert "不看進度" in fixed_line and "不用唸" in fixed_line
+    # 其他桶不該有這個註記
+    assert "不看進度" not in [l for l in out.split("\n") if l.startswith("🎉")][0]

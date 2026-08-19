@@ -18,7 +18,12 @@ def run_daily_recurring():
             if r.type == "income":
                 entry = Income(item=r.item, amount=r.amount, category=r.category)
             else:
-                entry = Transaction(item=r.item, price=r.amount, category=r.category)
+                # source="recurring" 讓固定支出在報表裡可以跟實際刷卡/發票分開看；
+                # shared 從設定繼承（房租車貸這類兩人分攤的，DB 存全額、標 shared=1）
+                entry = Transaction(
+                    item=r.item, price=r.amount, category=r.category,
+                    source="recurring", shared=getattr(r, "shared", 0) or 0,
+                )
             db.add(entry)
             count += 1
 

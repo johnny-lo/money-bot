@@ -68,7 +68,7 @@ def _patch(monkeypatch, *, last, carriers, scrape_ok=True):
         return [{"invoice_no": "X", "amount": 1, "date": "2026-06-18", "seller": "S", "items": []}]
 
     monkeypatch.setattr(ib, "_scrape_one", fake_scrape)
-    monkeypatch.setattr(ib, "_save_invoices", lambda invs: (len(invs), len(invs), []))
+    monkeypatch.setattr(ib, "_save_invoices", lambda invs, **kw: (len(invs), len(invs), []))
     return saved, calls
 
 

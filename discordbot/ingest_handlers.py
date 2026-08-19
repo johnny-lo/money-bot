@@ -22,7 +22,7 @@ async def do_image_recording(message: discord.Message, att: discord.Attachment):
             async with aiohttp.ClientSession() as s:
                 async with s.get(att.url) as resp:
                     image_bytes = await resp.read()
-            data = handle_image_data(image_bytes)
+            data = handle_image_data(image_bytes, source="discord")
             embeds = [image_recorded_embed(data)]
             pe = persona_embed(data.get("persona", ""))
             if pe:

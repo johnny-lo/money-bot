@@ -460,7 +460,7 @@ async def _scrape_carrier(phone: str, password: str, days: int, headless: bool =
 
 # ─────────────────── DB 寫入 ───────────────────
 
-def _save_invoices(invoices: list[dict]) -> tuple[int, int, list[dict]]:
+def _save_invoices(invoices: list[dict], source: str | None = None) -> tuple[int, int, list[dict]]:
     """寫入 DB，去重（同一張發票已寫過就跳過）。回傳 (新增發票數, 新增品項數, 新增品項清單)。"""
     if not invoices:
         return 0, 0, []
@@ -488,6 +488,7 @@ def _save_invoices(invoices: list[dict]) -> tuple[int, int, list[dict]]:
                     item=name,
                     price=it["amount"],
                     invoice_no=inv_no,
+                    source=source,
                     created_at=inv_dt,
                 )
                 db.add(tx)
@@ -501,6 +502,7 @@ def _save_invoices(invoices: list[dict]) -> tuple[int, int, list[dict]]:
                     item=name,
                     price=inv["amount"],
                     invoice_no=inv_no,
+                    source=source,
                     created_at=inv_dt,
                 )
                 db.add(tx)
@@ -543,7 +545,7 @@ def sync_invoices(days: int = 1, headless: bool = True) -> dict:
         masked = f"{phone[:4]}***{phone[-2:]}"
         try:
             invoices = asyncio.run(_scrape_carrier(phone, password, days, headless=headless))
-            new_inv, new_items, added = _save_invoices(invoices)
+            new_inv, new_items, added = _save_invoices(invoices, source=f"載具{label}")
             total_new_inv += new_inv
             total_new_items += new_items
             all_added.extend(added)
