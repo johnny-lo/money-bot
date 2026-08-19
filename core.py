@@ -9,7 +9,7 @@ from models import Transaction, Income, RecurringRecord
 from gemini import gemini_image, generate_persona_comment
 from categorize import run_weekly_categorization
 from auth import generate_report_token
-from report_helpers import format_bucket_context, parse_bucket_ratios
+from report_helpers import format_bucket_context, parse_bucket_ratios, split_shared
 
 # 擷取指令的正規表達式
 PATTERN = re.compile(r"^(.+)\s+(\d+)$")
@@ -510,17 +510,41 @@ def _previous_month_income() -> int:
         db.close()
 
 
-def bucket_context() -> str | None:
-    """組出給 AI 角色看的三桶（投資/生活/爽）水位文字。
+def _month_categories_with_shared() -> list[dict]:
+    """本月支出：依 (分類, 是否共同分攤) 加總。給桶位算「我的那一份」用。
 
-    刻意複用 query_monthly_data()——月收入與分類明細它已經在查了，不另開一套查詢
-    （一個真相、多個薄客戶端）。比例由 BUCKET_RATIOS 環境變數決定，預設三等分。
+    不能直接用 query_monthly_data() 的 categories——那是**全額**加總。而 MONTHLY_INCOME
+    是「我一個人的」收入，拿全額的房租去比我個人的收入，兩邊基準對不起來。
+    """
+    now = datetime.now()
+    db = SessionLocal()
+    try:
+        rows = db.query(
+            Transaction.category, Transaction.shared, func.sum(Transaction.price),
+        ).filter(
+            func.extract('year', Transaction.created_at) == now.year,
+            func.extract('month', Transaction.created_at) == now.month,
+        ).group_by(Transaction.category, Transaction.shared).all()
+        return [
+            {"name": c or "未分類", "shared": int(sh or 0), "amount": int(a or 0)}
+            for c, sh, a in rows
+        ]
+    finally:
+        db.close()
+
+
+def bucket_context() -> str | None:
+    """組出給 AI 角色看的四桶（投資/固定/生活/爽）水位文字。
+
+    收入基準是**我個人的**，所以共同分攤（shared=1）的支出只計 SHARED_SPLIT 那一份
+    （預設 0.5）——不然房租全額 12,000 會拿去比我一個人的 52,000，桶位灌水。
+    比例由 BUCKET_RATIOS 環境變數決定，預設等分。
 
     **任何失敗都回 None**，呼叫端就完全不傳 context，角色退回「沒有水位資訊」的
     保守模式（禁止超支告誡）。記帳本身絕不能因為算水位失敗而失敗。
     """
     try:
-        data = query_monthly_data()
+        data = query_monthly_data()      # 收入基準用它（全額支出這裡不用）
         # 基準優先序：本月實收 → 上月實收 → MONTHLY_INCOME 設定值。
         # 第三段是必要的：不是每個人都會把薪水記進來（本專案自己就沒有），
         # 少了它這個功能會「永遠算不出水位」＝等於沒做。
@@ -530,9 +554,13 @@ def bucket_context() -> str | None:
         if income <= 0:
             income, basis = int(os.getenv("MONTHLY_INCOME") or 0), "設定的月收入"
         now = datetime.now()
+        try:
+            share = float(os.getenv("SHARED_SPLIT") or 0.5)
+        except ValueError:
+            share = 0.5
         return format_bucket_context(
             income,
-            data["categories"],
+            split_shared(_month_categories_with_shared(), share),
             parse_bucket_ratios(os.getenv("BUCKET_RATIOS")),
             day_of_month=now.day,
             days_in_month=calendar.monthrange(now.year, now.month)[1],

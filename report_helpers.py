@@ -279,6 +279,28 @@ def parse_bucket_ratios(spec: str | None, n: int = 4) -> tuple[float, ...]:
     return tuple(x / total for x in nums)
 
 
+def split_shared(rows: list[dict], ratio: float = 0.5) -> list[dict]:
+    """把「共同分攤」的支出折成自己那一份，並依分類重新加總。
+
+    rows 形如 [{"name": 分類, "shared": 0/1, "amount": 全額}, ...]。
+
+    為什麼 DB 存全額、到這裡才折：家庭總支出仍然正確（報表看「我們家一個月花多少」
+    不會少一半），而分攤比例改成 6:4 時只要改這個 ratio，不必回頭重寫歷史資料。
+
+    ratio 超出 (0, 1] 視為設定寫壞，退回 0.5——不要讓一個打錯的設定把水位算成 0。
+    """
+    if not (0 < ratio <= 1):
+        ratio = 0.5
+    merged: dict[str, int] = {}
+    for r in rows or []:
+        amount = int(r.get("amount") or 0)
+        if r.get("shared"):
+            amount = int(round(amount * ratio))
+        name = r.get("name") or "未分類"
+        merged[name] = merged.get(name, 0) + amount
+    return [{"name": k, "amount": v} for k, v in merged.items()]
+
+
 def bucket_totals(categories: list[dict]) -> tuple[dict[str, int], int]:
     """把 query_monthly_data() 的 categories 攤成各桶總額。
 

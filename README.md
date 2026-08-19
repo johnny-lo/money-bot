@@ -104,6 +104,7 @@
 | `MONTHLY_BUDGET` | 月度預算金額（選填，0 = 不顯示預算進度）|
 | `MONTHLY_INCOME` | 三桶水位的收入基準（選填但**建議設**）。優先序：本月實收 → 上月實收 → 此值；都沒有則角色拿不到水位，走保守模式 |
 | `BUCKET_RATIOS` | 四桶比例 `投資:固定:生活:爽`（選填，預設等分；建議 `2:4:2:2`）|
+| `SHARED_SPLIT` | 共同分攤支出在「我的桶位」裡算幾成（選填，預設 `0.5`）。DB 存全額，只有算桶位時折 |
 | `DISCORD_BOT_TOKEN` | Discord Bot Token（選填，未設定則跳過） |
 | `DISCORD_INVOICE_CHANNEL_ID` | 發票通知頻道 ID（選填） |
 | `DISCORD_REPORT_CHANNEL_ID` | 週報 / 月結通知頻道 ID（選填） |

@@ -172,3 +172,47 @@ def test_固定桶要標註不看進度():
     assert "不看進度" in fixed_line and "不用唸" in fixed_line
     # 其他桶不該有這個註記
     assert "不看進度" not in [l for l in out.split("\n") if l.startswith("🎉")][0]
+
+
+# ── split_shared：共同分攤只計自己那一份 ──────────────────────
+
+def test_共同分攤的支出只算一半():
+    """收入基準是「我一個人的」，所以拿全額房租去比會把桶位灌水。"""
+    from report_helpers import split_shared
+    out = {r["name"]: r["amount"] for r in split_shared([
+        {"name": "居住水電", "shared": 1, "amount": 12000},   # 房租，兩人分
+        {"name": "三餐", "shared": 0, "amount": 300},          # 自己吃的
+    ])}
+    assert out["居住水電"] == 6000
+    assert out["三餐"] == 300
+
+
+def test_同分類的共同與個人會合併相加():
+    """同一個分類可能同時有共同與個人的支出，折半後要併成一筆。"""
+    from report_helpers import split_shared
+    out = {r["name"]: r["amount"] for r in split_shared([
+        {"name": "居住水電", "shared": 1, "amount": 12000},   # → 6000
+        {"name": "居住水電", "shared": 0, "amount": 1700},    # 自己付的電費 → 1700
+    ])}
+    assert out["居住水電"] == 7700
+
+
+def test_分攤比例可調():
+    from report_helpers import split_shared
+    out = {r["name"]: r["amount"] for r in split_shared(
+        [{"name": "居住水電", "shared": 1, "amount": 10000}], ratio=0.6)}
+    assert out["居住水電"] == 6000
+
+
+@pytest.mark.parametrize("bad", [0, -0.5, 1.5, 99])
+def test_比例寫壞退回一半而不是把水位算成零(bad):
+    from report_helpers import split_shared
+    out = {r["name"]: r["amount"] for r in split_shared(
+        [{"name": "居住水電", "shared": 1, "amount": 10000}], ratio=bad)}
+    assert out["居住水電"] == 5000
+
+
+def test_沒有分類的也要留著():
+    from report_helpers import split_shared
+    out = {r["name"]: r["amount"] for r in split_shared([{"shared": 0, "amount": 500}])}
+    assert out["未分類"] == 500
