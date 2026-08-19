@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+# 同一分支連續推送時,取消還在跑的舊 run(省 runner 時間)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 後端（測試 + import 預檢）
+    runs-on: ubuntu-latest
+
+    # import 預檢會執行 main.py 的 Base.metadata.create_all + ALTER 檢查,
+    # 需要一個真的連得到的 Postgres。
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # database.py 在 import 時就 create_engine(DATABASE_URL);沒有這個值會
+      # ArgumentError,21 個測試檔直接收集失敗。測試本身不連 DB,但這個變數必須存在。
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      # 註:LINE 憑證刻意不給。line_handler 缺憑證時會印一行「跳過 LINE webhook」
+      # 然後正常啟動(見 tests/test_line_optional.py),CI 順便驗證這個可選性沒被改壞。
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"   # 對齊 Dockerfile
+          cache: pip
+
+      - name: 安裝依賴
+        run: pip install -r requirements.txt
+
+      # tests/test_einvoice_{detail,pagination}.py 會 p.chromium.launch() 開真瀏覽器。
+      # 不裝的話它們是 fail 而不是 skip(importorskip 只檢查套件,套件在 requirements 裡)。
+      - name: 快取 Playwright 瀏覽器
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+      - name: 安裝 Chromium
+        run: playwright install --with-deps chromium
+
+      - name: 單元測試
+        run: pytest tests/ -q
+
+      # 這個 repo 最痛的一次生產中斷是「加端點忘了裝 python-multipart → import 期
+      # RuntimeError → bot + webhook 全掛」。import 崩潰 = 全站掛,所以把它擋在 CI。
+      - name: import 預檢（import 崩潰 = 全站掛）
+        run: python -c "import main; print('import main OK')"
+
+  frontend:
+    name: 前端 build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"       # package.json 的 build script 帶 Node 18+ 的 webcrypto flag
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安裝依賴
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build（產出 dist/,不入版控,只驗證 build 得起來）
+        run: npm run build
+        working-directory: frontend

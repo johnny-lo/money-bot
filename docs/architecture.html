@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Money Bot 後端架構全覽</title>
+<style>
+  :root {
+    --bg: #1b1d21;
+    --panel: #24262b;
+    --card: #2e3136;
+    --card-hi: #35393f;
+    --line: #3d4148;
+    --text: #dbdee1;
+    --muted: #9aa1ab;
+    --faint: #6d7480;
+    --link: #58a6d8;
+
+    /* 顏色直接取自 discordbot/embeds.py 的常數 */
+    --c-expense: #E74C3C;
+    --c-income:  #2ECC71;
+    --c-info:    #3498DB;
+    --c-persona: #9B59B6;
+    --c-warn:    #F1C40F;
+    --c-food:    #E67E22;
+    --c-recipe:  #16A085;
+    --c-video:   #8E44AD;
+
+    --sans: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { transition: none !important; }
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.75;
+  }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--c-info);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+  code {
+    font-family: var(--mono);
+    font-size: 0.86em;
+    background: #1e2024;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.08em 0.4em;
+    color: #c9d4de;
+    word-break: break-all;
+  }
+
+  /* ── 七色 rail：整套系統的域色圖例 ─────────────────── */
+  .rail {
+    height: 4px;
+    background: linear-gradient(90deg,
+      var(--c-expense) 0 14.28%, var(--c-income) 0 28.56%,
+      var(--c-info) 0 42.84%,   var(--c-persona) 0 57.12%,
+      var(--c-food) 0 71.4%,    var(--c-recipe) 0 85.68%,
+      var(--c-video) 0 100%);
+  }
+
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 20px; }
+
+  /* ── Hero ──────────────────────────────────────────── */
+  header.hero { padding: 44px 0 28px; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    color: var(--faint);
+    margin-bottom: 14px;
+  }
+  h1 {
+    font-size: clamp(26px, 4.5vw, 40px);
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    line-height: 1.25;
+  }
+  h1 .sub { color: var(--muted); font-weight: 500; }
+  .lede { margin-top: 12px; max-width: 46em; color: var(--muted); }
+  .stackline {
+    margin-top: 18px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--faint);
+    line-height: 2;
+  }
+  .stackline b { color: var(--muted); font-weight: 600; }
+
+  /* ── 導覽列（頻道清單）────────────────────────────── */
+  nav.chan {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(27,29,33,0.92);
+    backdrop-filter: blur(6px);
+    border-block: 1px solid var(--line);
+  }
+  nav.chan .wrap {
+    display: flex; gap: 4px;
+    overflow-x: auto;
+    padding-block: 8px;
+    scrollbar-width: thin;
+  }
+  nav.chan a {
+    flex: 0 0 auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--muted);
+    padding: 4px 10px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  nav.chan a:hover { background: var(--card); color: var(--text); text-decoration: none; }
+
+  /* ── 章節（頻道標題）────────────────────────────── */
+  section { padding: 36px 0 8px; scroll-margin-top: 52px; }
+  h2.chan-title {
+    font-size: 20px;
+    font-weight: 800;
+    display: flex; align-items: baseline; gap: 8px;
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 10px;
+    margin-bottom: 20px;
+  }
+  h2 .hash { font-family: var(--mono); color: var(--faint); font-weight: 400; }
+  h3 {
+    font-size: 15.5px; font-weight: 700;
+    margin: 26px 0 10px;
+    color: var(--text);
+  }
+  h3 .tag {
+    font-family: var(--mono); font-size: 11px; font-weight: 400;
+    color: var(--faint); margin-left: 8px;
+  }
+  p.note { color: var(--muted); font-size: 13.5px; max-width: 52em; margin: 8px 0; }
+  p.note b { color: var(--text); }
+
+  /* ── embed 卡片（仿 Discord embed）────────────────── */
+  .embed {
+    background: var(--card);
+    border-left: 4px solid var(--c, var(--line));
+    border-radius: 4px;
+    padding: 14px 16px;
+  }
+  .embed .etitle { font-weight: 700; font-size: 14.5px; margin-bottom: 6px; }
+  .embed .edesc { font-size: 13.5px; color: var(--muted); }
+  .embed .edesc b { color: var(--text); font-weight: 600; }
+  .efields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 16px; margin-top: 10px; }
+  .f .fn {
+    font-family: var(--mono); font-size: 10.5px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--faint); margin-bottom: 2px;
+  }
+  .f .fv { font-size: 13px; color: var(--text); }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+    gap: 12px;
+  }
+
+  /* ── 模組清單（details）──────────────────────────── */
+  details.files { margin-top: 10px; }
+  details.files summary {
+    cursor: pointer;
+    font-family: var(--mono); font-size: 12px;
+    color: var(--faint);
+    list-style: none;
+  }
+  details.files summary::before { content: "▸ "; }
+  details.files[open] summary::before { content: "▾ "; }
+  details.files ul { list-style: none; margin-top: 8px; }
+  details.files li {
+    font-size: 13px; color: var(--muted);
+    padding: 4px 0 4px 12px;
+    border-left: 1px solid var(--line);
+    margin-left: 4px;
+  }
+  details.files li b { color: var(--text); font-weight: 600; }
+
+  /* ── 系統地圖 ────────────────────────────────────── */
+  .mapwrap { overflow-x: auto; }
+  .sysmap {
+    min-width: 720px;
+    display: grid;
+    grid-template-columns: 1fr 30px 1.25fr 30px 1fr;
+    gap: 10px;
+    align-items: stretch;
+  }
+  .lane { display: flex; flex-direction: column; gap: 8px; }
+  .lane .lt {
+    font-family: var(--mono); font-size: 11px;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--faint); text-align: center; padding-bottom: 2px;
+  }
+  .node {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--c, var(--line));
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 12.5px;
+    flex: 1;
+  }
+  .node b { display: block; font-size: 13px; }
+  .node span { color: var(--muted); font-size: 11.5px; line-height: 1.5; display: block; }
+  .arrcol {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--faint); font-size: 18px; font-family: var(--mono);
+  }
+  .dbbar {
+    min-width: 720px;
+    margin-top: 10px;
+    display: grid; grid-template-columns: 1fr 2fr 1fr;
+  }
+  .dbbar .node { text-align: center; }
+  .downarr {
+    min-width: 720px;
+    text-align: center; color: var(--faint);
+    font-family: var(--mono); line-height: 1.2; margin-top: 8px;
+  }
+
+  /* ── 流程 pills ──────────────────────────────────── */
+  .flow {
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 6px 8px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin: 10px 0;
+  }
+  .flow .step {
+    font-family: var(--mono); font-size: 12px;
+    background: var(--card-hi);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--c, var(--line));
+    border-radius: 4px;
+    padding: 3px 9px;
+    white-space: nowrap;
+  }
+  .flow .arr { color: var(--faint); font-family: var(--mono); font-size: 13px; }
+  @media (max-width: 600px) {
+    .flow .step { white-space: normal; }
+  }
+
+  /* ── 有序步驟（真序列才編號）────────────────────── */
+  ol.steps { list-style: none; counter-reset: st; margin: 12px 0; }
+  ol.steps li {
+    counter-increment: st;
+    position: relative;
+    padding: 6px 0 10px 44px;
+    font-size: 13.5px;
+    color: var(--muted);
+  }
+  ol.steps li b { color: var(--text); }
+  ol.steps li::before {
+    content: counter(st, decimal-leading-zero);
+    position: absolute; left: 0; top: 7px;
+    font-family: var(--mono); font-size: 12px;
+    color: var(--c, var(--faint));
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 7px;
+  }
+  ol.steps li:not(:last-child)::after {
+    content: "";
+    position: absolute; left: 16px; top: 34px; bottom: -2px;
+    width: 1px; background: var(--line);
+  }
+
+  /* ── 表格 ────────────────────────────────────────── */
+  .tablewrap { overflow-x: auto; margin: 12px 0; border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 13px; }
+  th {
+    font-family: var(--mono); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--faint); font-weight: 600;
+    text-align: left; padding: 9px 14px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+  }
+  td { padding: 9px 14px; border-bottom: 1px solid #2a2c31; color: var(--muted); vertical-align: top; }
+  td:first-child { color: var(--text); white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+
+  /* ── 清單 ────────────────────────────────────────── */
+  ul.plain { list-style: none; margin: 8px 0; }
+  ul.plain li {
+    padding: 5px 0 5px 18px;
+    position: relative;
+    font-size: 13.5px; color: var(--muted);
+  }
+  ul.plain li::before {
+    content: "·";
+    position: absolute; left: 4px;
+    color: var(--faint); font-weight: 700;
+  }
+  ul.plain li b { color: var(--text); }
+
+  footer {
+    margin-top: 48px;
+    padding: 22px 0 40px;
+    border-top: 1px solid var(--line);
+    color: var(--faint);
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 2;
+  }
+</style>
+</head>
+<body>
+
+<div class="rail" role="presentation"></div>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">linebot / docs / architecture.html — 供人與 AI 快速理解，內容對齊 2026-07 的 codebase</p>
+    <h1>Money Bot <span class="sub">後端架構全覽</span></h1>
+    <p class="lede">
+      LINE / Discord 雙介面的生活後端——記帳、電子發票同步、美食地圖、食譜收錄、歷史教學影片。
+      FastAPI 單體進程，內含排程器與 Discord bot，AI 只做「抽取、分類、評語」三件事，每條 AI 路徑都有降級出口。
+    </p>
+    <p class="stackline">
+      <b>Runtime</b>&nbsp; Python 3.11 · FastAPI + Uvicorn · SQLAlchemy → PostgreSQL 15 · APScheduler（Asia/Taipei）<br>
+      <b>介面</b>&nbsp; LINE Bot SDK 2.4.3 · discord.py（27 slash commands + 頻道 ingest）· React PWA（掛 /m/）<br>
+      <b>AI／爬蟲</b>&nbsp; Gemini Vision（影像）· codex CLI（訂閱制文字）· Playwright Chromium · yt-dlp · Google Places API (New)<br>
+      <b>部署</b>&nbsp; Docker Compose：app（127.0.0.1:8000）+ db（內網）+ ngrok（tunnel）
+    </p>
+  </div>
+</header>
+
+<nav class="chan" aria-label="章節導覽">
+  <div class="wrap">
+    <a href="#map">#🗺️-系統地圖</a>
+    <a href="#modules">#🧩-模組地圖</a>
+    <a href="#flows">#🔀-資料流</a>
+    <a href="#schedule">#⏰-排程</a>
+    <a href="#db">#🗄️-資料庫</a>
+    <a href="#ai">#🤖-AI-分工</a>
+    <a href="#auth">#🔐-認證與防禦</a>
+    <a href="#patterns">#📐-設計慣例</a>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <!-- ═══════════════ 系統地圖 ═══════════════ -->
+  <section id="map">
+    <h2 class="chan-title"><span class="hash">#</span>🗺️-系統地圖</h2>
+    <p class="note">
+      單一 FastAPI 進程做三份工：HTTP 服務、APScheduler 排程 thread、Discord bot event loop（<code>asyncio.create_task</code> 同進程共生）。
+      色條為域色，全站沿用 <code>discordbot/embeds.py</code> 的顏色常數。
+    </p>
+    <div class="mapwrap">
+      <div class="sysmap">
+        <div class="lane">
+          <div class="lt">輸入</div>
+          <div class="node" style="--c:var(--c-income)"><b>LINE webhook</b><span>POST /callback，純文字＋圖片，X-Line-Signature 驗簽</span></div>
+          <div class="node" style="--c:var(--c-persona)"><b>Discord</b><span>27 個 slash commands＋4 個 ingest 頻道（美食/食譜/影片/記帳圖片）＋✅ reaction</span></div>
+          <div class="node" style="--c:var(--c-warn)"><b>APScheduler</b><span>固定收支、發票補拓、週/月報 pipeline、開機 catch-up</span></div>
+          <div class="node" style="--c:var(--c-info)"><b>PWA（/m/）</b><span>fetch JSON API，帶 X-Device-Token</span></div>
+        </div>
+        <div class="arrcol" aria-hidden="true">→</div>
+        <div class="lane">
+          <div class="lt">處理核心</div>
+          <div class="node" style="--c:var(--c-expense)"><b>core.py 指令路由</b><span>正則指令表 → handle_*()（LINE 字串）/ *_data()（Discord dict）雙介面</span></div>
+          <div class="node" style="--c:var(--c-food)"><b>ingest orchestrators</b><span>food / recipe / video 各一條：抽取 → 正名 → upsert → 事後加值</span></div>
+          <div class="node" style="--c:var(--c-persona)"><b>AI 層</b><span>gemini.py（影像）＋ codex_cli.py（文字，subprocess）</span></div>
+          <div class="node" style="--c:var(--c-recipe)"><b>repo 層</b><span>SessionLocal try/finally，ORM 進、dict 出</span></div>
+        </div>
+        <div class="arrcol" aria-hidden="true">→</div>
+        <div class="lane">
+          <div class="lt">輸出</div>
+          <div class="node" style="--c:var(--c-income)"><b>LINE 回覆</b><span>list[str] 純文字</span></div>
+          <div class="node" style="--c:var(--c-persona)"><b>Discord embeds</b><span>embeds.py 純呈現層；排程經 bridge 投遞</span></div>
+          <div class="node" style="--c:var(--c-info)"><b>JSON API</b><span>routes/：report / record / food_map / recipes / videos / device</span></div>
+          <div class="node" style="--c:var(--c-food)"><b>靜態檔</b><span>/m/（React build）· /media/（店家照片）· /report（ECharts SPA）</span></div>
+        </div>
+      </div>
+      <div class="downarr" aria-hidden="true">↓</div>
+      <div class="dbbar">
+        <div></div>
+        <div class="node" style="--c:var(--c-info)"><b>PostgreSQL 15 — 10 張表</b><span>啟動時 create_all ＋ main.py 手動 ALTER 補欄位（無 Alembic）</span></div>
+        <div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 模組地圖 ═══════════════ -->
+  <section id="modules">
+    <h2 class="chan-title"><span class="hash">#</span>🧩-模組地圖</h2>
+    <div class="grid">
+
+      <div class="embed" style="--c:var(--c-expense)">
+        <div class="etitle">🏛️ 入口與核心</div>
+        <div class="edesc">app 組裝、指令路由、ORM。<b>core.py 是雙介面</b>：同一份邏輯出兩種形狀。</div>
+        <details class="files" open>
+          <summary>7 檔</summary>
+          <ul>
+            <li><b>main.py</b> — app 組裝、DDL 補丁、排程註冊、Discord bot 啟動</li>
+            <li><b>core.py</b> — 正則指令表路由＋記帳/查詢 handlers＋Discord 用 *_data() API</li>
+            <li><b>line_handler.py</b> — /callback webhook、文字/圖片事件</li>
+            <li><b>database.py</b> — engine / SessionLocal / get_db / session_scope</li>
+            <li><b>models.py</b> — 10 個 ORM 模型</li>
+            <li><b>auth.py</b> — 短效 token（in-memory）＋長效裝置 token（DB）</li>
+            <li><b>recurring.py</b> — 每日到期的固定收支自動入帳</li>
+          </ul>
+        </details>
+      </div>
+
+      <div class="embed" style="--c:var(--c-persona)">
+        <div class="etitle">🤖 AI 層</div>
+        <div class="edesc">兩個供應商各司其職，都是<b>手工 HTTP / subprocess</b>，不用 SDK。</div>
+        <details class="files" open>
+          <summary>3 檔</summary>
+          <ul>
+            <li><b>gemini.py</b> — urllib 手組 payload：gemini_image()（拍照記帳/CAPTCHA）、generate_persona_comment()（木須即時評論）</li>
+            <li><b>codex_cli.py</b> — subprocess 跑 <code>codex exec</code>（stdin 進、--output-last-message 出，180s timeout）</li>
+            <li><b>persona.md</b> — 木須龍（台配風格）角色設定，記帳評論與週/月評語共用</li>
+          </ul>
+        </details>
+      </div>
+
+      <div class="embed" style="--c:var(--c-warn)">
+        <div class="etitle">🧾 發票域</div>
+        <div class="edesc">Playwright 爬財政部＋<b>打卡高水位</b>補拓，斷線幾天自動補回。</div>
+        <details class="files" open>
+          <summary>2 檔</summary>
+          <ul>
+            <li><b>einvoice.py</b> — 登入（CAPTCHA×4 重試）、單月查詢（vue-datepicker）、逐筆 modal 明細、翻頁；品名代號加賣方前綴</li>
+            <li><b>invoice_backfill.py</b> — build_month_plan()（純函式拆逐月）＋ sync_with_backfill()（全成功才推進高水位，cap 60 天）</li>
+          </ul>
+        </details>
+      </div>
+
+      <div class="embed" style="--c:var(--c-info)">
+        <div class="etitle">📊 報表域</div>
+        <div class="edesc">彙總查詢在 reports.py，<b>計算全是純函式</b>（49 個單元測試蓋住）。</div>
+        <details class="files" open>
+          <summary>2 檔</summary>
+          <ul>
+            <li><b>report_helpers.py</b> — compare / top_n / detect_anomalies / sparkline / daily_heatmap / savings_rate / budget_status / 日期工具</li>
+            <li><b>categorize.py</b> — 13 細類→6 大組封閉清單；batch 50 送 codex；週跑 NULL、可全量重跑</li>
+          </ul>
+        </details>
+      </div>
+
+      <div class="embed" style="--c:var(--c-persona)">
+        <div class="etitle">🎮 discordbot/</div>
+        <div class="edesc">事件路由、呈現、sync→async 橋，<b>邏輯不放這裡</b>。</div>
+        <details class="files" open>
+          <summary>6 檔</summary>
+          <ul>
+            <li><b>bot.py</b> — on_message 依頻道 ID 分流、✅ reaction 標去過、圖片提示防洗版（30 分鐘）</li>
+            <li><b>commands.py</b> — 27 個中文 slash commands；慢指令必 defer</li>
+            <li><b>embeds.py</b> — 全部 embed builders＋域色常數（純呈現）</li>
+            <li><b>ingest_handlers.py</b> — 美食/食譜/影片/圖片記帳的 on_message 處理</li>
+            <li><b>reports.py</b> — _query_period 彙總＋週/月報組卡＋AI 評語＋notify_*</li>
+            <li><b>bridge.py</b> — run_coroutine_threadsafe：排程 thread 投遞 embeds</li>
+          </ul>
+        </details>
+      </div>
+
+      <div class="embed" style="--c:var(--c-food)">
+        <div class="etitle">🍜 food/</div>
+        <div class="edesc">最大的域：<b>三層抽取</b>、Places 正名、批次匯入、照片庫、自動補強。</div>
+        <details class="files" open>
+          <summary>11 檔</summary>
+          <ul>
+            <li><b>links.py</b> — URL 偵測＋平台判斷（子網域邊界防釣魚）〔純函式〕</li>
+            <li><b>extract.py</b> — yt-dlp / og fetch / gmaps 解析＋codex 抽欄位＋deep extract＋<b>SSRF 守門</b></li>
+            <li><b>ingest.py</b> — 單筆與批次 orchestrator（分桶 ✅⚠️❌、去重、semaphore 6）</li>
+            <li><b>places.py</b> — Places API (New)：searchText / reviews / photo；API 計數器</li>
+            <li><b>regions.py</b> — 地名正規化、簡繁查表〔純函式〕</li>
+            <li><b>repo.py</b> — food_places CRUD（place_id 去重 upsert）</li>
+            <li><b>photos.py</b> — 檔案存 media/、DB 只記路徑；批次防 N+1</li>
+            <li><b>enrich.py</b> — 推薦菜＋Google 照片補強（idempotent、API 預算 200）</li>
+            <li><b>pending.py</b> — 補件卡 in-memory 暫存（重啟丟失可接受）</li>
+            <li><b>map_data.py</b> — marker JSON 整形〔純函式〕</li>
+            <li><b>recommend.py</b> — 篩選/排序/隨機挑〔純函式〕</li>
+          </ul>
+        </details>
+      </div>
+
+      <div class="embed" style="--c:var(--c-recipe)">
+        <div class="etitle">🍳 recipe/</div>
+        <div class="edesc">最小的域，<b>整條複用 food 的抽取基建</b>，只多「菜名清洗」。</div>
+        <details class="files" open>
+          <summary>3 檔</summary>
+          <ul>
+            <li><b>extract.py</b> — codex 抽乾淨菜名（去贅字）＋純函式解析</li>
+            <li><b>ingest.py</b> — gmaps 擋掉、抽不到退 blob 第一行</li>
+            <li><b>repo.py</b> — url UNIQUE 去重＋IntegrityError 併發回收</li>
+          </ul>
+        </details>
+      </div>
+
+      <div class="embed" style="--c:var(--c-video)">
+        <div class="etitle">🎥 video/</div>
+        <div class="edesc">主題（單一書架）＋去正規化標籤；<b>AI 失敗不擋入庫</b>。</div>
+        <details class="files" open>
+          <summary>4 檔</summary>
+          <ul>
+            <li><b>extract.py</b> — codex 判 {topic, tags}＋YouTube 縮圖（複用 parse_video_id）</li>
+            <li><b>commands.py</b> — reply 語法解析（#主題 / +標籤 / -標籤 / 改標題）＋小抄單一真相</li>
+            <li><b>ingest.py</b> — 標題退 blob 第一行的安全降級</li>
+            <li><b>repo.py</b> — history_videos＋video_tags（加標籤冪等）</li>
+          </ul>
+        </details>
+      </div>
+
+      <div class="embed" style="--c:var(--c-info)">
+        <div class="etitle">🌐 routes/ 與測試</div>
+        <div class="edesc">HTTP 介面全掛 <code>require_token</code>；測試在容器內跑。</div>
+        <details class="files" open>
+          <summary>6 routes ＋ tests</summary>
+          <ul>
+            <li><b>report.py</b> — /api/report/monthly|category|summary|ledger＋/report 頁</li>
+            <li><b>record.py</b> — POST/PUT/DELETE /api/record（網頁報表 CRUD）</li>
+            <li><b>food_map.py</b> — 店家清單（帶照片）＋去過/照片寫操作＋舊地圖頁</li>
+            <li><b>recipes.py / videos.py</b> — PWA 讀清單＋改名/標籤/刪除（新增走 Discord）</li>
+            <li><b>device.py</b> — 短效 token 換發長效裝置 token</li>
+            <li><b>tests/</b> — 29 個測試檔；<code>docker compose exec app pytest tests/ -v</code></li>
+          </ul>
+        </details>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ═══════════════ 資料流 ═══════════════ -->
+  <section id="flows">
+    <h2 class="chan-title"><span class="hash">#</span>🔀-資料流</h2>
+
+    <h3>文字指令 <span class="tag">LINE 與 Discord 共用同一顆 core</span></h3>
+    <div class="flow" style="--c:var(--c-expense)">
+      <span class="step">訊息</span><span class="arr">→</span>
+      <span class="step">line_handler / commands.py</span><span class="arr">→</span>
+      <span class="step">core.process_text_message()</span><span class="arr">→</span>
+      <span class="step">正則指令表（說明/分類/報表/固定/查詢/刪改/抓發票）</span><span class="arr">→</span>
+      <span class="step">fallback：「品名 金額」記帳</span><span class="arr">→</span>
+      <span class="step">DB 寫入</span><span class="arr">→</span>
+      <span class="step" style="--c:var(--c-persona)">木須評論（Gemini）</span><span class="arr">→</span>
+      <span class="step">回覆</span>
+    </div>
+    <p class="note">
+      雙介面約定：LINE 走 <code>handle_*()</code> 回 <code>list[str]</code>；Discord 走 <code>*_data()</code> 回 dict 給 embed builder。
+      同功能兩個出口，改邏輯只改中間。
+    </p>
+
+    <h3>拍照記帳 <span class="tag">兩平台共用</span></h3>
+    <div class="flow" style="--c:var(--c-expense)">
+      <span class="step">圖片 bytes</span><span class="arr">→</span>
+      <span class="step" style="--c:var(--c-persona)">gemini_image() 回 JSON 品項陣列</span><span class="arr">→</span>
+      <span class="step">正數 → transactions</span>
+      <span class="step" style="--c:var(--c-income)">負數（折扣）→ incomes</span><span class="arr">→</span>
+      <span class="step">小計/折扣/實付回覆＋木須評論</span>
+    </div>
+
+    <h3>電子發票補拓 <span class="tag">einvoice.py ＋ invoice_backfill.py（真序列，故編號）</span></h3>
+    <ol class="steps" style="--c:var(--c-warn)">
+      <li><b>觸發</b>：排程或手動呼叫 <code>sync_with_backfill()</code>，讀 <code>invoice_sync_state</code> 高水位（單列 id=1；首次 bootstrap = 昨天）。</li>
+      <li><b>算缺口</b>：<code>last_covered+1 ~ today</code>，超過 60 天的部分跳過（平台多半也查不到）。</li>
+      <li><b>拆計畫</b>：<code>build_month_plan()</code> 把缺口拆成逐月查詢（政府站限制每次查詢須同月）——前月整月查、當月以天數回推。</li>
+      <li><b>逐載具×逐月爬</b>：<code>_scrape_carrier()</code> Playwright 登入 → CAPTCHA 交 Gemini 辨識（5 位數字，最多重試 4 次）→ vue-datepicker 設單月 → 每筆發票<b>點開 Bootstrap modal 抓品項明細</b>（嚴禁 go_back，會把 SPA 清單帶走）→ <code>a.page-link</code>「下一頁」翻頁（作用中頁碼沒前進即停，硬上限 60 頁）。</li>
+      <li><b>入庫</b>：<code>_save_invoices()</code> 以 <code>invoice_no</code> 去重；逐品項各寫一筆 transaction，抓不到明細退化成「賣方＋總額」一筆；純代號品名加賣方前綴。</li>
+      <li><b>推進或凍結</b>：全部載具全部月成功 → 高水位推進到 today；任一失敗 → <b>不推進</b>＋發失敗卡，下次自動重抓整段（去重保證重抓安全）。</li>
+      <li><b>通知</b>：<code>#🧾-發票通知</code> 摘要 embed＋「新增明細」第二張 embed；開機 catch-up 版 0 新增不發卡。</li>
+    </ol>
+
+    <h3>美食連結 ingest <span class="tag">三層抽取，逐層降級</span></h3>
+    <div class="flow" style="--c:var(--c-food)">
+      <span class="step">#美食輸入 訊息</span><span class="arr">→</span>
+      <span class="step">links.detect_links()（平台判斷）</span><span class="arr">→</span>
+      <span class="step">L1 extract.from_url：yt-dlp 主力 ／ og fetch（facebookexternalhit UA）／ gmaps 解 URL</span><span class="arr">→</span>
+      <span class="step" style="--c:var(--c-persona)">L2 codex from_text 抽 {店名, 地區, 推薦菜, 類型}</span><span class="arr">→</span>
+      <span class="step" style="--c:var(--c-persona)">L3 deep_extract_via_codex（看圖＋搜尋，僅店名抽不到才動用）</span><span class="arr">→</span>
+      <span class="step">Places searchText 正名</span><span class="arr">→</span>
+      <span class="step">upsert（place_id 去重）</span><span class="arr">→</span>
+      <span class="step">雷點摘要 best-effort</span><span class="arr">→</span>
+      <span class="step">embed 卡</span>
+    </div>
+    <p class="note">
+      抽不到店名 → <b>⚠️ 補件卡</b>寫進 <code>food.pending</code>（in-memory），使用者 reply 卡片補店名即接回原流程。
+      多連結用 <code>asyncio.gather + to_thread</code> 平行，一連結一卡。
+      批次（≥2 行）另走：剝 <code>- [ ]</code> 勾選框帶出想去/去過 → <b>一次 codex 批解析</b> → semaphore 6 平行正名 → place_id 程序內去重（狀態只升不降）→ ✅高信心/⚠️需確認/❌找不到 總結卡，cap 60 行。
+    </p>
+
+    <h3>食譜與影片 ingest <span class="tag">複用同一條抽取基建</span></h3>
+    <div class="flow" style="--c:var(--c-recipe)">
+      <span class="step">#🍳-食譜 連結</span><span class="arr">→</span>
+      <span class="step">food.extract.from_url（複用）</span><span class="arr">→</span>
+      <span class="step" style="--c:var(--c-persona)">codex 抽乾淨菜名</span><span class="arr">→</span>
+      <span class="step">url UNIQUE 去重入庫</span><span class="arr">→</span>
+      <span class="step">卡片（reply 可改名）</span>
+    </div>
+    <div class="flow" style="--c:var(--c-video)">
+      <span class="step">#📜-歷史教學 連結</span><span class="arr">→</span>
+      <span class="step">food.extract.from_url（複用）</span><span class="arr">→</span>
+      <span class="step" style="--c:var(--c-persona)">codex 判 topic＋tags（失敗不擋入庫）</span><span class="arr">→</span>
+      <span class="step">入庫＋掛標籤</span><span class="arr">→</span>
+      <span class="step">卡片（reply：#主題 +標籤 -標籤 改標題）</span>
+    </div>
+    <p class="note">差異只在後段：食譜擋 gmaps 連結、菜名抽不到走 pending 補名；影片標題退 blob 第一行、卡片底部固定附回覆小抄。</p>
+
+    <h3>週報／月報 <span class="tag">discordbot/reports.py</span></h3>
+    <div class="flow" style="--c:var(--c-info)">
+      <span class="step">週日 21:00 pipeline</span><span class="arr">→</span>
+      <span class="step">_query_period() 彙總（總額/分類/Top N/每日）</span><span class="arr">→</span>
+      <span class="step">report_helpers 純函式（對比/異常/sparkline/儲蓄率/預算）</span><span class="arr">→</span>
+      <span class="step" style="--c:var(--c-persona)">codex 木須評語（餵入已算好的數字）</span><span class="arr">→</span>
+      <span class="step">bridge.post_embeds_sync()</span><span class="arr">→</span>
+      <span class="step">#📊-報表查詢</span>
+    </div>
+    <p class="note">
+      排程跑在同步 thread，靠 <code>asyncio.run_coroutine_threadsafe(coro, bot.loop)</code> 投遞到 Discord event loop。
+      <b>注意</b>：<code>_bot_instance</code> 是 module 級狀態，notify_*() 必須在 bot 主進程內呼叫，<code>docker compose exec</code> 子進程呼叫會靜默失敗。
+      AI 評語失敗時欄位顯示錯誤訊息，<b>embed 照樣推</b>。
+    </p>
+
+    <h3>PWA <span class="tag">frontend/dist 掛 /m/</span></h3>
+    <div class="flow" style="--c:var(--c-info)">
+      <span class="step">Discord 連結 /m/?token=短效</span><span class="arr">→</span>
+      <span class="step">POST /api/device-token 換長效</span><span class="arr">→</span>
+      <span class="step">localStorage 存 X-Device-Token</span><span class="arr">→</span>
+      <span class="step">GET/POST/PUT/DELETE /api/*</span><span class="arr">→</span>
+      <span class="step">四 tab：美食地圖／消費／食譜／歷史影片</span>
+    </div>
+    <p class="note">API 設計偏「整份清單給前端、過濾與隨機在前端做」；新增（食譜/影片/美食連結）仍走 Discord，因為需要抽取 pipeline。</p>
+  </section>
+
+  <!-- ═══════════════ 排程 ═══════════════ -->
+  <section id="schedule">
+    <h2 class="chan-title"><span class="hash">#</span>⏰-排程<span class="tag" style="font-family:var(--mono);font-size:12px;color:var(--faint);font-weight:400">BackgroundScheduler · Asia/Taipei</span></h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Job</th><th>時間</th><th>做什麼</th><th>備註</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><code>daily_recurring</code></td>
+            <td>每日 00:05</td>
+            <td>到期的固定收支自動入帳</td>
+            <td>day_of_month 限 1–28 避開大小月</td>
+          </tr>
+          <tr>
+            <td><code>daily_invoice_sync</code></td>
+            <td>週一～週六 21:00</td>
+            <td>發票補拓 → 通知 #🧾-發票通知</td>
+            <td>失敗發失敗卡、高水位不推進</td>
+          </tr>
+          <tr>
+            <td><code>weekly_pipeline</code></td>
+            <td>週日 21:00</td>
+            <td>補拓 → AI 分類 → 週報；每月第一個週日（day ≤ 7）再串上月月結</td>
+            <td>各步驟獨立 try/except，一步倒不拖垮整條</td>
+          </tr>
+          <tr>
+            <td><code>startup_catchup</code></td>
+            <td>開機後 3 分鐘（一次性）</td>
+            <td>背景補拓一次，機器關了又開盡快追上</td>
+            <td>quiet 模式：0 新增且無失敗就不發卡</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ═══════════════ 資料庫 ═══════════════ -->
+  <section id="db">
+    <h2 class="chan-title"><span class="hash">#</span>🗄️-資料庫<span class="tag" style="font-family:var(--mono);font-size:12px;color:var(--faint);font-weight:400">PostgreSQL 15 · 10 tables</span></h2>
+    <p class="note">
+      Schema 演進：啟動時 <code>Base.metadata.create_all</code>＋main.py 手動檢查補欄位（transactions 的 category / invoice_no、food_photos 的 FK），<b>沒有 Alembic</b>。
+      三個 UNIQUE 去重鍵是整個系統冪等性的支點。
+    </p>
+    <div class="grid">
+      <div class="embed" style="--c:var(--c-expense)">
+        <div class="etitle">transactions — 支出</div>
+        <div class="edesc">item · price · category?（AI 填）· <b>invoice_no?（發票去重鍵，index）</b> · created_at（發票用消費日回填）</div>
+      </div>
+      <div class="embed" style="--c:var(--c-income)">
+        <div class="etitle">incomes — 收入</div>
+        <div class="edesc">item · amount · category? · created_at。拍照記帳的折扣以「折扣：品名」形式寫進來。</div>
+      </div>
+      <div class="embed" style="--c:var(--c-info)">
+        <div class="etitle">recurring_records — 固定收支</div>
+        <div class="edesc">type（expense/income）· item · amount · category? · day_of_month（1–28）· active（軟刪除：取消＝設 0）</div>
+      </div>
+      <div class="embed" style="--c:var(--c-food)">
+        <div class="etitle">food_places — 美食地圖</div>
+        <div class="edesc"><b>place_id（UNIQUE，Google 正名去重）</b> · name · address · lat/lng · country/city/district · cuisine_type · recommended_items · caution_summary · status（想去/去過）· my_rating（1–5）· my_note · source_url · discord_message_id（✅ reaction 回查）</div>
+      </div>
+      <div class="embed" style="--c:var(--c-food)">
+        <div class="etitle">food_photos — 店家照片</div>
+        <div class="edesc">food_place_id（<b>FK CASCADE</b>）· path（media/ 相對路徑，檔案在檔案系統）· source（app/bot/google）</div>
+      </div>
+      <div class="embed" style="--c:var(--c-recipe)">
+        <div class="etitle">recipes — 食譜</div>
+        <div class="edesc">name（codex 清洗，可改）· <b>url（UNIQUE 去重鍵）</b> · platform · discord_message_id（reply 改名回查）</div>
+      </div>
+      <div class="embed" style="--c:var(--c-video)">
+        <div class="etitle">history_videos — 教學影片</div>
+        <div class="edesc">title · <b>url（UNIQUE 去重鍵）</b> · topic（單一書架，index）· channel? · platform · discord_message_id</div>
+      </div>
+      <div class="embed" style="--c:var(--c-video)">
+        <div class="etitle">video_tags — 影片標籤</div>
+        <div class="edesc">video_id（<b>FK CASCADE</b>）· tag（字串直存，去正規化多對多：查＝WHERE tag=?）</div>
+      </div>
+      <div class="embed" style="--c:var(--c-info)">
+        <div class="etitle">device_tokens — PWA 裝置</div>
+        <div class="edesc">token（UNIQUE）· label（userAgent 簡述）· last_used_at（看哪台還活著）。無期限，撤銷＝刪列。</div>
+      </div>
+      <div class="embed" style="--c:var(--c-warn)">
+        <div class="etitle">invoice_sync_state — 高水位</div>
+        <div class="edesc"><b>單列表（id 恆為 1）</b>· last_covered_date：發票已成功涵蓋到的最後一天，驅動整個補拓機制。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ AI 分工 ═══════════════ -->
+  <section id="ai">
+    <h2 class="chan-title"><span class="hash">#</span>🤖-AI-分工</h2>
+    <p class="note">分工原則：<b>影像找 Gemini、文字找 codex</b>（訂閱制，免計費 API 的 429 配額）。唯一例外是記帳當下的木須即時評論走 Gemini 文字——求快。</p>
+    <div class="grid">
+      <div class="embed" style="--c:var(--c-persona)">
+        <div class="etitle">Gemini API（計費，urllib 手工呼叫）</div>
+        <div class="efields">
+          <div class="f"><div class="fn">拍照記帳</div><div class="fv">明細照片 → JSON 品項陣列</div></div>
+          <div class="f"><div class="fn">CAPTCHA</div><div class="fv">財政部 5 位數字驗證碼辨識</div></div>
+          <div class="f"><div class="fn">截圖抽店家</div><div class="fv">美食截圖 → 欄位 JSON 一步到位</div></div>
+          <div class="f"><div class="fn">木須即時評論</div><div class="fv">記帳後 20–50 字角色回應</div></div>
+        </div>
+      </div>
+      <div class="embed" style="--c:var(--c-persona)">
+        <div class="etitle">codex CLI（ChatGPT 訂閱，subprocess）</div>
+        <div class="efields">
+          <div class="f"><div class="fn">帳目分類</div><div class="fv">batch 50 筆、封閉 13 類清單驗證</div></div>
+          <div class="f"><div class="fn">週／月評語</div><div class="fv">木須口吻，餵入已算好的統計數字</div></div>
+          <div class="f"><div class="fn">抽取</div><div class="fv">店名/地區、菜名、影片主題＋標籤、批次清單一次解析</div></div>
+          <div class="f"><div class="fn">評論歸納</div><div class="fv">低星雷點一句話、推薦菜 Top 5</div></div>
+          <div class="f"><div class="fn">深度振查</div><div class="fv">唯一 full-access 沙箱（看圖＋搜尋，120s）；其餘 read-only</div></div>
+        </div>
+      </div>
+    </div>
+    <p class="note">
+      共同防呆三件套：<b>markdown fence 去殼</b> → <b>壞 JSON 安全降級</b>（回空欄位，不炸流程）→ <b>封閉清單/長度驗證</b>（分類不在 13 類剔除、標籤最多 5 個、摘要截 200 字）。
+    </p>
+  </section>
+
+  <!-- ═══════════════ 認證與防禦 ═══════════════ -->
+  <section id="auth">
+    <h2 class="chan-title"><span class="hash">#</span>🔐-認證與防禦</h2>
+    <h3>兩層 token</h3>
+    <div class="flow" style="--c:var(--c-info)">
+      <span class="step">Bot 指令（報表/美食地圖）</span><span class="arr">→</span>
+      <span class="step">短效 token（30 分鐘，in-memory dict）</span><span class="arr">→</span>
+      <span class="step">POST /api/device-token 換發</span><span class="arr">→</span>
+      <span class="step">長效裝置 token（DB、無期限、記 last_used_at）</span><span class="arr">→</span>
+      <span class="step">之後全走 X-Device-Token header</span>
+    </div>
+    <p class="note">
+      <code>require_token</code> 收 query token 或 header 擇一。關鍵設計：<b>只有短效 token 能換發</b>——換發權綁在「剛從 Discord 拿到連結」這件事上，
+      洩漏的裝置 token 無法自我繁殖；踢裝置＝刪那列。
+    </p>
+    <h3>防禦清單</h3>
+    <ul class="plain">
+      <li><b>SSRF 守門</b>（<code>food/extract.py _is_safe_fetch_url</code>）：og fetch 與 full-access codex 的種子 URL 都只放行公網 http(s)，擋 file:// 、loopback、私網、link-local（169.254 metadata）。</li>
+      <li><b>上傳限制</b>：Content-Type 白名單（不信任檔名）、單張 5MB、每店 10 張。</li>
+      <li><b>Stored XSS</b>：報表頁品名/分類經 esc() 才進 innerHTML（發票品名是外部輸入）。</li>
+      <li><b>去重三鍵</b>：invoice_no / place_id / url UNIQUE；SELECT→INSERT 撞 UNIQUE 時 rollback 後回查當「已存在」（併發安全）。</li>
+      <li><b>限流與預算</b>：批次正名 semaphore 6、發票翻頁上限 60、批次 60 行、enrich API 預算 200 次（超過即停，重跑自動接續）。</li>
+      <li><b>網路面</b>：app 與 ngrok inspector 只綁 127.0.0.1，db 只在 docker 內網；對外唯一入口是 ngrok tunnel。</li>
+    </ul>
+  </section>
+
+  <!-- ═══════════════ 設計慣例 ═══════════════ -->
+  <section id="patterns">
+    <h2 class="chan-title"><span class="hash">#</span>📐-設計慣例</h2>
+    <ul class="plain">
+      <li><b>純函式核心、I/O 邊界分明</b>：計算與解析（report_helpers、links、regions、map_data、recommend、reply 語法、各 parse_*_json）全是無副作用純函式，pytest 直接測；I/O 包在薄 wrapper（places.py、extract 的 fetch 函式、_scrape_one）留給 monkeypatch。</li>
+      <li><b>Orchestrator 模式</b>：每個域一條 ingest.py 串「抽取 → 正名 → 入庫 → 事後加值」，回 <code>(結果, 原因)</code> tuple，呼叫端決定卡片或補件。</li>
+      <li><b>Repo 模式</b>：SessionLocal try/finally、ORM 進 dict 出；FastAPI 路由另用 <code>Depends(get_db)</code>。</li>
+      <li><b>雙介面 core</b>：同一份業務邏輯，LINE 出字串、Discord 出結構化 dict；embeds.py 是純呈現層，不碰 DB。</li>
+      <li><b>Best-effort 事後加值</b>：雷點摘要、enrich 補強都是「失敗不影響主流程」，且 idempotent 可重跑補漏。</li>
+      <li><b>失敗顯性化</b>：發票失敗發失敗卡、AI 評語失敗在欄位裡寫錯誤訊息照樣推卡——寧可吵，不沉默。</li>
+      <li><b>去重換冪等</b>：所有自動化都假設「會重跑」，靠 UNIQUE 鍵讓重跑無害；高水位只在全成功時推進。</li>
+      <li><b>降級鏈</b>：yt-dlp→og fetch→deep extract；明細抓不到退賣方總額；菜名抽不到退 blob 第一行；AI 失敗不擋入庫。</li>
+      <li><b>可接受的簡陋</b>：pending 補件與短效 token 都是 in-memory、重啟即失——明知且接受，換取零依賴。</li>
+      <li><b>sync↔async 橋</b>：排程（同步 thread）→ bridge → bot event loop；async 路徑呼叫 blocking 函式一律 <code>asyncio.to_thread</code> 包。</li>
+    </ul>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    docs/architecture.html · 產出於 2026-07-07，內容對齊當日 master<br>
+    相關文件：CODEBASE.md（AI 快速索引）· README.md（功能與指令）· docs/superpowers/（各模組 spec 與 plan）· AGENTS.md（避坑指南）<br>
+    驗證方式：<code>docker compose up -d --build</code> → <code>docker compose exec app pytest tests/ -v</code>
+  </div>
+  <div class="rail" style="margin-top:22px" role="presentation"></div>
+</footer>
+
+</body>
+</html>
