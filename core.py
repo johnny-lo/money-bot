@@ -18,7 +18,7 @@ PATTERN_UPDATE = re.compile(r"^修改\s+(\d+)\s+(.+)\s+(\d+)$")
 PATTERN_INCOME = re.compile(r"^收入\s+(.+)\s+(\d+)$")
 PATTERN_INCOME_DELETE = re.compile(r"^刪除收入\s+(\d+)$")
 PATTERN_INCOME_UPDATE = re.compile(r"^修改收入\s+(\d+)\s+(.+)\s+(\d+)$")
-PATTERN_RECURRING = re.compile(r"^固定\s+(支出|收入)\s+(.+)\s+(\d+)\s+(\d+)$")
+PATTERN_RECURRING = re.compile(r"^固定\s+(支出|收入)\s+(.+?)\s+(\d+)\s+(\d+)(\s+共同)?$")
 PATTERN_RECURRING_DELETE = re.compile(r"^取消固定\s+(\d+)$")
 PATTERN_FETCH_INVOICE = re.compile(r"^抓發票(?:\s+(\d+))?$")
 
@@ -55,6 +55,7 @@ HELP_TEXT = (
     "🔄 固定收支：\n"
     "　固定 支出 房租 15000 1\n"
     "　固定 收入 薪水 50000 5\n"
+    "　固定 支出 房租 12000 5 共同 → 兩人分攤，桶位只算你一半\n"
     "　（最後數字＝每月幾號）\n"
     "　固定清單 → 查看所有固定項目\n"
     "　取消固定 ID\n"
@@ -98,13 +99,15 @@ def handle_report(user_id: str, base_url: str) -> str:
     return f"📊 點擊下方連結查看互動式報表（30 分鐘內有效）：\n{report_url}"
 
 
-def handle_add_recurring(type_str: str, item: str, amount: int, day: int) -> str:
+def handle_add_recurring(type_str: str, item: str, amount: int, day: int,
+                         shared: bool = False) -> str:
     r_type = "income" if type_str == "收入" else "expense"
     if day < 1 or day > 28:
         return "⚠️ 日期請設 1~28（避免大小月問題）"
     db = SessionLocal()
     try:
-        rec = RecurringRecord(type=r_type, item=item, amount=amount, day_of_month=day)
+        rec = RecurringRecord(type=r_type, item=item, amount=amount, day_of_month=day,
+                              shared=1 if shared else 0)
         db.add(rec)
         db.commit()
         db.refresh(rec)
@@ -114,6 +117,7 @@ def handle_add_recurring(type_str: str, item: str, amount: int, day: int) -> str
             f"項目：{item}\n"
             f"金額：{amount} 元\n"
             f"每月 {day} 號自動記入"
+            + ("\n🤝 共同分攤：桶位只算你的一半（DB 仍存全額）" if shared else "")
         )
     except Exception as e:
         db.rollback()
@@ -131,7 +135,8 @@ def handle_list_recurring() -> str:
         lines = ["🔄 【固定收支清單】"]
         for r in records:
             icon = "💰" if r.type == "income" else "💸"
-            lines.append(f"ID:{r.id} | {icon} {r.item} {r.amount}元 / 每月{r.day_of_month}號")
+            tag = " 🤝共同" if getattr(r, "shared", 0) else ""
+            lines.append(f"ID:{r.id} | {icon} {r.item} {r.amount}元 / 每月{r.day_of_month}號{tag}")
         return "\n".join(lines)
     except Exception as e:
         return f"💥 查詢失敗：{e}"
@@ -447,6 +452,7 @@ def process_text_message(msg: str, user_id: str = None, base_url: str = None,
             match_recurring.group(2).strip(),
             int(match_recurring.group(3)),
             int(match_recurring.group(4)),
+            shared=bool(match_recurring.group(5)),
         )
         return [result]
 
@@ -753,24 +759,28 @@ def list_recurring_data() -> list[dict]:
         return [{
             "id": r.id, "type": r.type, "item": r.item,
             "amount": r.amount, "day_of_month": r.day_of_month,
+            "shared": int(getattr(r, "shared", 0) or 0),
         } for r in records]
     finally:
         db.close()
 
 
-def add_recurring_data(type_str: str, item: str, amount: int, day: int) -> dict:
+def add_recurring_data(type_str: str, item: str, amount: int, day: int,
+                       shared: bool = False) -> dict:
     if day < 1 or day > 28:
         return {"success": False, "error": "日期請設 1~28（避免大小月問題）"}
     r_type = "income" if type_str in ("收入", "income") else "expense"
     db = SessionLocal()
     try:
-        rec = RecurringRecord(type=r_type, item=item, amount=amount, day_of_month=day)
+        rec = RecurringRecord(type=r_type, item=item, amount=amount, day_of_month=day,
+                              shared=1 if shared else 0)
         db.add(rec)
         db.commit()
         db.refresh(rec)
         return {
             "success": True, "id": rec.id, "type": r_type,
             "item": item, "amount": amount, "day_of_month": day,
+            "shared": 1 if shared else 0,
         }
     except Exception as e:
         db.rollback()

@@ -86,10 +86,12 @@ def test_route_help():
     ("修改 5 滷肉飯 100", "handle_update_expense", (5, "滷肉飯", 100)),
     ("修改收入 5 獎金 1000", "handle_update_income", (5, "獎金", 1000)),
     ("固定 支出 房租 15000 1", "handle_add_recurring", ("支出", "房租", 15000, 1)),
+    # 尾巴的「共同」是可選旗標，不能被吃進品名裡
+    ("固定 支出 房租 15000 1 共同", "handle_add_recurring", ("支出", "房租", 15000, 1)),
 ])
 def test_route_dispatch(monkeypatch, msg, handler, expected_args):
     calls = []
-    monkeypatch.setattr(core, handler, lambda *a: calls.append(a) or "OK")
+    monkeypatch.setattr(core, handler, lambda *a, **kw: calls.append(a) or "OK")
     assert core.process_text_message(msg) == ["OK"]
     assert calls == [expected_args]
 
@@ -216,3 +218,15 @@ def test_image_data_empty_list(fake_db, monkeypatch):
     _set_gemini(monkeypatch, "[]")
     out = core.handle_image_data(b"img")
     assert out["success"] is False
+
+
+def test_固定支出的共同旗標有傳到處理函式(monkeypatch):
+    """「共同」只被 regex 吃掉、沒傳下去的話，這個功能等於不存在（設得了但沒作用）。"""
+    seen = {}
+    monkeypatch.setattr(core, "handle_add_recurring",
+                        lambda *a, **kw: seen.update(kw) or "OK")
+    core.process_text_message("固定 支出 房租 12000 5 共同")
+    assert seen.get("shared") is True
+    seen.clear()
+    core.process_text_message("固定 支出 我的手機分期 5800 10")
+    assert seen.get("shared") is False

@@ -106,9 +106,11 @@ def register_commands(bot) -> None:
         await ix.response.send_message(embed=delete_record_embed("income", data))
 
     @tree.command(name="固定支出", description="新增每月固定支出")
-    @app_commands.describe(品名="項目", 金額="金額", 日期="每月幾號（1-28）")
-    async def cmd_recurring_expense(ix: discord.Interaction, 品名: str, 金額: int, 日期: int):
-        data = add_recurring_data("支出", 品名, 金額, 日期)
+    @app_commands.describe(品名="項目", 金額="金額", 日期="每月幾號（1-28）",
+                           共同分攤="兩人平分（桶位只算你一半，DB 仍存全額）")
+    async def cmd_recurring_expense(ix: discord.Interaction, 品名: str, 金額: int, 日期: int,
+                                    共同分攤: bool = False):
+        data = add_recurring_data("支出", 品名, 金額, 日期, shared=共同分攤)
         await ix.response.send_message(embed=recurring_added_embed(data))
 
     @tree.command(name="固定收入", description="新增每月固定收入")
