@@ -13,9 +13,16 @@ const STATUS = [
   { key: '去過', label: '去過' },
 ]
 
-// 三態循環；按鈕顯示的是「下一個模式」的圖示（沿用原本清單模式長 🗺️ 的慣例）
-const NEXT_VIEW = { nearby: 'list', list: 'map', map: 'nearby' }
-const NEXT_ICON = { nearby: '☰', list: '🗺️', map: '📍' }
+// 三種畫法用分段控制列出來，而不是一顆循環鈕。
+// 為什麼改：循環鈕顯示的是「下一個模式」的圖示，使用者看不出**自己在哪個模式**，
+// 而地區/行政區篩選只在清單、地圖模式渲染 → 開 App 停在預設的「附近」時，
+// 使用者會以為行政區功能不見了（實際被回報過兩次）。
+// 一個控制項＝一個真相來源：三個都列出來、目前的高亮，就沒有猜的空間。
+const VIEWS = [
+  { key: 'nearby', icon: '📍', label: '附近' },
+  { key: 'list', icon: '☰', label: '清單' },
+  { key: 'map', icon: '🗺️', label: '地圖' },
+]
 
 // 「資料的唯一主人」：所有店家、篩選、定位、選中誰都放這裡（lifting state up）。
 // Nearby / FoodList / FoodMap 只是三種「畫法」，收 props、把互動回報上來。
@@ -112,8 +119,8 @@ export default function Food() {
     setDistrict(kind === 'd' ? d : 'all')
   }
 
-  function cycleView() {
-    const next = NEXT_VIEW[view]
+  function switchView(next) {
+    if (next === view) return
     setView(next)
     if (next === 'nearby' && !coords) locate()
   }
@@ -152,9 +159,19 @@ export default function Food() {
         </div>
         <div className="bar-right">
           <button className="icon-btn" onClick={rollDice} title="抽一家">🎲</button>
-          <button className="icon-btn" onClick={cycleView} title="切換 附近 / 清單 / 地圖">
-            {NEXT_ICON[view]}
-          </button>
+          <div className="view-seg" role="tablist" aria-label="檢視模式">
+            {VIEWS.map((v) => (
+              <button
+                key={v.key}
+                role="tab"
+                aria-selected={v.key === view}
+                className={v.key === view ? 'view-seg-btn active' : 'view-seg-btn'}
+                onClick={() => switchView(v.key)}
+              >
+                {v.icon}<span className="view-seg-label">{v.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -162,6 +179,10 @@ export default function Food() {
           附近模式整排不顯示 —— 範圍由滑桿決定、料理由磚塊決定，
           再擺一套篩選器只會跟它們打架，而且 chips 比磚塊差（沒家數、
           還列出附近根本沒有的類別）。 */}
+      {view === 'nearby' && (
+        <div className="view-hint">想按縣市／行政區找？切到「清單」或「地圖」</div>
+      )}
+
       {view !== 'nearby' && (
         <div className="food-bar2">
           <select

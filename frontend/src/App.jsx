@@ -40,6 +40,9 @@ export default function App() {
           </button>
         ))}
       </nav>
+
+      {/* 版本戳（build 時間）。「手機是不是還是舊版」看這裡，不用再猜。 */}
+      <div className="build-stamp">{__BUILD_ID__}</div>
     </div>
   )
 }

@@ -347,3 +347,23 @@ body {
 .sheet-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
 .tag-add { display: flex; gap: 6px; align-items: center; }
 .tag-add .note-input { flex: 1; }
+
+
+/* 美食分頁的三態切換：現在在哪個模式要看得見，另外兩個要點得到。
+   原本是一顆顯示「下一個模式」圖示的循環鈕 → 沒人知道自己在哪、也不知道有幾個模式。 */
+.view-seg { display: flex; gap: 2px; background: #eee; border-radius: 10px; padding: 2px; }
+.view-seg-btn {
+  border: none; background: transparent; color: #666; cursor: pointer;
+  font-size: 0.78rem; padding: 4px 7px; border-radius: 8px; line-height: 1.1;
+  display: flex; align-items: center; gap: 3px; white-space: nowrap;
+}
+.view-seg-btn.active { background: #fff; color: var(--brand); font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
+.view-seg-label { font-size: 0.72rem; }
+
+/* 附近模式沒有地區篩選（那是刻意的），但要講出來,否則會被當成功能壞掉 */
+.view-hint { font-size: 0.72rem; color: #aaa; padding: 2px 14px 6px; }
+
+/* 版本戳：手機是不是拿到新版,看一眼就知道,不用再靠猜 */
+.build-stamp { position: fixed; right: 4px; bottom: 2px; font-size: 8px;
+  color: rgba(0,0,0,0.22); z-index: 5; pointer-events: none; letter-spacing: 0.02em; }
