@@ -14,6 +14,8 @@ jobs:
   backend:
     name: 後端（測試 + import 預檢）
     runs-on: ubuntu-latest
+    # 沒有這行的話,卡住的步驟會一路燒到 GitHub 預設的 6 小時上限
+    timeout-minutes: 20
 
     # import 預檢會執行 main.py 的 Base.metadata.create_all + ALTER 檢查,
     # 需要一個真的連得到的 Postgres。
@@ -58,8 +60,14 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
 
+      # --with-deps 會跑 apt-get,在 runner 上偶爾卡在 dpkg lock / debconf 互動
+      # （實測過一次:平常 1 分 40 秒的步驟卡了 25 分鐘沒動）。
+      # DEBIAN_FRONTEND=noninteractive 擋掉互動提示,timeout 讓它失敗得夠快。
       - name: 安裝 Chromium
         run: playwright install --with-deps chromium
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        timeout-minutes: 8
 
       - name: 單元測試
         run: pytest tests/ -q
@@ -72,6 +80,7 @@ jobs:
   frontend:
     name: 前端 build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
