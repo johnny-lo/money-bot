@@ -6,14 +6,29 @@ from linebot.models import MessageEvent, TextMessage, TextSendMessage, ImageMess
 
 from core import process_text_message, handle_image
 
-line_bot_api = LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
-handler = WebhookHandler(os.getenv("LINE_CHANNEL_SECRET"))
+# LINE 憑證缺任一個就整個停用，而不是在 import 期炸掉。
+# 舊寫法 `LineBotApi(os.getenv(...))` 在 token 為 None 時會 TypeError（SDK 直接把 token
+# 串進 Authorization header）→ **import 崩潰 = 全站掛**：webhook、Discord Bot、PWA 一起沒。
+# Discord 那邊本來就有 `if discord_token:` 守著，這裡補齊同樣的可選性。
+_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
+LINE_ENABLED = bool(_ACCESS_TOKEN and _CHANNEL_SECRET)
 
-BASE_URL = os.getenv("BASE_URL", "https://your-ngrok-domain.ngrok-free.dev").rstrip("/")
+line_bot_api = LineBotApi(_ACCESS_TOKEN) if LINE_ENABLED else None
+handler = WebhookHandler(_CHANNEL_SECRET) if LINE_ENABLED else None
+
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
 
 
 def register_line_routes(app: FastAPI):
-    """將 LINE webhook 路由掛載到 FastAPI app 上"""
+    """將 LINE webhook 路由掛載到 FastAPI app 上（未設定憑證則整段跳過）"""
+    if not LINE_ENABLED:
+        print("ℹ️ 未設定 LINE_CHANNEL_ACCESS_TOKEN / LINE_CHANNEL_SECRET，跳過 LINE webhook")
+        return
+
+    # handler 在 import 期可能是 None，所以事件註冊不能用 module 層的 @handler.add 裝飾器
+    handler.add(MessageEvent, message=TextMessage)(handle_message)
+    handler.add(MessageEvent, message=ImageMessage)(handle_image_message)
 
     @app.post("/callback")
     async def callback(request: Request):
@@ -34,7 +49,6 @@ def _reply(event, messages: list[str]):
     )
 
 
-@handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     msg = event.message.text.strip()
     result = process_text_message(msg, user_id=event.source.user_id, base_url=BASE_URL)
@@ -42,7 +56,6 @@ def handle_message(event):
         _reply(event, result)
 
 
-@handler.add(MessageEvent, message=ImageMessage)
 def handle_image_message(event):
     try:
         message_content = line_bot_api.get_message_content(event.message.id)
