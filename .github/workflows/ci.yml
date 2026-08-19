@@ -60,14 +60,14 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
 
-      # --with-deps 會跑 apt-get,在 runner 上偶爾卡在 dpkg lock / debconf 互動
-      # （實測過一次:平常 1 分 40 秒的步驟卡了 25 分鐘沒動）。
-      # DEBIAN_FRONTEND=noninteractive 擋掉互動提示,timeout 讓它失敗得夠快。
+      # 刻意**不加 --with-deps**：它會跑 apt-get update，而 runner 的 azure 鏡像站
+      # 實測會卡死（滿屏 Ign:，25 分鐘沒動，加了 8 分鐘 timeout 後穩定 timeout）。
+      # ubuntu-latest 映像本來就帶 Playwright Chromium 需要的系統函式庫，
+      # 瀏覽器本體從 Playwright CDN 下載，不經過 apt。真的缺 lib 的話下一步的測試
+      # 會在 p.chromium.launch() 大聲失敗，不會靜默跳過。
       - name: 安裝 Chromium
-        run: playwright install --with-deps chromium
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        timeout-minutes: 8
+        run: playwright install chromium
+        timeout-minutes: 6
 
       - name: 單元測試
         run: pytest tests/ -q
