@@ -1,4 +1,4 @@
-"""報表用純函式：對比、Top N、異常偵測、迷你圖、儲蓄率、預算狀態。
+"""報表用純函式：對比、Top N、異常偵測、迷你圖、儲蓄率、預算狀態、三桶水位。
 
 所有函式都是純函式（沒有 DB / 網路 / 環境變數副作用），方便用 pytest 測試。
 """
@@ -221,3 +221,105 @@ def previous_month(year: int, month: int) -> tuple[int, int]:
 def is_first_sunday(d: date) -> bool:
     """判斷 d 是不是當月第一個週日。"""
     return d.weekday() == 6 and d.day <= 7
+
+
+# ─── 三桶水位（投資 / 生活 / 爽）──────────────────────────────
+#
+# 這是跟 6 大組**不同的軸**：大組回答「錢花在什麼」，桶回答「這筆錢該不該花」。
+# 存在的理由：記帳助理若只看得到單筆金額，就只能用金額大小論斷，於是每筆稍大的
+# 都被唸——但花三萬買 ETF 是好事，第五杯手搖才該被挑眉。有桶位才講得準。
+
+BUCKET_INVEST, BUCKET_LIVING, BUCKET_FUN = "投資", "生活", "爽"
+BUCKET_ORDER = (BUCKET_INVEST, BUCKET_LIVING, BUCKET_FUN)
+BUCKET_ICONS = {BUCKET_INVEST: "🏦", BUCKET_LIVING: "🍚", BUCKET_FUN: "🎉"}
+
+# 細類 → 桶。細類清單見 categorize.CATEGORIES（單一真相在那邊，這裡只做映射）。
+CATEGORY_BUCKETS: dict[str, str] = {
+    "投資":     BUCKET_INVEST,
+    "居住水電": BUCKET_LIVING,
+    "分期保險": BUCKET_LIVING,   # 車貸/保險是義務不是投資，即使有儲蓄性質
+    "交通":     BUCKET_LIVING,
+    "三餐":     BUCKET_LIVING,
+    "食材":     BUCKET_LIVING,
+    "超商":     BUCKET_LIVING,
+    "日用品":   BUCKET_LIVING,
+    "醫療":     BUCKET_LIVING,
+    "聚餐":     BUCKET_FUN,
+    "飲料零食": BUCKET_FUN,
+    "服飾":     BUCKET_FUN,
+    "娛樂":     BUCKET_FUN,
+    "其他":     BUCKET_LIVING,   # 保守：兜不到類的不灌進爽桶，免得被無辜唸
+}
+
+
+def parse_bucket_ratios(spec: str | None) -> tuple[float, float, float]:
+    """解析 "投資:生活:爽" 比例（例 "1:1:1"、"2:5:3"），正規化成加總為 1 的分數。
+
+    格式錯誤/含非正數/全零一律回等分三份——設定寫壞不該讓功能整個消失。
+    """
+    default = (1 / 3, 1 / 3, 1 / 3)
+    if not spec:
+        return default
+    parts = [p.strip() for p in str(spec).replace("／", "/").replace("/", ":").split(":")]
+    if len(parts) != 3:
+        return default
+    try:
+        nums = [float(p) for p in parts]
+    except ValueError:
+        return default
+    if any(n < 0 for n in nums) or sum(nums) <= 0:
+        return default
+    total = sum(nums)
+    return (nums[0] / total, nums[1] / total, nums[2] / total)
+
+
+def bucket_totals(categories: list[dict]) -> tuple[dict[str, int], int]:
+    """把 query_monthly_data() 的 categories 攤成三桶總額。
+
+    回 (每桶金額, 未分類金額)。**未分類要單獨回**：記帳當下 category 是 NULL、
+    要等週日 AI 分類才會落桶，不揭露的話桶位會被低估，助理就會過度樂觀。
+    """
+    totals = {b: 0 for b in BUCKET_ORDER}
+    uncategorized = 0
+    for row in categories or []:
+        amount = int(row.get("amount") or 0)
+        bucket = CATEGORY_BUCKETS.get(row.get("name") or "")
+        if bucket is None:
+            uncategorized += amount
+        else:
+            totals[bucket] += amount
+    return totals, uncategorized
+
+
+def format_bucket_context(
+    income: int,
+    categories: list[dict],
+    ratios: tuple[float, float, float],
+    *,
+    day_of_month: int,
+    days_in_month: int,
+    basis: str = "本月收入",
+) -> str | None:
+    """組出給 AI 角色讀的三桶水位文字。income <= 0 回 None（沒基準就不要瞎猜）。
+
+    回 None 時呼叫端應該完全不傳 context，讓角色走「沒有水位資訊」的保守模式。
+    """
+    if income <= 0:
+        return None
+    totals, uncategorized = bucket_totals(categories)
+    lines = [f"本月三桶水位（基準：{basis} ${income:,}）"]
+    for bucket, ratio in zip(BUCKET_ORDER, ratios):
+        budget = int(round(income * ratio))
+        spent = totals[bucket]
+        pct = round(spent / budget * 100) if budget > 0 else 0
+        lines.append(
+            f"{BUCKET_ICONS[bucket]} {bucket}：${spent:,} / ${budget:,}（{pct}%）"
+        )
+    if uncategorized:
+        lines.append(
+            f"⏳ 尚未分類 ${uncategorized:,}（週日 AI 分類後才會落桶，"
+            f"所以上面三桶是**低估**的，講話別太樂觀）"
+        )
+    time_pct = round(day_of_month / days_in_month * 100) if days_in_month else 0
+    lines.append(f"月份進度：{day_of_month}/{days_in_month} 天（{time_pct}%）")
+    return "\n".join(lines)

@@ -63,7 +63,7 @@ def fake_db(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_persona(monkeypatch):
-    monkeypatch.setattr(core, "generate_persona_comment", lambda *_: "")
+    monkeypatch.setattr(core, "generate_persona_comment", lambda *_, **__: "")
 
 
 # ── process_text_message 路由分流 ───────────────────────────────
@@ -140,7 +140,7 @@ def test_record_no_match_returns_none(fake_db):
 
 
 def test_record_appends_persona_when_present(fake_db, monkeypatch):
-    monkeypatch.setattr(core, "generate_persona_comment", lambda *_: "🐉 吼！")
+    monkeypatch.setattr(core, "generate_persona_comment", lambda *_, **__: "🐉 吼！")
     out = core.handle_record_text("午餐 150")
     assert out[1] == "🐉 吼！"
 

@@ -12,7 +12,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ```
 .
 ├── main.py              # 入口：FastAPI app 建立、DB 初始化、APScheduler 排程、Discord Bot 監管式啟動（run_discord_bot）
-├── core.py              # 核心業務邏輯：文字指令解析/處理、圖片記帳、訊息路由 + Data API（Discord embeds 用）
+├── core.py              # 核心業務邏輯：文字指令解析/處理、圖片記帳、訊息路由 + Data API（Discord embeds 用） + `bucket_context()`(複用 query_monthly_data 算三桶水位;基準優先序 本月實收→上月實收→`MONTHLY_INCOME`;**任何失敗回 None**,記帳絕不能因為算水位失敗而失敗)
 ├── line_handler.py      # LINE Bot：webhook /callback、文字/圖片訊息事件處理（純文字介面）。**憑證可選**：`LINE_ENABLED` 為假時整段跳過掛載,不再 import 期崩潰拖垮全站（測試 tests/test_line_optional.py）
 ├── discordbot/          # Discord Bot package（原 discord_handler.py 拆分，邏輯不變；不能叫 discord 會遮蔽套件）
 │   ├── bot.py           # MoneyBot client：on_message 頻道分流、on_raw_reaction_add(✅ 標去過)、create_discord_bot、run_discord_bot（監管迴圈：暫時性失敗退避重試、壞 token 停手；on_ready/重試訊息 flush=True 即時可見）
@@ -25,8 +25,8 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── codex_cli.py         # codex_text(prompt)：shell 出去呼叫本機 `codex exec`（ChatGPT 訂閱制，預設 gpt-5.5），用 --output-last-message 取乾淨輸出。供「分類 + 週/月報評語」的文字生成用，取代計費的 Gemini 文字 API（CODEX_MODEL env 可覆蓋模型）
 ├── database.py          # SQLAlchemy engine/SessionLocal/Base 建立（讀 DATABASE_URL）
 ├── models.py            # ORM 模型：Transaction(支出)、Income(收入)、RecurringRecord(固定收支)
-├── categorize.py        # AI 分類（走 codex_text / 訂閱制）：CATEGORIES(13 細類)/CATEGORY_GROUPS(細→大組)/GROUP_ORDER、run_weekly_categorization()(只處理 NULL)、run_full_recategorization()(清掉全部重跑)、category_group()。AI 分批 50 筆送，避免單次 prompt 太長
-├── report_helpers.py    # 報表純函式（無 DB / 無網路）：compare(對比)、top_n_expenses、detect_anomalies、sparkline/daily_heatmap、savings_rate、budget_status、日期工具(week_range/month_range/is_first_sunday 等)。全部由 tests/test_report_helpers.py 覆蓋（49 個測試）
+├── categorize.py        # AI 分類（走 codex_text / 訂閱制）：CATEGORIES(14 細類,含投資)/CATEGORY_GROUPS(細→大組)/GROUP_ORDER、run_weekly_categorization()(只處理 NULL)、run_full_recategorization()(清掉全部重跑)、category_group()。AI 分批 50 筆送，避免單次 prompt 太長
+├── report_helpers.py    # 報表純函式（無 DB / 無網路）：compare(對比)、top_n_expenses、detect_anomalies、sparkline/daily_heatmap、savings_rate、budget_status、日期工具(week_range/month_range/is_first_sunday 等)。全部由 tests/test_report_helpers.py 覆蓋（49 個測試）。**另有三桶水位純函式**：`CATEGORY_BUCKETS`(細類→投資/生活/爽,跟 6 大組是不同的軸——大組答「花在什麼」,桶答「該不該花」)、`parse_bucket_ratios`(「1:1:1」→正規化,寫壞退回三等分)、`bucket_totals`(回 (每桶金額, **未分類金額**);未分類要單獨回,因為記帳當下 category 是 NULL、要等週日 AI 分類才落桶,不揭露會讓水位低估)、`format_bucket_context`(組給 AI 角色讀的文字,income<=0 回 None)
 ├── tests/               # pytest 測試。跑法：`docker compose exec app pytest tests/ -v`
 ├── recurring.py         # 固定收支：run_daily_recurring() 每日自動寫入到期項目
 ├── auth.py              # 認證兩層：短效報表 token(30min,in-memory)generate/validate_report_token + PWA 長效裝置 token(DB,無期限,記 last_used_at)create/validate/revoke_device_token。require_token 收 query token 或 X-Device-Token header 擇一
@@ -133,7 +133,7 @@ LINE/Discord 訊息
 
 ## Category Schema (categorize.py)
 
-13 細類 → 6 大組對應，封閉清單（AI 必須從中選一）：
+14 細類 → 7 大組對應，封閉清單（AI 必須從中選一）：
 
 | 大組 | 細類 |
 |---|---|
@@ -142,6 +142,7 @@ LINE/Discord 訊息
 | 飲食 | 三餐、聚餐、飲料零食、食材、超商 |
 | 生活 | 日用品、醫療、服飾 |
 | 娛樂 | 娛樂 |
+| 投資 | 投資 |
 | 其他 | 其他 |
 
 - **居住水電** = 房租、管理費、電費、水費、瓦斯

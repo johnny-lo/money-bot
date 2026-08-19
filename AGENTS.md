@@ -121,6 +121,26 @@
 - **驗證**：`tests/test_line_optional.py`（4 個）+ CI 的 import 預檢刻意**不給** LINE 憑證。
 - **教訓**：凡是「選填」的整合，import 期就不能碰它的憑證。判斷法：把那個 env 拿掉還 import 得起來嗎？
 
+### 坑：功能依賴的資料其實不存在，於是功能「上線即失效」
+- **實例**：三桶水位以「月收入的百分比」當基準。程式全綠、測試全過，一接真實 DB
+  `bucket_context()` 回 `None`——因為**這個系統根本沒人在記收入**（Income 表只有
+  3~5 月的零星測試資料）。功能不是壞掉，是**條件永遠不成立，等於沒做**。
+- **解法**：基準改成優先序 本月實收 → 上月實收 → `MONTHLY_INCOME` 設定值。
+- **教訓**：跟「條件渲染的 UI 使用者永遠打不開」是同一類問題，只是搬到後端。
+  **新功能若依賴某張表有資料，動手前先去查那張表真的有沒有資料**：
+  ```bash
+  docker exec -w /app money-bot python -c "from database import SessionLocal; from models import Income; from sqlalchemy import func; s=SessionLocal(); print(s.query(func.count(Income.id)).scalar())"
+  ```
+
+### 坑：註解說 A，程式做 B（角色評論到底走 Gemini 還是 codex）
+- **現象**：`codex_cli.py` 的 docstring 寫「只負責文字生成（分類、週月評語、**角色評論**）」，
+  但 `generate_persona_comment()` 實際呼叫的是 `gemini_text()`。README/CODEBASE 寫對，docstring 寫錯。
+- **後果**：連作者本人都記成「角色評論走 codex」，排查 429 時會找錯地方。
+- **現況（已改）**：角色即時評論 **Gemini 優先**（~1-2s，使用者在等）→ 失敗/429 **退到 codex**
+  （實測 ~7s，吃 ChatGPT 訂閱無配額）。兩層都掛才回空字串，記帳本身不受影響。
+- **教訓**：判斷「某功能走哪個 AI」不要信註解，跟著 import 走一遍：
+  `grep -n "def generate_persona_comment" -A20 gemini.py`
+
 ## 3. 資料庫的坑
 
 ### 坑：以為加欄位/表會自動生效

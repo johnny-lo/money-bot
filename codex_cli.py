@@ -1,7 +1,8 @@
 """用本機 codex CLI(OpenAI Codex，ChatGPT 訂閱制)跑純文字 prompt，
 取代計費的 Gemini 文字 API —— 走訂閱不必擔心單次計費 / 配額 429。
 
-只負責「文字」生成（分類、週月評語、錢鼠阿財評論）；
+只負責「文字」生成（分類、週/月報評語，以及角色即時評論的**備援**——
+記帳當下的角色回應優先走 Gemini 求即時，Gemini 失敗/429 才退到這裡）；
 影像辨識（拍照記帳、CAPTCHA）仍由 gemini.py 的 gemini_image() 用 Gemini Vision 處理。
 """
 import os
