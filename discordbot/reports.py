@@ -90,7 +90,7 @@ def _generate_ai_comment(
     anomalies: list[dict] | None = None,
     top_records: list[dict] | None = None,
 ) -> str:
-    """用 codex CLI（ChatGPT 訂閱，gpt-5.5）生成期間評語（木須龍口吻）。失敗回錯誤訊息字串。
+    """用 codex CLI（ChatGPT 訂閱，gpt-5.5）生成期間評語（錢鼠阿財口吻）。失敗回錯誤訊息字串。
 
     傳入報表已算好的 vs 上期對比 / 儲蓄率 / 異常暴增 / 單筆 Top 3，
     讓評語能講出具體數字與可執行建議，而非空泛鼓勵。

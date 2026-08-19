@@ -58,7 +58,7 @@
   - **生活**：日用品 / 醫療 / 服飾
   - **娛樂**：娛樂
   - **其他**：其他
-- **AI 角色回應** — 記帳後由「木須龍」角色（台灣配音風格）給出有趣評論（走 Gemini，求即時）
+- **AI 角色回應** — 記帳後由 persona 角色給出有趣評論（走 Gemini，求即時）。角色設定放 `persona.md`（本機私人檔，不入版控）；repo 附範本 `persona.example.md`（原創角色「錢鼠阿財」），沒有 `persona.md` 時自動退回範本。以三桶（投資/生活/爽）的桶位為判斷依據，不以金額大小論斷；沒有桶位資訊時不做超支告誡
 - **AI 週/月評語** — 週報/月報的理財評語走 codex CLI（ChatGPT 訂閱制，預設 `gpt-5.5`），免 Gemini 計費 API 的 429 配額困擾
 
 > **文字 vs 影像分工**：帳目分類、週/月報評語等「純文字」生成走 codex 訂閱制；拍照記帳辨識、發票 CAPTCHA 破解等「影像」仍由 Gemini Vision 處理。codex 裝在 app 容器映像內（**非獨立服務**），登入憑證由 compose 掛載主機 `~/.codex` 到容器 `/root/.codex`。
@@ -88,15 +88,17 @@
 | 前端報表 | ECharts 5 (純 HTML/JS) |
 | 部署 | Docker Compose (app + PostgreSQL + ngrok) |
 
+**Discord Bot 韌性**：Discord 是長連線 websocket（自己外連 gateway），啟動走監管迴圈 `run_discord_bot`——暫時性失敗（開機 DNS 未 ready、連線閃斷、gateway 重連耗盡）以指數退避（5s→cap 5 分）自動重試，直到接上；只有 `LoginFailure`（token 無效）才停手。取代舊版無監管的一次性 task（一拋例外就永久離線）。健康訊號 `🐉 Discord Bot 已上線` 與重試訊息都 `flush=True`，`docker logs` 即時可見。
+
 ## 環境變數 (.env)
 
 | 變數 | 說明 |
 |------|------|
-| `LINE_CHANNEL_SECRET` | LINE Bot Channel Secret |
-| `LINE_CHANNEL_ACCESS_TOKEN` | LINE Bot Channel Access Token |
+| `LINE_CHANNEL_SECRET` | LINE Bot Channel Secret（選填；與 ACCESS_TOKEN 缺任一則 LINE webhook 停用，不影響 Discord / PWA）|
+| `LINE_CHANNEL_ACCESS_TOKEN` | LINE Bot Channel Access Token（選填，同上）|
 | `DATABASE_URL` | PostgreSQL 連線字串 |
 | `GEMINI_API_KEY` | Google Gemini API Key |
-| `MODEL_NAME` | Gemini 模型名稱（影像辨識：拍照記帳 / CAPTCHA / 木須龍即時評論） |
+| `MODEL_NAME` | Gemini 模型名稱（影像辨識：拍照記帳 / CAPTCHA / 錢鼠阿財即時評論） |
 | `CODEX_MODEL` | codex 模型覆蓋（選填，留空＝用 codex 預設 `gpt-5.5`；分類與週/月報評語用） |
 | `MONTHLY_BUDGET` | 月度預算金額（選填，0 = 不顯示預算進度）|
 | `DISCORD_BOT_TOKEN` | Discord Bot Token（選填，未設定則跳過） |
@@ -129,9 +131,28 @@ docker compose up -d --build
 # 3. 確認服務狀態
 docker compose logs -f app
 
-# 4. 跑單元測試（report_helpers 純函式）
+# 4. 跑單元測試
 docker compose exec app pytest tests/ -v
 ```
+
+## CI
+
+`.github/workflows/ci.yml`（GitHub Actions，push / PR 觸發）：
+
+| Job | 做什麼 |
+|-----|--------|
+| `backend` | `pytest tests/`（427 個）+ **import 預檢**（`python -c "import main"`）|
+| `frontend` | `npm ci` + `npm run build` |
+
+兩個細節是踩過才知道的：
+
+- **CI 必須給 `DATABASE_URL` 和假的 LINE 憑證**。`database.py` 在 import 時就 `create_engine()`、
+  `line_handler.py` 在 import 時就 `LineBotApi(token)`，缺值不是「功能停用」而是**import 期直接崩潰**。
+- **要裝 Chromium**。`tests/test_einvoice_{detail,pagination}.py` 會 `p.chromium.launch()` 開真瀏覽器；
+  `importorskip` 只檢查套件有沒有裝，套件在 `requirements.txt` 裡，所以不裝瀏覽器是 **fail 不是 skip**。
+
+`import main` 這關是刻意設的：這個 repo 最痛的一次生產中斷就是「加端點忘了裝 `python-multipart`
+→ import 期 RuntimeError → bot + webhook 全掛」。**import 崩潰＝全站掛**，所以把它擋在 CI。
 
 服務啟動後：
 - FastAPI 跑在 `http://localhost:8000`（loopback only，不對外）
@@ -160,9 +181,9 @@ docker compose exec app pytest tests/ -v
 | 傳送照片 | AI 辨識發票/明細 |
 
 ### Discord（Slash Commands + Embeds + 多頻道）
-所有回覆用彩色 embed 卡片（💸 支出紅、💰 收入綠、🔍 查詢藍、🐉 木須龍紫）。
+所有回覆用彩色 embed 卡片（💸 支出紅、💰 收入綠、🔍 查詢藍、🐭 錢鼠阿財紫）。
 
-**頻道結構**（一次性 setup 腳本建立，含木須龍主題 banner 圖）：
+**頻道結構**（一次性 setup 腳本建立，含主題 banner 圖（圖檔在 gitignore 的 resource/，不入版控））：
 - `#📝-記帳` — slash commands 主場
 - `#📊-報表查詢` — 每週日 21:00 自動 post 週報；每月第一個週日同時連推上月完整月結
 - `#🧾-發票通知` — 週一 ~ 週六 21:00 抓完發票自動 post 結果（週日歸週報 pipeline）

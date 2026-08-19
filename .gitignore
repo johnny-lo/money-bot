@@ -1,11 +1,37 @@
 .env
+.env.*
+*.env
+!.env.example
 __pycache__/
 *.pyc
+.pytest_cache/
 resource/
 
 # 財務資料快照(備份用,不入版控)
 .backups/
+*.sql
+*.dump
 
 # 使用者上傳的食物照片(只留資料夾,內容不入版控)
 media/*
 !media/.gitkeep
+
+# AI 工具的本機設定(含本機絕對路徑、其他專案名稱、允許執行的指令清單)
+.claude/settings.local.json
+
+# 安全稽核報告＝自家系統的攻擊地圖(prompt injection 路徑、full-access codex 入口),
+# 公開等於附贈攻略。修完之前不入版控。
+docs/audit/
+# 例外:這份是「測試缺口+功能建議」,沒有攻擊路徑,且早已在版本歷史裡,留著當工程紀錄
+!docs/audit/2026-06-10-test-gaps-and-features.html
+
+# 截圖幾乎一定會拍到對外網址或私人清單(想去的店、消費明細) → 預設全擋。
+# 真要放圖:先打碼,再改名成 docs/public-*.png 才放行。
+docs/*.png
+docs/*.jpg
+docs/**/*.png
+docs/**/*.jpg
+!docs/public-*.png
+
+# 本機私人角色設定(木須版)。公開 repo 只附 persona.example.md 範本。
+persona.md

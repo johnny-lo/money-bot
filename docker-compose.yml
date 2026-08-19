@@ -8,7 +8,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     environment:
-      - BASE_URL=${BASE_URL:-https://your-ngrok-domain.ngrok-free.dev}
+      - BASE_URL=${BASE_URL:?請在 .env 設定 BASE_URL（對外網址）}
       - LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
       - LINE_CHANNEL_ACCESS_TOKEN=${LINE_CHANNEL_ACCESS_TOKEN}
       - DATABASE_URL=${DATABASE_URL}
@@ -56,7 +56,7 @@ services:
     container_name: money-tunnel
     restart: unless-stopped
     # ★ 下面這行要把 domain 改成你剛剛申請到的那個！
-    command: http --url=https://your-ngrok-domain.ngrok-free.dev app:8000
+    command: http --url=${NGROK_DOMAIN:?請在 .env 設定 NGROK_DOMAIN（ngrok 保留域名）} app:8000
     environment:
       # 去 ngrok 官網 Dashboard 複製你的 Authtoken
       NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}

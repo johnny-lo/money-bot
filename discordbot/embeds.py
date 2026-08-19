@@ -6,7 +6,7 @@ from food import ingest
 COLOR_EXPENSE = 0xE74C3C   # 紅
 COLOR_INCOME  = 0x2ECC71   # 綠
 COLOR_INFO    = 0x3498DB   # 藍
-COLOR_PERSONA = 0x9B59B6   # 紫（木須龍）
+COLOR_PERSONA = 0x9B59B6   # 紫（錢鼠阿財）
 COLOR_WARN    = 0xF1C40F   # 黃
 COLOR_FOOD    = 0xE67E22   # 美食橘
 COLOR_RECIPE  = 0x16A085   # 食譜青綠

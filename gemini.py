@@ -3,15 +3,17 @@ import json
 import base64
 import urllib.request
 
-# 載入 persona 設定
+# 載入 persona 設定。persona.md 是**本機私人角色**（.gitignore，不入版控），
+# 找不到就退回 repo 附的範本 persona.example.md，讓全新 clone 也能直接跑。
 PERSONA_TEXT = "你是一個記帳助理。"
-persona_path = "persona.md"
 
-if os.path.exists(persona_path):
-    with open(persona_path, "r", encoding="utf-8") as f:
-        PERSONA_TEXT = f.read()
+for persona_path in ("persona.md", "persona.example.md"):
+    if os.path.exists(persona_path):
+        with open(persona_path, "r", encoding="utf-8") as f:
+            PERSONA_TEXT = f.read()
+        break
 else:
-    print(f"⚠️ 找不到 {persona_path}，將使用預設 AI 設定。")
+    print("⚠️ 找不到 persona.md / persona.example.md，將使用預設 AI 設定。")
 
 
 def gemini_text(prompt: str, model: str | None = None) -> str:

@@ -29,7 +29,7 @@ from .embeds import (
 )
 from .reports import notify_weekly_summary, notify_monthly_summary
 
-BASE_URL = os.getenv("BASE_URL", "https://your-ngrok-domain.ngrok-free.dev").rstrip("/")
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
 
 
 def register_commands(bot) -> None:

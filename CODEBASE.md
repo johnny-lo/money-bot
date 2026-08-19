@@ -11,17 +11,17 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 
 ```
 .
-├── main.py              # 入口：FastAPI app 建立、DB 初始化、APScheduler 排程、Discord Bot 啟動
+├── main.py              # 入口：FastAPI app 建立、DB 初始化、APScheduler 排程、Discord Bot 監管式啟動（run_discord_bot）
 ├── core.py              # 核心業務邏輯：文字指令解析/處理、圖片記帳、訊息路由 + Data API（Discord embeds 用）
-├── line_handler.py      # LINE Bot：webhook /callback、文字/圖片訊息事件處理（純文字介面）
+├── line_handler.py      # LINE Bot：webhook /callback、文字/圖片訊息事件處理（純文字介面）。**憑證可選**：`LINE_ENABLED` 為假時整段跳過掛載,不再 import 期崩潰拖垮全站（測試 tests/test_line_optional.py）
 ├── discordbot/          # Discord Bot package（原 discord_handler.py 拆分，邏輯不變；不能叫 discord 會遮蔽套件）
-│   ├── bot.py           # MoneyBot client：on_message 頻道分流、on_raw_reaction_add(✅ 標去過)、create_discord_bot
+│   ├── bot.py           # MoneyBot client：on_message 頻道分流、on_raw_reaction_add(✅ 標去過)、create_discord_bot、run_discord_bot（監管迴圈：暫時性失敗退避重試、壞 token 停手；on_ready/重試訊息 flush=True 即時可見）
 │   ├── commands.py      # 28 個 slash commands 註冊（記帳/查詢/固定收支/美食/食譜/測試報表）；BASE_URL 在此
 │   ├── embeds.py        # 全部 embed builders + 顏色常數 + fmt_money/fmt_dt（純呈現層）
 │   ├── ingest_handlers.py # 美食/食譜/圖片記帳的 on_message 處理（handle_food_message/handle_recipe_message/do_image_recording）
 │   ├── reports.py       # 週報/月報/發票通知：_query_period 彙總 + _generate_ai_comment + notify_*
 │   └── bridge.py        # sync→async 橋接：set_bot/post_embeds_sync（排程 thread 投遞 embeds）
-├── gemini.py            # Gemini API 封裝：gemini_image()（影像辨識：拍照記帳、CAPTCHA，用 MODEL_NAME）、gemini_text()（保留作後備）、generate_persona_comment()（木須龍記帳評論，走 Gemini 文字）
+├── gemini.py            # Gemini API 封裝：gemini_image()（影像辨識：拍照記帳、CAPTCHA，用 MODEL_NAME）、gemini_text()（保留作後備）、generate_persona_comment()（錢鼠阿財記帳評論，走 Gemini 文字）
 ├── codex_cli.py         # codex_text(prompt)：shell 出去呼叫本機 `codex exec`（ChatGPT 訂閱制，預設 gpt-5.5），用 --output-last-message 取乾淨輸出。供「分類 + 週/月報評語」的文字生成用，取代計費的 Gemini 文字 API（CODEX_MODEL env 可覆蓋模型）
 ├── database.py          # SQLAlchemy engine/SessionLocal/Base 建立（讀 DATABASE_URL）
 ├── models.py            # ORM 模型：Transaction(支出)、Income(收入)、RecurringRecord(固定收支)
@@ -32,7 +32,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── auth.py              # 認證兩層：短效報表 token(30min,in-memory)generate/validate_report_token + PWA 長效裝置 token(DB,無期限,記 last_used_at)create/validate/revoke_device_token。require_token 收 query token 或 X-Device-Token header 擇一
 ├── einvoice.py          # 財政部電子發票同步：Playwright 登入 → CAPTCHA(Gemini) → 抓發票 → 寫 transactions。`sync_invoices()` 回傳 `{"summary": str, "new_items": list[dict]}`，支援多組載具（EINVOICE_PHONE_1/2 + PASSWORD_1/2）。**明細逐品項抓取**：清單與明細同一 SPA URL，明細開在 Bootstrap modal；`_parse_current_page` 對每筆「點號碼→等 modal→`_fetch_detail_items`(限定 modal 內品名表)→`_close_detail_modal`(關 modal,**嚴禁 go_back**)→下一筆」，故每張發票的每個品項各寫一筆 transaction（抓不到明細才退化成賣方+總額一筆）。回歸測試 tests/test_einvoice_detail.py（Playwright 靜態 fixture，主機無 Playwright 則 skip）。**歷史月份回填**：`_scrape_carrier(..., month=(y,m))` 用 `_set_query_month` 操作 vue-datepicker 把查詢區間設成『單月』(政府站限制每次查詢須同月，跨月會被擋)；翻頁用 `_NEXT_PAGE_FIND/_NEXT_PAGE_CLICK`(Bootstrap `a.page-link「下一頁」`，舊版 aria-label/rel=next 從沒中過 → 多頁只抓第 1 頁)。回歸測 tests/test_einvoice_pagination.py
 ├── invoice_backfill.py  # 發票智能補拓：`build_month_plan(gap_start,today)`(純函式,缺口拆逐月查詢計畫,政府站同月限制)、`get/set_last_covered`(invoice_sync_state 高水位 repo)、`sync_with_backfill(today=None)`(算缺口→`_scrape_one` 複用 einvoice `_scrape_carrier`/`_save_invoices`→去重存→全成功才推進高水位;失敗回 failures、不推進)。BACKFILL_CAP_DAYS=60、bootstrap=today-1。測 tests/test_invoice_backfill.py(純 plan + monkeypatch 編排)
-├── persona.md           # AI 角色設定：木須龍(台灣配音風格)，記帳後生成角色回應
+├── persona.md           # AI 角色設定（**本機私人檔,.gitignore 不入版控**）。gemini.py 找不到就退回 `persona.example.md`,全新 clone 也能跑。判斷基準是**三桶（投資/生活/爽）桶位**而非金額大小;摘要沒帶桶位資訊時**預設沒超支、禁止說教**（舊版只看金額→每筆稍大的都被念）。寫法與踩過的坑見 persona.example.md
 ├── resource/            # Discord 頻道歡迎 banner 圖（手動放入，由 _setup_discord 一次性上傳；已 .gitignore 不入版本控制）
 ├── food/
 │   ├── __init__.py
@@ -42,7 +42,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── photos.py        # 店家照片庫：檔案存 media/food/<id>/、DB(food_photos) 只記相對路徑。add_photo()/list_photos()/photos_by_place()(批次防 N+1,回 {id,url,source})/delete_photo()/delete_files_for_place()
 │   ├── enrich.py        # 店家自動補強 orchestrator：enrich_place()(推薦菜空才補、google 照片沒有才抓,idempotent)、backfill_all(max_api_calls=200)(一次性補全部,docker exec 跑;API 呼叫預算超過即停,重跑自動接續)
 │   ├── links.py         # URL 偵測 + 平台判斷（純函式，無 I/O）：find_urls()、classify_platform()(youtube/instagram/threads/tiktok/facebook/gmaps/other,子網域邊界比對防釣魚)、strip_urls()、detect_links()、first_link()
-│   ├── extract.py       # 截圖/文字/連結 → 欄位 JSON：parse_extracted_json()(純函式)、from_image()(Gemini Vision)、from_text()(codex)、parse_video_id()(YouTube 11 碼 ID,純函式)、gmaps_place_name()(Google Maps URL path 解店名,純函式)、parse_og()(HTML body 抽 og:title/description,純函式)、from_url(url, platform)(I/O wrapper,yt-dlp 主 + og fetch 備援,Maps follow redirect→gmaps_place_name；og fetch 用 facebookexternalhit UA 才拿得到 Threads/Meta 平台 og 標籤)、deep_extract_via_codex()(全 access codex CLI 深度振查,看圖+搜尋交叉驗證,前兩層抽不到店名才動用)。**SSRF 守門 `_is_safe_fetch_url`**:`_http_get` 與 `deep_extract_via_codex` 入口都先過它,只放行公網 http(s),擋掉 file://、非 http(s) scheme、localhost/127.x/169.254(metadata)/10.x/192.168.x 等內網位址(防被誘導抓內網或讓 full-access codex 被指向 localhost)。三個 prompt(_TEXT_PROMPT/_IMAGE_PROMPT/_DEEP_PROMPT)精準區分 recommended_items(文中明確稱讚/必點/招牌的具體菜名,例:歐巴豬五花) vs cuisine_type(店家主要販售的料理類型,例:拉麵/咖啡/早午餐),避免把料理類別誤塞進推薦欄 + `parse_place_list`（一次 codex 批解析）
+│   ├── extract.py       # 截圖/文字/連結 → 欄位 JSON（**deep_extract_via_codex 跑 `-s read-only` + `tools.web_search=true`,絕不可改回 danger-full-access——它處理的是攻擊者可控的網頁內容;prompt 內另有不可信資料聲明當第二層**）：parse_extracted_json()(純函式)、from_image()(Gemini Vision)、from_text()(codex)、parse_video_id()(YouTube 11 碼 ID,純函式)、gmaps_place_name()(Google Maps URL path 解店名,純函式)、parse_og()(HTML body 抽 og:title/description,純函式)、from_url(url, platform)(I/O wrapper,yt-dlp 主 + og fetch 備援,Maps follow redirect→gmaps_place_name；og fetch 用 facebookexternalhit UA 才拿得到 Threads/Meta 平台 og 標籤)、deep_extract_via_codex()(全 access codex CLI 深度振查,看圖+搜尋交叉驗證,前兩層抽不到店名才動用)。**SSRF 守門 `_is_safe_fetch_url`**:`_http_get` 與 `deep_extract_via_codex` 入口都先過它,只放行公網 http(s),擋掉 file://、非 http(s) scheme、localhost/127.x/169.254(metadata)/10.x/192.168.x 等內網位址(防被誘導抓內網或讓 full-access codex 被指向 localhost)。三個 prompt(_TEXT_PROMPT/_IMAGE_PROMPT/_DEEP_PROMPT)精準區分 recommended_items(文中明確稱讚/必點/招牌的具體菜名,例:歐巴豬五花) vs cuisine_type(店家主要販售的料理類型,例:拉麵/咖啡/早午餐),避免把料理類別誤塞進推薦欄 + `parse_place_list`（一次 codex 批解析）
 │   ├── pending.py       # 需補件 in-memory 暫存(無 TTL,重啟丟失)：remember()/get()/consume()/clear()
 │   ├── ingest.py        # orchestrator：extract → places → upsert → 事後雷點(best-effort)。回 (place|None, missing_reason)。`from_url(url, *, caption='')` 用 extract.from_url 抽 blob → codex from_text → 抽不到店名再 deep_extract_via_codex → _from_fields 入庫 + `batch_from_text`（批次匯入 orchestrator）、`strip_checkbox`/`is_batch`/`take_capped`/`bucket_line`/`dedupe_resolved`（純函式）
 │   ├── cuisine.py       # 料理兩層分類（純函式）：MAJORS(12 大類)、normalize_major()(持久化邊界守門員,越界值一律清空)、classify(raw,*,name,items)→(大類,細類)。三層優先序 A 店型(咖啡甜點/飲料冰品) > B 菜系國別 > C 弱品類(火鍋/燒烤/早午餐/酒吧)：日式燒肉→日式(B勝C)、法式甜點→咖啡甜點(A勝B)。**分層只套用在 cuisine_type(描述店)**；店名/推薦菜(描述菜)純最左命中,否則推薦菜提到蛋糕的餐廳會變甜點店。詞彙表只住這裡,不進 LLM prompt(兩份必漂移)
@@ -61,6 +61,9 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── commands.py      # 純函式 parse_reply_command（#主題/+標籤/-標籤/改標題/noop）+ CHEAT_SHEET 小抄文字（卡片 footer 與 help 共用單一真相）
 │   ├── repo.py          # HistoryVideo+VideoTag DB 存取：add_video url 去重 / list_videos(附 tags) / rename / set_topic / add_tag(冪等)/remove_tag / tags_by_video(批次防 N+1) / delete / set_message_id / get_by_message_id
 │   └── ingest.py        # 連結→{topic,tags}+標題→入庫+掛標籤 orchestrator：AI 失敗不擋入庫(標題退 blob 第一行)
+├── .github/workflows/ci.yml  # GitHub Actions：backend(pytest 427 + **import 預檢**,帶 postgres service + Chromium——einvoice 兩個回歸測試會真的開瀏覽器,不裝是 fail 不是 skip) / frontend(npm ci + build)。CI 必須給 DATABASE_URL 與假的 LINE 憑證,否則 database.py / line_handler.py 在 **import 期**就炸
+├── .env.example         # 環境變數範本（README 的 `cp .env.example .env` 用）；真 .env 不入版控
+├── persona.example.md   # persona.md 的**寫法教學**（怎麼寫判斷規則、為什麼不能給口頭禪清單、資料不足時的預設行為）
 ├── requirements.txt     # Python 依賴
 ├── Dockerfile           # python:3.11-slim，pip install → uvicorn 啟動
 ├── docker-compose.yml   # 三個服務：app(127.0.0.1:8000)、db(PostgreSQL，僅 docker network；帳密可由 .env POSTGRES_* 覆蓋,預設沿用舊值)、ngrok(127.0.0.1:4040 inspector + tunnel)
@@ -184,7 +187,7 @@ LINE/Discord 訊息
 - 27 個 slash commands 全用中文名稱（`/記帳`, `/查詢`, `/最近`, `/測試週報`, `/測試月報`, `/美食新增`, `/美食推薦`, `/美食清單`, `/去過`, `/美食地圖`, `/美食刪除`, `/隨機食譜`, `/食譜清單`, `/食譜刪除` 等）
 - 每個 command callback 流程：(1) `await ix.response.defer()` 必要時、(2) 呼叫 `core.*_data()`、(3) 用對應 embed builder 組卡片、(4) `ix.followup.send(embeds=...)`
 - 慢 commands（`/記帳`, `/收入`, `/分類`, `/抓發票`）必 defer 避免 3 秒超時
-- 配色：支出 `#E74C3C` / 收入 `#2ECC71` / 查詢 `#3498DB` / 木須龍 `#9B59B6` / 警告 `#F1C40F`
+- 配色：支出 `#E74C3C` / 收入 `#2ECC71` / 查詢 `#3498DB` / 錢鼠阿財 `#9B59B6` / 警告 `#F1C40F`
 - 圖片附件走 `on_message`，依頻道分流：`RECIPE_INGEST_CHANNEL_ID` → `_handle_recipe_message()`（連結→食譜入庫 + `_send_recipe_card` reply 卡片；gmaps 連結擋掉）；`FOOD_INGEST_CHANNEL_ID` → `_handle_food_message()`（截圖/文字 ingest、reply 補件）；`HISTORY_VIDEO_INGEST_CHANNEL_ID` → `handle_video_message()`（連結→影片入庫+AI 判主題標籤；reply 卡片 `#主題`/`+標籤`/`-標籤`/改標題編輯；help/純文字回小抄）；`DISCORD_RECORD_CHANNEL_ID` → `_do_image_recording()`（圖片記帳）；**未設 RECORD 頻道則退回「任意頻道圖片記帳」舊行為**；其他頻道圖片回指引（`_HINT_DEBOUNCE` 30 分鐘防洗版）。recipe 分支複用 `food.links.classify_platform` / `food.extract.from_url` / `food.pending`；3 個 recipe slash 指令（`/隨機食譜`, `/食譜清單`, `/食譜刪除`）+ 4 個 recipe_*_embed embed builders
 - `on_raw_reaction_add`：在 `#美食輸入` 對店家卡片按 ✅ → `set_visited_by_message_id()` 標去過 + 追問評分/心得
 - **Sync→Async 橋接**：`set_bot()`/`post_embeds_sync()`(discordbot/bridge.py) 讓 APScheduler 排程（同步 thread）能投遞 embeds 到 Discord。原理：把 coroutine 用 `asyncio.run_coroutine_threadsafe(coro, bot.loop)` 排到 bot 的 event loop
@@ -197,7 +200,7 @@ LINE/Discord 訊息
   - 對應 channel ID 存在 `.env`：`DISCORD_RECORD_CHANNEL_ID` / `DISCORD_REPORT_CHANNEL_ID` / `DISCORD_INVOICE_CHANNEL_ID`
 - **週報 (`notify_weekly_summary`)** — 本週（週一→週日）embed 欄位：三格頭(收/支/淨) → vs 上週對比 → 大組分布 → 細類分布(前 8) → Top 3 單筆 → 每日支出迷你長條 → 異常分類(近 4 週均值+50%) → AI 評語
 - **月結 (`notify_monthly_summary`)** — 上月 embed 欄位：三格頭 → vs 上上月對比 → 儲蓄率 → 預算狀態(`MONTHLY_BUDGET`) → 大組 → 細類(前 8) → Top 3 → 近 6 月 sparkline → 異常分類(近 4 月均值+50%) → AI 評語
-- **AI 評語**：兩種報表共用 `_generate_ai_comment()`，走 `codex_cli.codex_text()`（ChatGPT 訂閱制，預設 gpt-5.5，不再用計費 Gemini，免 429 配額）+ persona.md 木須龍。會餵入報表已算好的 vs 上期對比 / 儲蓄率（月）/ 異常暴增分類 / 單筆 Top 3，要求講出具體數字與可執行建議；prompt 依 `period_kind` 分流（週報 2–3 句聚焦本週、月報 3–4 句講趨勢+下月行動）。失敗時欄位會顯示「⚠️ AI 評語生成失敗：{錯誤訊息}」，embed 照樣推。註：木須龍「記帳當下」評論（generate_persona_comment）仍走 Gemini，只有報表評語與分類改用 codex
+- **AI 評語**：兩種報表共用 `_generate_ai_comment()`，走 `codex_cli.codex_text()`（ChatGPT 訂閱制，預設 gpt-5.5，不再用計費 Gemini，免 429 配額）+ persona.md 錢鼠阿財。會餵入報表已算好的 vs 上期對比 / 儲蓄率（月）/ 異常暴增分類 / 單筆 Top 3，要求講出具體數字與可執行建議；prompt 依 `period_kind` 分流（週報 2–3 句聚焦本週、月報 3–4 句講趨勢+下月行動）。失敗時欄位會顯示「⚠️ AI 評語生成失敗：{錯誤訊息}」，embed 照樣推。註：錢鼠阿財「記帳當下」評論（generate_persona_comment）仍走 Gemini，只有報表評語與分類改用 codex
 - **手動測試**：在 Discord 用 `/測試週報` / `/測試月報` 立即觸發推送（**必須在 bot 主進程內呼叫**，因為 `_bot_instance` 是 module 級狀態；從 `docker compose exec` 開的子進程裡呼叫 `notify_*()` 會靜默失敗）
 - **DB 查詢輔助** `_query_period(start, end)` 一次撈完一段期間需要的所有彙總（總額/分類/Top N/每日金額），週報跟月報共用
 
