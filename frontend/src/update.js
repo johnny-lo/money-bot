@@ -5,6 +5,8 @@
 // 所以殼永遠不走網路，只有 SW 自己更新後才會換。而瀏覽器只在「導覽發生」時才去
 // 檢查 sw.js —— 桌機按重新整理就算一次，但手機主畫面 App 沒有重整鈕，iOS 又是
 // 暫停而非終止，從 App 切換器切回來常常不算導覽 → 檢查永遠不觸發，就一直卡舊版。
+// （另有一個更兇的歷史成因已排除：ngrok 免費版的攔截頁會讓瀏覽器抓 sw.js 時拿到
+//   HTML，SW 註冊直接靜默失敗。改用 Tailscale Funnel 後不再發生，詳見 AGENTS.md。）
 
 /** 目前這份 app 是由哪個 bundle 檔載入的（檔名帶內容雜湊，內容一變檔名就變）。 */
 export function currentBundle() {
@@ -30,17 +32,9 @@ export function isStale(current, server) {
  * 直接問伺服器現在的殼指向哪個 bundle。
  *
  * cache:'no-store' + 這個請求不是 navigate（不會被 NavigationRoute 攔），所以真的會出網路。
- *
- * **必須帶 ngrok-skip-browser-warning**：不帶的話 ngrok 免費版會回攔截頁的 HTML，
- * 解不出 bundle 檔名 → 永遠判定「沒有新版」→ 這個偵測就等於沒做。
- * （這正是「瀏覽器抓 sw.js 沒辦法帶 header、於是拿到攔截頁、於是 SW 永遠更新不了」
- *   那個根因的同一顆地雷；我們自己發的 fetch 至少躲得掉。）
  */
 export async function fetchServerBundle() {
-  const res = await fetch('/m/index.html', {
-    cache: 'no-store',
-    headers: { 'ngrok-skip-browser-warning': 'true' },
-  })
+  const res = await fetch('/m/index.html', { cache: 'no-store' })
   return bundleName(await res.text())
 }
 

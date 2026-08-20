@@ -97,8 +97,23 @@
   cookie 一過期又壞掉。所以是**間歇性**的，很容易被誤判成快取玄學。
 - **當下的繞法**：點開連結 → **先過攔截頁**（按 Visit Site）→ **在同一個分頁按重新整理**。
   這時 cookie 在，SW 更新請求才拿得到真的 JS。
-- **根本解**：**離開 ngrok 免費版**。Cloudflare Tunnel（cloudflared）免費、沒有攔截頁，
-  一併消滅 `api.js` / `sw.js` 裡那三處 `ngrok-skip-browser-warning` hack。
+- **根本解（已執行，2026-08-20）**：改用 **Tailscale Funnel**。免費、沒有攔截頁、網址固定，
+  **訪客不需要安裝 Tailscale**（Funnel 是公開網際網路；要裝的是 Serve）。
+  ```bash
+  tailscale funnel --bg 8000            # 開
+  tailscale funnel status               # 看
+  tailscale funnel --https=443 off      # 關
+  ```
+  一併消滅了 `api.js`/`sw.js`/`update.js` 裡四處 `ngrok-skip-browser-warning` hack。
+- **試過但無效**：ngrok Traffic Policy 的 `add-headers`（想讓邊緣自己補 header）——
+  攔截頁的判斷發生在 policy 之前，回來還是 2,824 bytes 的攔截頁。別再試一次。
+- **遷移時要手動改的東西**（換網域一定會遇到）：① LINE webhook URL ② Google Maps
+  **browser** key 的 referrer 限制（server key 不用）③ 手機重新從 Discord 開一次連結換發裝置 token。
+  Discord **不用改**——bot 是 gateway 主動連出，Discord 端沒有你的網址。
+- **DNS 負快取會騙你**：剛開 Funnel 時 `8.8.8.8` 可能還回舊的 NXDOMAIN，手機顯示「找不到伺服器」。
+  查權威伺服器才準：`dig @ns1.dnsimple.com <name>.ts.net`。等負快取過期，或手機切行動網路。
+- **本機 curl 驗不到公開路徑**：MagicDNS 會把 `*.ts.net` 解析到 tailnet 內網 IP（100.x），
+  等於沒走 Funnel。要驗公開路徑得用 `curl --resolve <name>:443:<公開IP>`。
 - **教訓**：診斷「前端拿不到新版」時，**要單獨 curl `sw.js` 並檢查 `content-type`**。
   只 curl `index.html` 和 bundle 是不夠的——那兩個 app 內帶得了 header，sw.js 帶不了。
 

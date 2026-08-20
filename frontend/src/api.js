@@ -24,7 +24,6 @@ export async function ensureAuth() {
     const label = encodeURIComponent(navigator.userAgent.slice(0, 100))
     const res = await fetch(`/api/device-token?token=${short}&label=${label}`, {
       method: 'POST',
-      headers: { 'ngrok-skip-browser-warning': 'true' },
     })
     if (res.ok) {
       const data = await res.json()
@@ -45,7 +44,7 @@ async function authedFetch(path, { method = 'GET', body = null, json = null } = 
     throw new Error('沒有有效憑證，請回 Discord 用 /美食地圖 重新開啟一次。')
   }
 
-  const headers = { 'ngrok-skip-browser-warning': 'true' }   // 跳過 ngrok 免費版的攔截頁
+  const headers = {}
   let url = path
   if (device) headers['X-Device-Token'] = device
   else url += (path.includes('?') ? '&' : '?') + 'token=' + short
@@ -74,7 +73,7 @@ async function authedFetch(path, { method = 'GET', body = null, json = null } = 
   try {
     return JSON.parse(text)
   } catch {
-    throw new Error('資料格式錯誤（可能是 ngrok 攔截頁，請重新整理）')
+    throw new Error('資料格式錯誤：伺服器沒有回 JSON，請重新整理')
   }
 }
 

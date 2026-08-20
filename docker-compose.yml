@@ -1,4 +1,11 @@
 services:
+  # 對外出口＝Tailscale Funnel（跑在主機上，不是容器）：
+  #   tailscale funnel --bg 8000     → https://<機器>.<tailnet>.ts.net
+  #   tailscale funnel status        → 看目前設定
+  #   tailscale funnel --https=443 off → 關掉
+  # 原本這裡有 ngrok service，已移除：免費版的攔截頁會讓瀏覽器抓 sw.js 時拿到 HTML，
+  # service worker 註冊靜默失敗，手機永遠卡舊版（詳見 AGENTS.md）。
+
   # 1. 你的記帳機器人
   app:
     image: money-bot
@@ -49,21 +56,6 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-money_db}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
-  # 3. ngrok (直接幫你把網址指到 app)
-  ngrok:
-    image: ngrok/ngrok:latest
-    container_name: money-tunnel
-    restart: unless-stopped
-    # ★ 下面這行要把 domain 改成你剛剛申請到的那個！
-    command: http --url=${NGROK_DOMAIN:?請在 .env 設定 NGROK_DOMAIN（ngrok 保留域名）} app:8000
-    environment:
-      # 去 ngrok 官網 Dashboard 複製你的 Authtoken
-      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN}
-    ports:
-      - "127.0.0.1:4040:4040"
-    depends_on:
-      - app
 
 volumes:
   postgres_data:

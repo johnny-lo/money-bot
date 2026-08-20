@@ -1,7 +1,6 @@
 // 自製 service worker（injectManifest 模式）。
-// 為什麼不用 generateSW：它的設定 schema 不允許幫 fetch 加自訂 header，
-// 而我們需要在抓 /media 圖片時帶 ngrok-skip-browser-warning ——
-// <img> 標籤帶不了 header，但 SW 攔截後重發的請求可以。
+// 保留 injectManifest 而非 generateSW：這裡的路由策略（導覽走 precache、API NetworkFirst、
+// 圖片 CacheFirst 分開設定）用自己寫的檔案比較清楚，之後要加東西也不受 schema 限制。
 import { precacheAndRoute, cleanupOutdatedCaches, createHandlerBoundToURL } from 'workbox-precaching'
 import { registerRoute, NavigationRoute } from 'workbox-routing'
 import { NetworkFirst, CacheFirst } from 'workbox-strategies'
@@ -30,19 +29,12 @@ registerRoute(
 )
 
 // 店家照片：CacheFirst（檔名是 uuid 內容不會變）。
-// requestWillFetch 把請求換成帶 ngrok 跳過攔截頁 header 的版本 ——
-// 沒有這個，ngrok 免費版會對圖片回 200+HTML 攔截頁，還會被當成圖片快取住（v1 的事故）。
-const ngrokBypassPlugin = {
-  requestWillFetch: async ({ request }) =>
-    new Request(request.url, { headers: { 'ngrok-skip-browser-warning': 'true' } }),
-}
-
 registerRoute(
   ({ url }) => url.pathname.startsWith('/media/'),
   new CacheFirst({
-    cacheName: 'media-v2',   // v1 被攔截頁毒過，換名拋棄整鍋
+    cacheName: 'media-v2',   // v1 曾被 ngrok 攔截頁毒過（回 200+HTML 還被當圖片快取住），
+                             // 當時換名整鍋拋棄。已改用 Tailscale Funnel、沒有攔截頁，名字沿用即可。
     plugins: [
-      ngrokBypassPlugin,
       new ExpirationPlugin({ maxEntries: 200, maxAgeSeconds: 30 * 24 * 60 * 60 }),
     ],
   }),

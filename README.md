@@ -87,7 +87,7 @@
 | 排程 | APScheduler (背景排程) |
 | 爬蟲 | Playwright + Chromium (財政部電子發票) |
 | 前端報表 | ECharts 5 (純 HTML/JS) |
-| 部署 | Docker Compose (app + PostgreSQL + ngrok) |
+| 部署 | Docker Compose (app + PostgreSQL) + Tailscale Funnel 對外 |
 
 **Discord Bot 韌性**：Discord 是長連線 websocket（自己外連 gateway），啟動走監管迴圈 `run_discord_bot`——暫時性失敗（開機 DNS 未 ready、連線閃斷、gateway 重連耗盡）以指數退避（5s→cap 5 分）自動重試，直到接上；只有 `LoginFailure`（token 無效）才停手。取代舊版無監管的一次性 task（一拋例外就永久離線）。健康訊號 `🐉 Discord Bot 已上線` 與重試訊息都 `flush=True`，`docker logs` 即時可見。
 
@@ -109,7 +109,7 @@
 | `DISCORD_INVOICE_CHANNEL_ID` | 發票通知頻道 ID（選填） |
 | `DISCORD_REPORT_CHANNEL_ID` | 週報 / 月結通知頻道 ID（選填） |
 | `DISCORD_RECORD_CHANNEL_ID` | 記帳主頻道 ID（選填，預留） |
-| `BASE_URL` | 對外網址（報表/地圖連結用）；未設則用 ngrok 保留域名預設值 |
+| `BASE_URL` | 對外網址（報表/地圖連結、LINE webhook 用）。必填 |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | （選填）覆蓋 db 容器帳密；未設沿用預設。注意 postgres 只在 volume 首次初始化時套用密碼 |
 | `FOOD_INGEST_CHANNEL_ID` | 美食輸入頻道 ID（美食地圖；丟截圖/文字自動記店） |
 | `RECIPE_INGEST_CHANNEL_ID` | `#🍳-食譜` 頻道 ID；未設則食譜分支不啟用（不影響美食/記帳） |
@@ -117,7 +117,6 @@
 | `GOOGLE_PLACES_SERVER_KEY` | 後端 Google Places API (New) 金鑰（美食店名正規化 / 雷點摘要） |
 | `GOOGLE_MAPS_BROWSER_KEY` | 前端 Google Maps JavaScript API 金鑰（美食地圖網頁；限 ngrok referrer + 只開 Maps JS API） |
 | `GOOGLE_MAPS_MAP_ID` | Google Maps Map ID（AdvancedMarker 必需；未申請填 `DEMO_MAP_ID`，會有浮水印） |
-| `NGROK_AUTHTOKEN` | ngrok 認證 Token |
 | `EINVOICE_PHONE_1` | 第一組載具：財政部電子發票會員手機號碼 |
 | `EINVOICE_PASSWORD_1` | 第一組載具：驗證碼（密碼） |
 | `EINVOICE_PHONE_2` | 第二組載具（選填） |
@@ -160,8 +159,20 @@ docker compose exec app pytest tests/ -v
 
 服務啟動後：
 - FastAPI 跑在 `http://localhost:8000`（loopback only，不對外）
-- ngrok 管理面板在 `http://localhost:4040`（loopback only，不對外）
-- LINE Webhook URL: `https://<your-ngrok-domain>/callback`
+- LINE Webhook URL: `<BASE_URL>/callback`
+
+### 對外出口：Tailscale Funnel
+
+```bash
+tailscale funnel --bg 8000          # 開，網址即 https://<機器>.<tailnet>.ts.net
+tailscale funnel status             # 看目前設定
+tailscale funnel --https=443 off    # 關
+```
+
+**為什麼不是 ngrok**：ngrok 免費版對瀏覽器請求回攔截頁，而**瀏覽器抓 service worker 時
+帶不了自訂 header** → 拿到 `text/html` → SW 註冊靜默失敗 → 手機永遠卡舊版。這是無解的
+（攔截頁在 ngrok 邊緣、那個請求也插不了 header），只能離開免費版。Tailscale Funnel 免費、
+沒有攔截頁、網址固定，且訪客不需要安裝 Tailscale。詳見 `AGENTS.md`。
 
 ## 指令一覽
 
