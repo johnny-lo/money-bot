@@ -28,10 +28,19 @@ export function isStale(current, server) {
 
 /**
  * 直接問伺服器現在的殼指向哪個 bundle。
+ *
  * cache:'no-store' + 這個請求不是 navigate（不會被 NavigationRoute 攔），所以真的會出網路。
+ *
+ * **必須帶 ngrok-skip-browser-warning**：不帶的話 ngrok 免費版會回攔截頁的 HTML，
+ * 解不出 bundle 檔名 → 永遠判定「沒有新版」→ 這個偵測就等於沒做。
+ * （這正是「瀏覽器抓 sw.js 沒辦法帶 header、於是拿到攔截頁、於是 SW 永遠更新不了」
+ *   那個根因的同一顆地雷；我們自己發的 fetch 至少躲得掉。）
  */
 export async function fetchServerBundle() {
-  const res = await fetch('/m/index.html', { cache: 'no-store' })
+  const res = await fetch('/m/index.html', {
+    cache: 'no-store',
+    headers: { 'ngrok-skip-browser-warning': 'true' },
+  })
   return bundleName(await res.text())
 }
 

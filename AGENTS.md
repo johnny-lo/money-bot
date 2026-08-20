@@ -76,6 +76,32 @@
   「伺服器沒更新」還是「裝置拿到舊殼」。
 - **教訓**：會反覆發生的除錯問題，值得為它做一個一眼可讀的指標，而不是每次重跑診斷。
 
+### 🔴 頭號根因：ngrok 攔截頁讓 service worker **永遠更新不了**
+- **症狀**：使用者每次都從 Discord 拿**全新網址**、也沒裝成 PWA，**還是卡舊殼**。
+  新網址＝新導覽＝照理會觸發 SW 更新檢查，所以「手機不好觸發檢查」那套解釋不成立。
+- **根因**（實測，決定性）：
+  ```bash
+  UA="Mozilla/5.0 (iPhone; ...) Safari/604.1"
+  curl -s -A "$UA" -o /dev/null -w "%{http_code} %{content_type} %{size_download}\n" \
+    https://<domain>/m/sw.js
+  # → 200 text/html 2824      ← ngrok 攔截頁！
+  curl -s -A "$UA" -H "ngrok-skip-browser-warning: true" -o /dev/null -w "%{http_code} %{content_type} %{size_download}\n" \
+    https://<domain>/m/sw.js
+  # → 200 text/javascript 25630  ← 真的 SW
+  ```
+  **瀏覽器抓 service worker 時不會帶自訂 header**——`ngrok-skip-browser-warning` 只有
+  app 自己 fetch 時加得上，而「抓 sw.js」是瀏覽器發的、那時 SW 還沒跑。
+  拿到 `text/html` → SW 規範要求 MIME 必須是 JavaScript → **註冊/更新直接失敗，而且靜默**。
+  舊 SW 繼續服役 → 舊殼繼續被餵 → 使用者怎麼重開都沒用。
+- **為什麼時好時壞**：過了攔截頁 ngrok 會種 cookie，之後的請求帶得上就正常；
+  cookie 一過期又壞掉。所以是**間歇性**的，很容易被誤判成快取玄學。
+- **當下的繞法**：點開連結 → **先過攔截頁**（按 Visit Site）→ **在同一個分頁按重新整理**。
+  這時 cookie 在，SW 更新請求才拿得到真的 JS。
+- **根本解**：**離開 ngrok 免費版**。Cloudflare Tunnel（cloudflared）免費、沒有攔截頁，
+  一併消滅 `api.js` / `sw.js` 裡那三處 `ngrok-skip-browser-warning` hack。
+- **教訓**：診斷「前端拿不到新版」時，**要單獨 curl `sw.js` 並檢查 `content-type`**。
+  只 curl `index.html` 和 bundle 是不夠的——那兩個 app 內帶得了 header，sw.js 帶不了。
+
 ### 為什麼「手機卡舊版」比桌機嚴重（機制差異，不是錯覺）
 - **共同前提**：`sw.js` 用 `NavigationRoute(createHandlerBoundToURL('/m/index.html'))`
   → **所有導覽都從 precache 拿殼，永遠不走網路**。殼只有在 SW 自己更新後才會換。
