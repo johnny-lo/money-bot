@@ -56,3 +56,30 @@ def test_有完整憑證時照常掛載(monkeypatch):
     app = FastAPI()
     m.register_line_routes(app)
     assert "/callback" in [r.path for r in app.routes]
+
+
+def test_沒帶簽章的_callback_回400而不是500(monkeypatch):
+    """公開網址上任何人都能戳 /callback。沒帶簽章時 SDK 會對 None 做 .encode()
+    → AttributeError → 500 + traceback。擋在前面，讓它是一個乾淨的壞請求。"""
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "dummy-token")
+    monkeypatch.setenv("LINE_CHANNEL_SECRET", "dummy-secret")
+    m = importlib.reload(line_handler)
+    app = FastAPI()
+    m.register_line_routes(app)
+    res = TestClient(app, raise_server_exceptions=False).post("/callback", json={"events": []})
+    assert res.status_code == 400
+
+
+def test_簽章錯誤的_callback_也是400(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("LINE_CHANNEL_ACCESS_TOKEN", "dummy-token")
+    monkeypatch.setenv("LINE_CHANNEL_SECRET", "dummy-secret")
+    m = importlib.reload(line_handler)
+    app = FastAPI()
+    m.register_line_routes(app)
+    res = TestClient(app, raise_server_exceptions=False).post(
+        "/callback", json={"events": []}, headers={"X-Line-Signature": "bogus"})
+    assert res.status_code == 400

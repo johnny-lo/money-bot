@@ -34,6 +34,11 @@ def register_line_routes(app: FastAPI):
     async def callback(request: Request):
         signature = request.headers.get("X-Line-Signature")
         body = await request.body()
+        if not signature:
+            # 沒帶簽章 = 不是 LINE 發的。不擋的話 SDK 會對 None 做 .encode()
+            # → AttributeError → 500 + 一整串 traceback。這個端點掛在公開網址上，
+            # 任何人戳一下就製造一筆噪音，所以當成壞請求擋在前面。
+            raise HTTPException(status_code=400, detail="Missing signature")
         try:
             handler.handle(body.decode("utf-8"), signature)
         except InvalidSignatureError:
