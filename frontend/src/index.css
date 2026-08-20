@@ -367,3 +367,14 @@ body {
 /* 版本戳：手機是不是拿到新版,看一眼就知道,不用再靠猜 */
 .build-stamp { position: fixed; right: 4px; bottom: 2px; font-size: 8px;
   color: rgba(0,0,0,0.22); z-index: 5; pointer-events: none; letter-spacing: 0.02em; }
+
+
+/* 有新版時的更新條。主畫面 App 沒有網址列、沒有重新整理鈕，這是手機唯一缺的逃生口。
+   放在 tab bar 正上方（拇指區），並避開底部安全區。 */
+.update-bar {
+  position: fixed; left: 12px; right: 12px;
+  bottom: calc(58px + env(safe-area-inset-bottom)); z-index: 40;
+  border: none; border-radius: 12px; padding: 10px 14px;
+  background: var(--brand); color: #fff; font-size: 0.85rem; font-weight: 700;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25); cursor: pointer;
+}
