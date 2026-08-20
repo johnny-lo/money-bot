@@ -7,7 +7,7 @@ from sqlalchemy import func
 from database import SessionLocal
 from models import Transaction, Income, RecurringRecord
 from gemini import gemini_image, generate_persona_comment
-from categorize import run_weekly_categorization
+from categorize import classify_one, run_weekly_categorization
 from auth import generate_report_token
 from report_helpers import format_bucket_context, parse_bucket_ratios, split_shared
 
@@ -104,10 +104,13 @@ def handle_add_recurring(type_str: str, item: str, amount: int, day: int,
     r_type = "income" if type_str == "收入" else "expense"
     if day < 1 or day > 28:
         return "⚠️ 日期請設 1~28（避免大小月問題）"
+    # 建立當下就分類一次：固定支出的品名每月都一樣，沒必要每筆都留 NULL 等週日 AI 重猜，
+    # 那會害「固定」桶每個月初空著、未分類暴增，角色看到的水位是錯的。
+    category = classify_one(item, amount) if r_type == "expense" else None
     db = SessionLocal()
     try:
         rec = RecurringRecord(type=r_type, item=item, amount=amount, day_of_month=day,
-                              shared=1 if shared else 0)
+                              category=category, shared=1 if shared else 0)
         db.add(rec)
         db.commit()
         db.refresh(rec)
@@ -770,10 +773,13 @@ def add_recurring_data(type_str: str, item: str, amount: int, day: int,
     if day < 1 or day > 28:
         return {"success": False, "error": "日期請設 1~28（避免大小月問題）"}
     r_type = "income" if type_str in ("收入", "income") else "expense"
+    # 建立當下就分類一次：固定支出的品名每月都一樣，沒必要每筆都留 NULL 等週日 AI 重猜，
+    # 那會害「固定」桶每個月初空著、未分類暴增，角色看到的水位是錯的。
+    category = classify_one(item, amount) if r_type == "expense" else None
     db = SessionLocal()
     try:
         rec = RecurringRecord(type=r_type, item=item, amount=amount, day_of_month=day,
-                              shared=1 if shared else 0)
+                              category=category, shared=1 if shared else 0)
         db.add(rec)
         db.commit()
         db.refresh(rec)

@@ -93,6 +93,30 @@ def _categorize_batch(items: list[Transaction]) -> dict[int, str]:
     return out
 
 
+def classify_one(item: str, amount: int) -> str | None:
+    """單筆即時分類，回傳封閉清單裡的細類；失敗回 None（呼叫端就留 NULL 給週日補）。
+
+    給「建立當下就知道會重複發生」的東西用——主要是固定支出。固定支出的品名每個月
+    都一樣（房租、車貸），沒道理每次自動記入都留 NULL、再讓週日的 AI 重猜一次：
+    那會害「固定」桶每個月初空著、未分類暴增，角色看到的水位就是錯的。
+    建立時分類一次、存進 RecurringRecord，之後每一筆都直接繼承。
+
+    重用 CATEGORIZE_RULES（單一真相），不另外寫一份規則。
+    """
+    try:
+        prompt = (
+            f"你是一個記帳分類助手。請幫這一筆消費分類。\n\n"
+            f"品名：{item}\n金額：{amount} 元\n\n"
+            f"{CATEGORIZE_RULES}\n\n"
+            f"只回傳分類名稱四個字以內，不要任何其他文字、標點或說明。"
+        )
+        got = codex_text(prompt).strip().strip('「」"\'')
+        return got if got in CATEGORIES else None
+    except Exception as e:
+        print(f"⚠️ 單筆分類失敗（留給週日 AI 補）：{e}")
+        return None
+
+
 def _run_categorization(targets: list[Transaction], db) -> str:
     """對一組 Transaction 分批跑 AI 分類並寫回 DB。"""
     if not targets:

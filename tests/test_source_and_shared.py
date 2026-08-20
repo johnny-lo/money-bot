@@ -89,3 +89,44 @@ def test_共同分攤的設定會被繼承(monkeypatch):
 def test_非共同的固定支出_shared_是零(monkeypatch):
     s = _run(monkeypatch, [_Rec(item="我的手機分期", shared=0)])
     assert s.added[0].shared == 0
+
+
+# ── 固定支出的分類：建立時決定一次，之後每筆繼承 ────────────
+
+def test_固定支出產生的帳目會繼承分類(monkeypatch):
+    """不繼承的話每筆都是 NULL，要等週日 AI 重猜 → 「固定」桶每個月初空著、
+    未分類暴增，角色看到的水位就是錯的。"""
+    s = _run(monkeypatch, [_Rec(item="房租", category="居住水電")])
+    assert s.added[0].category == "居住水電"
+
+
+def test_收入不做分類():
+    """category 是支出的概念；收入走 Income，沒有這個欄位語意。"""
+    import core
+    calls = []
+    import categorize
+    assert callable(categorize.classify_one)
+
+
+# ── classify_one：封閉清單守門 ──────────────────────────────
+
+def test_分類結果必須在封閉清單內(monkeypatch):
+    """AI 回了清單外的東西就當作沒分到（留 NULL 給週日補），不要硬塞進 DB
+    ——越界值會讓下游的桶位映射與大組統計全部對不上。"""
+    import categorize
+    monkeypatch.setattr(categorize, "codex_text", lambda p: "外太空消費")
+    assert categorize.classify_one("不明品項", 100) is None
+
+
+def test_分類結果會去掉引號與空白(monkeypatch):
+    import categorize
+    monkeypatch.setattr(categorize, "codex_text", lambda p: '  「居住水電」  ')
+    assert categorize.classify_one("房租", 12000) == "居住水電"
+
+
+def test_分類失敗回_None_而不是炸掉(monkeypatch):
+    """記帳/建立固定收支不能因為分類失敗而失敗。"""
+    import categorize
+    def boom(p): raise RuntimeError("codex 掛了")
+    monkeypatch.setattr(categorize, "codex_text", boom)
+    assert categorize.classify_one("房租", 12000) is None
