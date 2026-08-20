@@ -221,6 +221,32 @@
 - **教訓**：分類規則的改動有兩半——「規則」和「既有資料」。只做前者的話，
   任何依賴分類的下游功能（桶位、報表大組）都會拿到舊世界的答案。
 
+### 🔴 坑：image 漂移——執行中容器裡有「手動裝的套件」，image 裡沒有
+- **怎麼發生的**：2026-06 那次 `python-multipart` 事故，當時的處置是
+  「先 `pip install` 進**執行中的容器**，再寫進 `requirements.txt`」——但 **image 從沒重建**。
+  容器就這樣帶著手動裝的套件跑了 12 週。
+- **為什麼平常沒事**：`docker restart money-bot` 是重啟**同一個容器**，可寫層還在，套件還在。
+- **什麼時候會爆**：任何會**重建容器**的操作——`docker compose up`（即使你只想動 ngrok，
+  compose 會因為 `depends_on` 連 app 一起重建）。新容器從 **2026-06-01 的舊 image** 起，
+  手動裝的套件全部消失 → `python-multipart` 又不見 → **import 崩潰迴圈 → 全站掛**。
+  這是同一個事故隔 12 週原封不動重演一次。
+- **診斷**：
+  ```bash
+  docker image inspect money-bot --format '{{.Created}}'          # image 有多舊
+  docker run --rm --entrypoint python money-bot -c "import multipart"   # image 裡到底有沒有
+  ```
+- **緊急復原**（不用等完整重建，約 20 秒）：
+  ```bash
+  printf 'FROM money-bot\nRUN pip install --no-cache-dir <缺的套件>\n' > /tmp/f/Dockerfile
+  docker build -t money-bot:patched -f /tmp/f/Dockerfile /tmp/f
+  docker tag money-bot:patched money-bot:latest && docker compose up -d app
+  ```
+- **正解**：`docker compose build app`，讓 image 跟 `requirements.txt` 對齊。
+- **鐵律**：**改了 `requirements.txt` 就要 `docker compose build`，不能只 `pip install` 進容器。**
+  live-mount 讓「改程式碼免重建」變成習慣，很容易忘記**依賴不是程式碼、它在 image 裡**。
+- **教訓**：`docker restart` 與 `docker compose up` 不等價。前者保留容器，後者重建容器。
+  只要 image 跟 requirements 有落差，這個差別就是「正常」與「全站掛」的差別。
+
 ## 3. 資料庫的坑
 
 ### 坑：以為加欄位/表會自動生效
