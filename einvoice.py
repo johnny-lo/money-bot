@@ -478,6 +478,11 @@ def _save_invoices(invoices: list[dict], source: str | None = None) -> tuple[int
             except ValueError:
                 inv_dt = datetime.now()
 
+            # 賣方名存**原始值**，不存 simplify_seller() 的結果：簡化是純函式，
+            # 讀取時隨時能套；反過來原始值一旦沒存就永遠救不回來（歷史發票就是這樣沒的）。
+            # 空字串正規化成 NULL——「不知道」不該在 group by 裡變成一家假店。
+            seller = (inv.get("seller") or "").strip() or None
+
             items = inv.get("items") or []
             wrote = False
             for it in items:
@@ -489,6 +494,7 @@ def _save_invoices(invoices: list[dict], source: str | None = None) -> tuple[int
                     price=it["amount"],
                     invoice_no=inv_no,
                     source=source,
+                    seller=seller,
                     created_at=inv_dt,
                 )
                 db.add(tx)
@@ -497,12 +503,14 @@ def _save_invoices(invoices: list[dict], source: str | None = None) -> tuple[int
                 wrote = True
             # 明細抓不到 → 保底寫一筆 = 賣方名 + 發票總額
             if not wrote and inv["amount"] > 0:
+                # item 給人看（精簡名），seller 給機器 join（原始全名）——兩者刻意不同。
                 name = simplify_seller(inv["seller"]) or inv_no
                 tx = Transaction(
                     item=name,
                     price=inv["amount"],
                     invoice_no=inv_no,
                     source=source,
+                    seller=seller,
                     created_at=inv_dt,
                 )
                 db.add(tx)

@@ -48,10 +48,11 @@ try:
             ))
             _conn.commit()
             print("✅ 已自動新增 invoice_no 欄位")
-        # transactions 補 source / shared（既有表 create_all 不會加欄）
+        # transactions 補 source / shared / seller（既有表 create_all 不會加欄）
         for _col, _ddl in (
             ("source", "ALTER TABLE transactions ADD COLUMN source VARCHAR"),
             ("shared", "ALTER TABLE transactions ADD COLUMN shared INTEGER DEFAULT 0"),
+            ("seller", "ALTER TABLE transactions ADD COLUMN seller VARCHAR"),
         ):
             if _col not in _columns:
                 _conn.execute(_text(_ddl))
@@ -59,6 +60,10 @@ try:
                 print(f"✅ 已自動新增 transactions.{_col} 欄位")
         _conn.execute(_text(
             "CREATE INDEX IF NOT EXISTS ix_transactions_source ON transactions (source)"
+        ))
+        # seller 之後要拿來 group by / join food_places，索引不能省
+        _conn.execute(_text(
+            "CREATE INDEX IF NOT EXISTS ix_transactions_seller ON transactions (seller)"
         ))
         _conn.commit()
         # recurring_records 補 shared

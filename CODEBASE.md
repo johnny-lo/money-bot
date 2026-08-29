@@ -30,7 +30,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── tests/               # pytest 測試。跑法：`docker compose exec app pytest tests/ -v`
 ├── recurring.py         # 固定收支：run_daily_recurring() 每日自動寫入到期項目
 ├── auth.py              # 認證兩層：短效報表 token(30min,in-memory)generate/validate_report_token + PWA 長效裝置 token(DB,無期限,記 last_used_at)create/validate/revoke_device_token。require_token 收 query token 或 X-Device-Token header 擇一
-├── einvoice.py          # 財政部電子發票同步：Playwright 登入 → CAPTCHA(Gemini) → 抓發票 → 寫 transactions。`sync_invoices()` 回傳 `{"summary": str, "new_items": list[dict]}`，支援多組載具（EINVOICE_PHONE_1/2 + PASSWORD_1/2）。**明細逐品項抓取**：清單與明細同一 SPA URL，明細開在 Bootstrap modal；`_parse_current_page` 對每筆「點號碼→等 modal→`_fetch_detail_items`(限定 modal 內品名表)→`_close_detail_modal`(關 modal,**嚴禁 go_back**)→下一筆」，故每張發票的每個品項各寫一筆 transaction（抓不到明細才退化成賣方+總額一筆）。回歸測試 tests/test_einvoice_detail.py（Playwright 靜態 fixture，主機無 Playwright 則 skip）。**歷史月份回填**：`_scrape_carrier(..., month=(y,m))` 用 `_set_query_month` 操作 vue-datepicker 把查詢區間設成『單月』(政府站限制每次查詢須同月，跨月會被擋)；翻頁用 `_NEXT_PAGE_FIND/_NEXT_PAGE_CLICK`(Bootstrap `a.page-link「下一頁」`，舊版 aria-label/rel=next 從沒中過 → 多頁只抓第 1 頁)。回歸測 tests/test_einvoice_pagination.py
+├── einvoice.py          # 財政部電子發票同步：Playwright 登入 → CAPTCHA(Gemini) → 抓發票 → 寫 transactions。`sync_invoices()` 回傳 `{"summary": str, "new_items": list[dict]}`，支援多組載具（EINVOICE_PHONE_1/2 + PASSWORD_1/2）。**明細逐品項抓取**：清單與明細同一 SPA URL，明細開在 Bootstrap modal；`_parse_current_page` 對每筆「點號碼→等 modal→`_fetch_detail_items`(限定 modal 內品名表)→`_close_detail_modal`(關 modal,**嚴禁 go_back**)→下一筆」，故每張發票的每個品項各寫一筆 transaction（抓不到明細才退化成賣方+總額一筆）。回歸測試 tests/test_einvoice_detail.py（Playwright 靜態 fixture，主機無 Playwright 則 skip）。**歷史月份回填**：`_scrape_carrier(..., month=(y,m))` 用 `_set_query_month` 操作 vue-datepicker 把查詢區間設成『單月』(政府站限制每次查詢須同月，跨月會被擋)；翻頁用 `_NEXT_PAGE_FIND/_NEXT_PAGE_CLICK`(Bootstrap `a.page-link「下一頁」`，舊版 aria-label/rel=next 從沒中過 → 多頁只抓第 1 頁)。回歸測 tests/test_einvoice_pagination.py。**`_save_invoices()` 兩條寫入路徑（逐品項 / 抓不到明細的保底）都會存 `seller`＝賣方原始全名**（不是 `simplify_seller()` 的結果——簡化有損且讀取時隨時能做，原始值沒存就救不回來；空字串→NULL）。寫入契約測 tests/test_invoice_seller.py
 ├── invoice_backfill.py  # 發票智能補拓：`build_month_plan(gap_start,today)`(純函式,缺口拆逐月查詢計畫,政府站同月限制)、`get/set_last_covered`(invoice_sync_state 高水位 repo)、`sync_with_backfill(today=None)`(算缺口→`_scrape_one` 複用 einvoice `_scrape_carrier`/`_save_invoices`→去重存→全成功才推進高水位;失敗回 failures、不推進)。BACKFILL_CAP_DAYS=60、bootstrap=today-1。測 tests/test_invoice_backfill.py(純 plan + monkeypatch 編排)
 ├── persona.md           # AI 角色設定（**本機私人檔,.gitignore 不入版控**）。gemini.py 找不到就退回 `persona.example.md`,全新 clone 也能跑。判斷基準是**三桶（投資/生活/爽）桶位**而非金額大小;摘要沒帶桶位資訊時**預設沒超支、禁止說教**（舊版只看金額→每筆稍大的都被念）。寫法與踩過的坑見 persona.example.md
 ├── resource/            # Discord 頻道歡迎 banner 圖（手動放入，由 _setup_discord 一次性上傳；已 .gitignore 不入版本控制）
@@ -86,7 +86,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 
 | Table | Columns | Notes |
 |-------|---------|-------|
-| `transactions` | id(PK), item(str), price(int), category(str?), invoice_no(str?), **source(str?, index)**, **shared(int, 預設0)**, created_at(datetime) | 支出。invoice_no 是發票去重 key。**source＝資料通道**（`載具1`/`載具2`/`discord`/`line`/`app`/`recurring`）——兩組載具分屬兩人，所以它同時回答「這筆是誰花的」；載具編號在 einvoice 同步時就知道，接進 `_save_invoices(source=...)` 即全自動。**shared=1＝兩人共同分攤**，DB 存**全額**，算「我的份」時才除以 2（家庭總支出仍正確，改分攤比例不必重寫歷史） |
+| `transactions` | id(PK), item(str), price(int), category(str?), invoice_no(str?), **source(str?, index)**, **seller(str?, index)**, **shared(int, 預設0)**, created_at(datetime) | 支出。invoice_no 是發票去重 key。**source＝資料通道**（`載具1`/`載具2`/`discord`/`line`/`app`/`recurring`）——兩組載具分屬兩人，所以它同時回答「這筆是誰花的」；載具編號在 einvoice 同步時就知道，接進 `_save_invoices(source=...)` 即全自動。**seller＝賣方店名**（發票同步帶入，手動記帳為 NULL）——存**原始全名**「全家便利商店股份有限公司」而非 `simplify_seller()` 的結果：簡化是純函式、讀取時隨時能套，原始值沒存就永遠救不回來；空字串正規化成 NULL（「不知道」不該在 group by 裡變成一家假店）。有 index 是因為它的用途就是 group by 賣方 / 未來 join `food_places`（「這家店去過幾次、總共花多少」）。⚠️ **歷史資料救不回來**：`_save_invoices()` 一直拿得到 `inv["seller"]`（`format_item()` 用它補品名前綴、保底那筆直接拿它當品名）卻從沒寫進 DB，賣方在爬蟲當下就丟了——既有 697 筆發票消費永遠是 NULL，這欄**從上線那天起才開始累積**。**shared=1＝兩人共同分攤**，DB 存**全額**，算「我的份」時才除以 2（家庭總支出仍正確，改分攤比例不必重寫歷史） |
 | `incomes` | id(PK), item(str), amount(int), category(str?), created_at(datetime) | 收入 |
 | `recurring_records` | id(PK), type("expense"/"income"), item, amount, category?, day_of_month(1-28), active(1/0), **shared(int)**, created_at | 固定收支；shared 會被每月自動產生的 Transaction 繼承。建立時會呼叫 `categorize.classify_one()` 分類一次並存在 record 上,每月產生的 Transaction 直接繼承。設定方式：LINE `固定 支出 房租 12000 5 共同`（尾綴可選）/ Discord `/固定支出` 的 `共同分攤` 選項；`固定清單` 會顯示 🤝 標記 |
 | `food_places` | id(PK), place_id(str?), name, address?, lat?, lng?, country?, city?, district?, cuisine_type?, recommended_items?, caution_summary?, status("想去"/"去過"), my_rating(int?), my_note?, source_url?, updated_at, created_at | 美食地圖（Phase 1A+） |
@@ -97,7 +97,11 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 | `history_videos` | id(PK), title(str), url(str, UNIQUE 去重鍵), topic(str?, index, 主分類書架), channel(str?, v1 不自動填), platform(str?), discord_message_id(str?, index), created_at | 歷史教學影片；topic=單一書架 |
 | `video_tags` | id(PK), video_id(FK→history_videos.id, ON DELETE CASCADE, index), tag(str, index) | 影片標籤（去正規化多對多）：標籤直接存字串，查=WHERE tag=?、全部=DISTINCT tag |
 
-main.py 啟動時自動 `CREATE TABLE` + 檢查/補上 category / invoice_no 欄位。
+main.py 啟動時自動 `CREATE TABLE` + 檢查/補上既有表的新欄位（`transactions` 的 category / invoice_no /
+source / shared / **seller**、`recurring_records.shared`、`food_places` 的料理兩層分類、`food_photos` 的 FK）
+＋建對應索引。**`create_all` 只建新表不改既有表結構**，所以既有表加欄一定要在那段 inspector + `ALTER TABLE`
+補一筆；那段 try 會吞例外 → 重啟後跑 `docker logs money-bot | grep -E '✅|⚠️'` 確認真的加成功
+（ALTER 沒成功但 model 已有欄位 = 之後每次查 transactions 都 SELECT 不存在的欄位而炸）。
 
 ## Request Flow
 
