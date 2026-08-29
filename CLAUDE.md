@@ -13,12 +13,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 執行環境
 
-**一切跑在 Docker，host 沒有 python。** 三個容器：`money-bot`（FastAPI + Discord Bot）、
-`money-db`（Postgres，無對外 port）、`money-tunnel`（ngrok）。專案目錄 live-mount 成 `/app`
+**一切跑在 Docker，host 沒有 python。** 兩個容器：`money-bot`（FastAPI + Discord Bot）、
+`money-db`（Postgres，無對外 port）。**對外出口是主機上的 Tailscale Funnel，不是容器**
+（舊的 `money-tunnel`/ngrok 已移除）。專案目錄 live-mount 成 `/app`
 → 改完 Python 原始碼 container 立刻看得到，**不用 rebuild image**。
 
 ```bash
-# 全套測試（427 個，約 3 秒）
+# 全套測試（488 個，約 3.5 秒）
 docker exec -w /app money-bot python -m pytest tests/ -q
 
 # 單檔 / 單一測試

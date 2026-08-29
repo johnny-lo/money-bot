@@ -1,0 +1,15 @@
+[Unit]
+Description=每 5 分鐘跑一次對外健康檢查
+
+[Timer]
+# 開機後 2 分鐘先驗一次 —— **這正是事故發生的時間點**（重開機後 Funnel 的設定活著、
+# 入口註冊沒了）。等容器起完（Playwright 發票同步會擋 30~90 秒）再問才有意義。
+OnBootSec=2min
+OnUnitActiveSec=5min
+# 5 分鐘的檢查不需要秒級準度，放寬讓 systemd 併排喚醒、少吃一點電
+AccuracySec=30s
+# 機器睡過頭時，醒來補跑一次（別等下一個 5 分鐘）
+Persistent=true
+
+[Install]
+WantedBy=timers.target

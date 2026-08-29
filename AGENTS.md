@@ -8,7 +8,9 @@
 - **一切跑在 Docker，不在 host。** host 沒有 `python`（`rtk: Failed to spawn process`）。
   Python / pytest 一律：`docker exec -w /app money-bot python -m pytest <檔> -v`。
 - **container live-mount `.:/app`** → 改完原始碼，container **立刻看得到**，不用 rebuild image。
-- **三個容器**：`money-bot`（FastAPI+Discord）、`money-db`（Postgres，無對外 port）、`money-tunnel`（ngrok）。
+- **兩個容器**：`money-bot`（FastAPI+Discord）、`money-db`（Postgres，無對外 port）。
+  **對外出口是主機上的 Tailscale Funnel，不是容器**（舊的 `money-tunnel`/ngrok 已移除）——
+  所以健康檢查（`scripts/healthcheck.sh`）也跑在主機上，不在容器裡。
 - **部署節奏（記熟，省最多時間）**：
   - **後端改** → `docker restart money-bot`（**不是** `docker compose up`，那是改 env 才用）。
   - **前端改** → `npm run build --prefix frontend`（host 跑得動 npm；live-mount 直接生效，免重啟）。
@@ -114,6 +116,8 @@
   查權威伺服器才準：`dig @ns1.dnsimple.com <name>.ts.net`。等負快取過期，或手機切行動網路。
 - **本機 curl 驗不到公開路徑**：MagicDNS 會把 `*.ts.net` 解析到 tailnet 內網 IP（100.x），
   等於沒走 Funnel。要驗公開路徑得用 `curl --resolve <name>:443:<公開IP>`。
+  ⚠️ 這條後來真的害我們誤判了一次整站對外中斷——詳見下方
+  「**所有本地指標全綠，但外面完全連不上**」，以及自動化它的 `scripts/healthcheck.sh`。
 - **教訓**：診斷「前端拿不到新版」時，**要單獨 curl `sw.js` 並檢查 `content-type`**。
   只 curl `index.html` 和 bundle 是不夠的——那兩個 app 內帶得了 header，sw.js 帶不了。
 
@@ -151,6 +155,49 @@
 - **教訓**：① 條件渲染的 UI，每多一個 `&&` 就多一道使用者可能永遠打不開的門；
   ② 級聯選單（選 A 才出現 B）對「找得到」特別不利，能合併成一個分組選單就合併——
   一個控制項＝一個真相來源，連帶消滅「換 A 忘了重置 B」那整類 bug。
+
+### 🔴 坑：所有本地指標全綠，但外面完全連不上（Funnel 的設定活過重開機，入口註冊沒有）
+
+- **症狀**（2026-08-29，主機重開機後）：
+
+  | 檢查 | 結果 |
+  |---|---|
+  | `docker ps` | ✅ 容器都 Up |
+  | `curl localhost:8000` | ✅ 200 |
+  | `tailscale funnel status` | ✅ 顯示 `Funnel on` |
+  | `tailscale status` | ✅ Online、無 health 警告 |
+  | **外部裝置實際連線** | ❌ **完全連不上**（TLS 回 `no peer certificate available`）|
+
+- **根因**：Tailscale Funnel 的**設定**（`funnel status` 讀的那份）活過了重開機，但
+  **入口註冊**（讓公開網際網路的流量進得來的那一半）沒有。所以 `funnel status` 說 on
+  是誠實的——它報的是設定，不是可達性。**沒有任何一個本地指標會變紅。**
+- **解法**（實測有效）：先關再開，不能只再開一次——設定沒變的話再 on 一次對 tailscaled 是 no-op。
+  ```bash
+  tailscale funnel --https=443 off
+  tailscale funnel --bg 8000
+  ```
+- **🔴 最陰險的地方：本機 curl 會騙你。** 在主機上 `curl https://atlas.numbat-dojo.ts.net/m/`
+  回 200——因為 **MagicDNS 把 `*.ts.net` 解析到 tailnet 內網 IP（100.x）**，那條請求
+  **根本沒走 Funnel**。這騙過了兩個人。驗證公開路徑**唯一**正確的姿勢是：
+  ```bash
+  # 公開解析器查 → --resolve 強制走它。IP 不可寫死（Tailscale 會換），每次重查
+  IP=$(dig +short @1.1.1.1 atlas.numbat-dojo.ts.net A | head -1)
+  curl --resolve "atlas.numbat-dojo.ts.net:443:$IP" https://atlas.numbat-dojo.ts.net/healthz
+  ```
+  差別實測：`dig @1.1.1.1` → `103.84.155.153`（Funnel 入口）；`dig`/`getent` → `100.108.126.11`（內網）。
+- **已實作**（`scripts/healthcheck.sh` + systemd user timer，每 5 分鐘）：從公開路徑打
+  `/healthz`；**連續 2 次**失敗才動作（單次多半是網路抖動）→ 重掛 Funnel → 等 6 秒重驗 →
+  Discord webhook 通知；**修好也通知**；修了還不通就**通知並停手**（latch），不會每 5 分鐘
+  踢一次正在用的服務。安裝步驟見 `README.md`。
+- **關鍵設計：分辨「出口壞了」和「app 壞了」，只有前者才重掛 Funnel。**
+  分界線是 **TLS 有沒有握手成功**（curl 的 `%{time_appconnect}`）：握到手＝憑證是 Funnel 發的
+  ＝入口註冊正常＝問題在 app（例：`/healthz` 回 503 因為 DB 掛了），這時重掛 Funnel 只是
+  把好的東西關掉再打開、還會踢掉正在用的人。**沒握到手正是這次事故的簽名**
+  （`no peer certificate available`）。公開 DNS 查不到 A 記錄也算出口問題（Funnel 沒註冊時
+  公開 DNS 就沒有記錄）。
+- **教訓**：① 監控要從**使用者真正走的那條路**打，不是從你方便打的那條——後者會系統性地
+  漏掉「只有外部路徑壞掉」這整類故障；② 「設定存在」不等於「功能可用」，任何讀設定的
+  status 指令都不能當可達性證據；③ 修復動作要綁在**故障的分類**上，不是綁在「有故障」上。
 
 ### 坑：`docker restart` 後 curl 回 HTTP 000，以為掛了
 - **根因**：開機會跑發票同步（Playwright），**阻塞 server ready ~30–90s**，這段 curl 回 000 是正常。
@@ -384,5 +431,8 @@
 - [ ] `docker exec -w /app money-bot python -m pytest tests/ -q` 全綠。
 - [ ] 重啟後等到 `Application startup complete`，`docker ps` 是 `Up`。
 - [ ] 動到 API → curl smoke（帶 device token）；動到前端 → `npm run build --prefix frontend` + curl 確認伺服器送新 bundle。
+- [ ] **動到對外出口（Funnel / BASE_URL / 網域）→ 從公開路徑驗，不能只 curl localhost**：
+      `scripts/healthcheck.sh`（或手動 `dig @1.1.1.1` + `curl --resolve`）。
+      本機 curl `*.ts.net` 走 MagicDNS 內網，對這類故障零證據力。
 - [ ] 手機視覺類改動 → **使用者親眼確認**才算完成。
 - [ ] commit 有更新 `README.md` + `CODEBASE.md`。

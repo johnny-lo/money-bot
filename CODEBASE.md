@@ -1,7 +1,7 @@
 # Codebase Index (AI Quick Reference)
 
 > 供 AI 快速理解專案結構，每次 commit 時更新。
-> Last updated: 2026-06-10
+> Last updated: 2026-08-29
 
 ## Stack
 
@@ -61,7 +61,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── commands.py      # 純函式 parse_reply_command（#主題/+標籤/-標籤/改標題/noop）+ CHEAT_SHEET 小抄文字（卡片 footer 與 help 共用單一真相）
 │   ├── repo.py          # HistoryVideo+VideoTag DB 存取：add_video url 去重 / list_videos(附 tags) / rename / set_topic / add_tag(冪等)/remove_tag / tags_by_video(批次防 N+1) / delete / set_message_id / get_by_message_id
 │   └── ingest.py        # 連結→{topic,tags}+標題→入庫+掛標籤 orchestrator：AI 失敗不擋入庫(標題退 blob 第一行)
-├── .github/workflows/ci.yml  # GitHub Actions：backend(pytest 427 + **import 預檢**,帶 postgres service + Chromium——einvoice 兩個回歸測試會真的開瀏覽器,不裝是 fail 不是 skip) / frontend(npm ci + build)。CI 必須給 DATABASE_URL 與假的 LINE 憑證,否則 database.py / line_handler.py 在 **import 期**就炸
+├── .github/workflows/ci.yml  # GitHub Actions：backend(pytest 488 + **import 預檢** + `scripts/healthcheck.sh --self-test`,帶 postgres service + Chromium——einvoice 兩個回歸測試會真的開瀏覽器,不裝是 fail 不是 skip) / frontend(npm ci + build)。CI 必須給 DATABASE_URL 與假的 LINE 憑證,否則 database.py / line_handler.py 在 **import 期**就炸
 ├── .env.example         # 環境變數範本（README 的 `cp .env.example .env` 用）；真 .env 不入版控
 ├── persona.example.md   # persona.md 的**寫法教學**（怎麼寫判斷規則、為什麼不能給口頭禪清單、資料不足時的預設行為）
 ├── requirements.txt     # Python 依賴
@@ -74,8 +74,12 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── food_map.py      # 美食地圖：GET /food/map(舊 HTML 頁) + GET /api/food/places(每家帶 photos [{id,url,source}]) + PWA 寫操作：POST .../{id}/visited(評分1-5/心得,超範圍當沒給)、POST .../{id}/photos(multipart,5MB/張,10張/店,Content-Type 白名單)、DELETE /api/food/photos/{id}
 │   ├── recipes.py       # 食譜 JSON API（PWA 用）：GET /api/recipes、PUT /api/recipes/{id}(改名,空白名 422)、DELETE /api/recipes/{id}。新增仍走 Discord（要連結抽取 pipeline）；隨機抽在前端做
 │   ├── videos.py        # 影片 JSON API（PWA 🎥 用）：GET /api/videos(附 tags+thumbnail) / PUT /api/videos/{id}(改標題或設主題,空白名 422) / POST .../{id}/tags(加標籤) / DELETE .../{id}/tags/{tag}(刪標籤) / DELETE .../{id}。新增走 Discord
+│   ├── health.py        # GET /healthz：**免 token** 的對外健康檢查（app 活著 + DB `SELECT 1`）→ 200 `{"status":"ok"}` / DB 不通 503 `{"status":"unavailable"}`。**回應被當公開資訊**：不回版本號/路徑/env/連線字串，DB 例外只 print 進伺服器 log（SQLAlchemy 錯誤字串含帳密與主機名）。帶 `Cache-Control: no-store`——健康檢查拿到快取的舊答案＝謊報健康。測 tests/test_health_api.py（7 個，含「不洩漏」斷言）
 │   └── device.py        # POST /api/device-token：用「有效短效 token」換發長效裝置 token（只收短效,洩漏的裝置 token 無法自我繁殖）。前端 api.js ensureAuth 換發後存 localStorage、清掉網址 token,之後走 X-Device-Token header
 ├── frontend/            # 手機版 PWA（React+Vite+vite-plugin-pwa）：**四 tab 全實裝**——美食(Food/Nearby/FoodList/FoodMap/PlaceSheet/geo.js/cuisine.js；**預設「附近」模式**：定位→範圍滑桿(1/3/5/10/30km,車程標註是手工校準常數表**不是公式**——長程走國道,km×3 會把 30km 算成 90 分而那一檔就沒人按)→料理磚塊帶家數→點磚塊才列店。定位失敗**自動退回清單**+banner,絕不卡首屏。附近模式整排隱藏第二列篩選(範圍由滑桿決定、料理由磚塊決定,再擺一套只會打架)。三態切換 附近/清單/地圖 用**分段控制**(目前模式高亮)——原本是顯示「下一個模式」圖示的循環鈕,使用者看不出自己在哪個模式,又因為地區篩選只在清單/地圖渲染,導致「行政區不見了」被回報兩次;附近模式另加一行指路文字。右下角有 build 時間戳(vite define __BUILD_ID__),用來一眼判斷手機拿到的是不是新版。清單/地圖模式才有地區 select + 12 大類 chips。**地區是單一分組選單(optgroup 依縣市)不是兩個級聯 select**——級聯版的行政區被兩道預設關著的關卡擋住(要 view!=='nearby' 且已選特定縣市才渲染),使用者根本找不到;合併後一次點擊就到,且「換縣市忘了重置行政區」那類 bug 結構性消失(一個控制項＝一個真相來源)。geo.js 是無 React 純函式(haversineKm 缺座標回 Infinity 不回 0,否則沒座標的店會出現在每個範圍),可用 `node --input-type=module` 直接跑驗,不必為三個函式引入 JS 測試框架)、消費(Spend 吃 /api/report/ledger 整月前端算+RecordSheet CRUD)、食譜(Recipe.jsx 拉霸隨機抽=前端 random+減速動畫,清單/改名/刪除)、歷史(Videos.jsx 主題書架 chips **依影片數排序並顯示數量**（21 書架/33 影片,不排序的話有東西的會被埋在只有一支的後面）+標籤/關鍵字搜尋,useMemo 衍生過濾,點卡片 sheet 改主題/加刪標籤/開連結/刪除)。**更新機制三層**(手機主畫面 App 沒有重整鈕、iOS 是暫停非終止 → 瀏覽器的 SW 更新檢查永遠不觸發): ①main.jsx 在 visibilitychange/focus/30min 主動 `registration.update()` ②update.js 直接 fetch index.html 比對 bundle 檔名(不依賴 SW 自我回報)→ 落後跳更新條 ③forceUpdate() 清快取+unregister+reload(**保留 media\*照片**);右下角 build 時間戳供一眼判版。manifest+SW(injectManifest 自製 src/sw.js:precache+API NetworkFirst+media CacheFirst-v2 帶 ngrok 跳過 header——img 標籤帶不了 header,SW 重發才繞得過攔截頁)、icons 在 public/。build:`cd frontend && npm run build`(script 內含 NODE_OPTIONS webcrypto flag,Node 18 需要)→ dist/ 由 main.py 掛 /m/（目錄不存在自動跳過;.webmanifest MIME 已註冊）。node_modules/dist/.env(VITE_* 金鑰) 不入版控
+├── scripts/             # **跑在主機上**的維運腳本（不是容器內——對外出口 Tailscale Funnel 就在主機上）
+│   ├── healthcheck.sh   # 對外健康檢查 + 自動修復 Funnel + Discord webhook 通知。**一定從公開路徑打**：`dig +short @1.1.1.1 <host> A` 拿入口 IP（**不寫死，每次重查**）→ `curl --resolve <host>:443:<ip>` 強制走它。用系統解析會走 MagicDNS 解到 100.x 內網＝沒走 Funnel＝驗了等於沒驗（2026-08-29 就是這樣誤判整站對外中斷）。**連續 2 次**失敗才動作 → `tailscale funnel --https=443 off` + `--bg 8000` → 等 6s 重驗 → 通知；修好也通知；修不好就 latch **停手**（不無限重試踢服務）；自己好了通知並解閂。**核心判斷 `classify()`：TLS 握手成功（curl `%{time_appconnect}`>0）＝入口正常＝app 問題 → 只通知不碰 Funnel；沒握到手＝入口沒註冊（`no peer certificate available`，事故簽名）→ 才修**。純函式 `env_value`/`host_of`/`classify`/`decide` + 修復路徑（假 tailscale 驗指令順序）全由內建 `--self-test` 覆蓋（31 項，不出網不碰真 funnel）。另有 `--status`/`--reset`/`--help`。狀態檔在 `$XDG_STATE_HOME/linebot-healthcheck/state`，flock 防重入
+│   └── systemd/         # systemd **user** timer 範本（免 sudo）：linebot-healthcheck.{service,timer}，開機後 2 分鐘 + 每 5 分鐘。**不自動安裝**，安裝步驟見 README
 ├── media/               # 使用者/Google 店家照片（.gitignore 只留 .gitkeep）；main.py 掛 /media/
 └── templates/
     ├── report.html      # 互動式報表 SPA：ECharts 圖表 + 流水帳 CRUD（純前端 JS）。品名/分類經 esc() 跳脫再進 innerHTML（防發票品名 stored XSS）,編輯/刪除用 index 回查不塞 JSON 進屬性
@@ -211,7 +215,9 @@ LINE/Discord 訊息
 
 ## Environment Variables
 
-BASE_URL (對外網址，報表/地圖連結用；未設=ngrok 保留域名), LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, CODEX_MODEL (optional, 留空=用 codex 預設 gpt-5.5), MONTHLY_BUDGET (optional, 0/不設=不顯示預算進度), DISCORD_BOT_TOKEN (optional), DISCORD_INVOICE_CHANNEL_ID (optional), DISCORD_REPORT_CHANNEL_ID (optional), DISCORD_RECORD_CHANNEL_ID (optional), EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional), GOOGLE_PLACES_SERVER_KEY (美食地圖；後端 Places API New 用), FOOD_INGEST_CHANNEL_ID (美食地圖；#美食輸入 頻道), RECIPE_INGEST_CHANNEL_ID (optional; #🍳-食譜 頻道；未設則食譜分支不啟用，不影響美食/記帳), HISTORY_VIDEO_INGEST_CHANNEL_ID (optional; #📜-歷史教學 頻道；未設則影片分支不啟用), GOOGLE_MAPS_BROWSER_KEY (美食地圖 Phase 2；前端 Maps JS,限 ngrok referrer), GOOGLE_MAPS_MAP_ID (美食地圖 Phase 2；AdvancedMarker 必需,未申請填 DEMO_MAP_ID)
+BASE_URL (對外網址，報表/地圖連結用；未設=ngrok 保留域名), LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, CODEX_MODEL (optional, 留空=用 codex 預設 gpt-5.5), MONTHLY_BUDGET (optional, 0/不設=不顯示預算進度), DISCORD_BOT_TOKEN (optional), DISCORD_INVOICE_CHANNEL_ID (optional), DISCORD_REPORT_CHANNEL_ID (optional), DISCORD_RECORD_CHANNEL_ID (optional), EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional), GOOGLE_PLACES_SERVER_KEY (美食地圖；後端 Places API New 用), FOOD_INGEST_CHANNEL_ID (美食地圖；#美食輸入 頻道), RECIPE_INGEST_CHANNEL_ID (optional; #🍳-食譜 頻道；未設則食譜分支不啟用，不影響美食/記帳), HISTORY_VIDEO_INGEST_CHANNEL_ID (optional; #📜-歷史教學 頻道；未設則影片分支不啟用), GOOGLE_MAPS_BROWSER_KEY (美食地圖 Phase 2；前端 Maps JS,限 ngrok referrer), GOOGLE_MAPS_MAP_ID (美食地圖 Phase 2；AdvancedMarker 必需,未申請填 DEMO_MAP_ID), HEALTHCHECK_DISCORD_WEBHOOK (optional; 對外健康檢查告警,沒設就只寫 log), HEALTHCHECK_FAIL_THRESHOLD / HEALTHCHECK_RESOLVER / HEALTHCHECK_FUNNEL_PORT (optional; 預設 2 / 1.1.1.1 / 8000)
+
+> ⚠️ `HEALTHCHECK_*` 是**主機上的 `scripts/healthcheck.sh` 讀的，不是容器讀的** → 刻意**不**寫進 `docker-compose.yml` 的 `environment:`（跟上面那條「channel ID 忘了寫進 compose」的坑方向相反，這裡是刻意不寫）。腳本只從 `.env` 挑 `BASE_URL` 與 `HEALTHCHECK_DISCORD_WEBHOOK` 兩個 key，**不 source 整個檔**（避免把一堆金鑰灌進環境、也避免執行檔案內容）。
 
 > codex 整合：`codex` CLI 裝在 app 映像內（Dockerfile 用 `npm install -g @openai/codex`，**非獨立 container**），登入憑證以 `docker-compose.yml` 把主機 `${HOME}/.codex` 掛到容器 `/root/.codex`（rw，讓 ChatGPT 訂閱 token 自動刷新可寫回）。`auth_mode=chatgpt`=訂閱制，不走單次計費 API。
 
