@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 → 改完 Python 原始碼 container 立刻看得到，**不用 rebuild image**。
 
 ```bash
-# 全套測試（488 個，約 3.5 秒）
+# 全套測試（498 個，約 3.5 秒）
 docker exec -w /app money-bot python -m pytest tests/ -q
 
 # 單檔 / 單一測試

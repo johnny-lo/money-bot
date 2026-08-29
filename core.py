@@ -576,7 +576,7 @@ def bucket_context() -> str | None:
             basis=basis,
         )
     except Exception as e:
-        print(f"⚠️ 三桶水位計算失敗，角色改走保守模式：{e}")
+        print(f"⚠️ 四桶水位計算失敗，角色改走保守模式：{e}")
         return None
 
 

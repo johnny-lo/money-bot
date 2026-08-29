@@ -53,7 +53,7 @@ def gemini_image(prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg")
 def generate_persona_comment(transaction_summary: str, context: str | None = None) -> str:
     """記帳完成後，讓 AI 以 persona.md 角色對帳目做出有趣的回應。
 
-    context：三桶（投資/生活/爽）水位，由 core.bucket_context() 產生。
+    context：四桶（投資/固定/生活/爽）水位，由 core.bucket_context() 產生。
 
     **算不出來就傳 None，不要傳空字串或編造的數字。** persona.md 對「沒有水位
     資訊」定義了保守模式（預設沒超支、禁止告誡）；餵假資料會讓那條防線失效，

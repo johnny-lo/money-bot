@@ -107,7 +107,7 @@
 | `MODEL_NAME` | Gemini 模型名稱（影像辨識：拍照記帳 / CAPTCHA / 錢鼠阿財即時評論） |
 | `CODEX_MODEL` | codex 模型覆蓋（選填，留空＝用 codex 預設 `gpt-5.5`；分類與週/月報評語用） |
 | `MONTHLY_BUDGET` | 月度預算金額（選填，0 = 不顯示預算進度）|
-| `MONTHLY_INCOME` | 三桶水位的收入基準（選填但**建議設**）。優先序：本月實收 → 上月實收 → 此值；都沒有則角色拿不到水位，走保守模式 |
+| `MONTHLY_INCOME` | 四桶水位的收入基準（選填但**建議設**）。優先序：本月實收 → 上月實收 → 此值；都沒有則角色拿不到水位，走保守模式 |
 | `BUCKET_RATIOS` | 四桶比例 `投資:固定:生活:爽`（選填，預設等分；建議 `2:4:2:2`）|
 | `SHARED_SPLIT` | 共同分攤支出在「我的桶位」裡算幾成（選填，預設 `0.5`）。DB 存全額，只有算桶位時折 |
 | `DISCORD_BOT_TOKEN` | Discord Bot Token（選填，未設定則跳過） |
@@ -151,7 +151,7 @@ docker compose exec app pytest tests/ -v
 
 | Job | 做什麼 |
 |-----|--------|
-| `backend` | `pytest tests/`（488 個）+ **import 預檢**（`python -c "import main"`）+ `scripts/healthcheck.sh --self-test`（31 項純邏輯，不出網）|
+| `backend` | `pytest tests/`（498 個）+ **import 預檢**（`python -c "import main"`）+ `scripts/healthcheck.sh --self-test`（31 項純邏輯，不出網）|
 | `frontend` | `npm ci` + `npm run build` |
 
 兩個細節是踩過才知道的：
