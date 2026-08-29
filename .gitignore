@@ -35,3 +35,6 @@ docs/**/*.jpg
 
 # 本機私人角色設定(木須版)。公開 repo 只附 persona.example.md 範本。
 persona.md
+
+# subagent 的 git worktree（暫時性，不入版控）
+.claude/worktrees/
