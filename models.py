@@ -13,6 +13,10 @@ class Transaction(Base):
     # 資料來源通道：載具1 / 載具2 / discord / line / app / recurring。
     # 兩組載具分別屬於兩個人，所以這個欄位同時回答了「這筆是誰花的」（發票佔多數）。
     source = Column(String, nullable=True, index=True)
+    # 賣方店名，發票同步時帶入；手動記帳為 NULL。存**原始全名**（「全家便利商店股份有限公司」），
+    # 不存 simplify_seller() 的結果——簡化是純函式、讀取時隨時能套，原始值沒存就永遠救不回來。
+    # 加 index 是因為它的用途就是 group by 賣方 / join food_places（「這家店去過幾次、花多少」）。
+    seller = Column(String, nullable=True, index=True)
     # 1 = 兩人共同分攤（例：房租、車貸）。DB 存**全額**，算「我的份」時才除以 2，
     # 這樣家庭總支出仍然正確，日後改分攤比例也不必重寫歷史資料。
     shared = Column(Integer, default=0)
