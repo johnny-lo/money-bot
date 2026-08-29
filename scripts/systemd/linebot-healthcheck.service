@@ -1,0 +1,24 @@
+[Unit]
+Description=Money Bot 對外健康檢查（從公開路徑驗 Funnel，壞了自動重掛）
+Documentation=file:%h/Desktop/linebot/AGENTS.md
+# 網路沒起來時整支都是白跑的
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# ⚠️ 路徑寫死成 ~/Desktop/linebot；repo 放別的地方請改這行。
+ExecStart=%h/Desktop/linebot/scripts/healthcheck.sh
+# 修復要 off→on→等 6 秒→重驗，正常 30 秒內結束；卡住就砍掉，別讓 timer 一直被 flock 擋。
+TimeoutStartSec=3min
+Nice=10
+
+# BASE_URL 與 HEALTHCHECK_DISCORD_WEBHOOK 預設從 repo 的 .env 讀（腳本只挑這兩個 key，
+# 不 source 整個檔）。要覆蓋才在這裡設；**webhook 是密碼，寫在這裡會被 systemctl cat
+# 印出來**，建議還是放 .env。
+# Environment=HEALTHCHECK_FAIL_THRESHOLD=2
+# Environment=HEALTHCHECK_RESOLVER=1.1.1.1
+# Environment=HEALTHCHECK_FUNNEL_PORT=8000
+
+[Install]
+WantedBy=default.target

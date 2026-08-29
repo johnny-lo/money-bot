@@ -77,6 +77,12 @@ jobs:
       - name: import 預檢（import 崩潰 = 全站掛）
         run: python -c "import main; print('import main OK')"
 
+      # 健康檢查腳本的純邏輯（該不該修 Funnel、連續幾次才動作、修不好要停手）。
+      # --self-test 不出網、不碰真 funnel，也不需要 dig/curl/jq。這段邏輯改壞的後果是
+      # 「整站對外掛掉時沒人發現」或「每 5 分鐘踢一次還活著的服務」,值得擋在 CI。
+      - name: healthcheck.sh 自測
+        run: ./scripts/healthcheck.sh --self-test
+
   frontend:
     name: 前端 build
     runs-on: ubuntu-latest

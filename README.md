@@ -121,6 +121,8 @@
 | `EINVOICE_PASSWORD_1` | 第一組載具：驗證碼（密碼） |
 | `EINVOICE_PHONE_2` | 第二組載具（選填） |
 | `EINVOICE_PASSWORD_2` | 第二組載具密碼（選填） |
+| `HEALTHCHECK_DISCORD_WEBHOOK` | 對外健康檢查的告警 webhook（選填，沒設就只寫 log）。**主機上的 `scripts/healthcheck.sh` 讀，不是容器讀** → 刻意不寫進 `docker-compose.yml` |
+| `HEALTHCHECK_FAIL_THRESHOLD` / `HEALTHCHECK_RESOLVER` / `HEALTHCHECK_FUNNEL_PORT` | 健康檢查微調（選填，預設 `2` / `1.1.1.1` / `8000`）|
 
 ## 快速啟動
 
@@ -144,7 +146,7 @@ docker compose exec app pytest tests/ -v
 
 | Job | 做什麼 |
 |-----|--------|
-| `backend` | `pytest tests/`（427 個）+ **import 預檢**（`python -c "import main"`）|
+| `backend` | `pytest tests/`（488 個）+ **import 預檢**（`python -c "import main"`）+ `scripts/healthcheck.sh --self-test`（31 項純邏輯，不出網）|
 | `frontend` | `npm ci` + `npm run build` |
 
 兩個細節是踩過才知道的：
@@ -173,6 +175,79 @@ tailscale funnel --https=443 off    # 關
 帶不了自訂 header** → 拿到 `text/html` → SW 註冊靜默失敗 → 手機永遠卡舊版。這是無解的
 （攔截頁在 ngrok 邊緣、那個請求也插不了 header），只能離開免費版。Tailscale Funnel 免費、
 沒有攔截頁、網址固定，且訪客不需要安裝 Tailscale。詳見 `AGENTS.md`。
+
+### 對外健康檢查（自動修復 Funnel）
+
+主機重開機後踩過一次：**所有本地指標全綠**（`docker ps` Up、`curl localhost:8000` 200、
+`tailscale funnel status` 顯示 `Funnel on`、`tailscale status` Online 無警告）
+**但外部裝置完全連不上**——Funnel 的*設定*活過了重開機，*入口註冊*沒有。
+
+更麻煩的是：在主機上 `curl https://<機器>.ts.net/...` 也回 200，因為 **MagicDNS 把它解析到
+tailnet 內網 IP（100.x），根本沒走 Funnel**。所以「我 curl 過了」對這個故障零證據力。
+
+`scripts/healthcheck.sh` 就是為了這個而生——它是唯一會從**公開路徑**問問題的東西：
+
+```bash
+IP=$(dig +short @1.1.1.1 <host> A | head -1)      # 公開解析器，不是系統解析
+curl --resolve "<host>:443:$IP" https://<host>/healthz
+```
+
+| 行為 | 說明 |
+|------|------|
+| 檢查什麼 | `GET /healthz`（免 token，會順手驗 DB；見下方） |
+| 從哪打 | 公開解析器查到的 Funnel 入口 IP，`curl --resolve` 強制走它。**IP 每次重查，不寫死** |
+| 何時動作 | **連續 2 次**失敗（單次多半是網路抖動）|
+| 怎麼修 | `tailscale funnel --https=443 off` → `tailscale funnel --bg 8000` → 等 6 秒 → 重驗 |
+| 修好了 | Discord 通知「已自動修復」（**成功也說話**，不是只在壞掉時出聲）|
+| 修不好 | 通知後**停手**，不再每 5 分鐘踢一次正在用的服務；人工處理完跑 `--reset` 解除 |
+| 自己好了 | 通知「已恢復」並解除閂鎖 |
+| **不會做的事** | **app 壞掉時不碰 Funnel**——TLS 握手成功就代表入口是好的，那時重掛只是把好的關掉再開；這種情況只通知並指向 `docker logs money-bot` |
+
+**安裝**（user timer，不需要 sudo）：
+
+```bash
+# 1. 先讓容器有 /healthz（這個端點是新加的，舊容器沒有）
+docker restart money-bot        # 等 log 出現 Application startup complete
+
+# 2. 手動驗一次（應該印「✅ 健康」）
+./scripts/healthcheck.sh
+./scripts/healthcheck.sh --self-test    # 純邏輯自測，不出網、不碰 funnel
+
+# 3. 選填：Discord 通知（沒設就只寫 log）
+#    在 .env 加一行 HEALTHCHECK_DISCORD_WEBHOOK=https://discord.com/api/webhooks/...
+
+# 4. 裝 timer
+mkdir -p ~/.config/systemd/user
+cp scripts/systemd/linebot-healthcheck.{service,timer} ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now linebot-healthcheck.timer
+
+# 5. 確認
+systemctl --user list-timers linebot-healthcheck.timer
+journalctl --user -u linebot-healthcheck -n 30
+```
+
+- **順序很重要**：先 `docker restart` 再裝 timer。否則 `/healthz` 回 404，
+  兩輪後就會收到一則「服務說自己不健康」的假警報（不過它**不會**去動 Funnel，因為 404
+  被歸類成 app 問題）。
+- unit 檔裡的 `ExecStart` 路徑寫死成 `~/Desktop/linebot`，repo 放別處要改。
+- 機器沒登入也要跑 → 需要 `loginctl enable-linger $USER`（本機已是 `Linger=yes`）。
+- 需要 `dig`（`dnsutils`）、`curl`、`jq`、`flock`。**不能拿 `getent`/`host` 代替 `dig`**，
+  那會走 MagicDNS，等於又在驗內網。
+
+其他指令：`--status`（看狀態檔）、`--reset`（解除「已停手」閂鎖）、`--help`。
+
+### `/healthz`
+
+```
+GET /healthz  →  200 {"status":"ok"}          # app 活著且 DB 通
+              →  503 {"status":"unavailable"} # DB 不通
+```
+
+**免 token**（檢查器要在服務壞掉時還問得到答案，讓它持有憑證只是多一個會外洩的東西），
+所以回應被當成公開資訊：**不回版本號、路徑、環境變數、DB 連線字串，連例外訊息都不轉出去**
+（SQLAlchemy 的錯誤字串裡就有帳密與主機名）——細節只進伺服器 log。回應帶 `Cache-Control: no-store`，
+因為健康檢查拿到快取的舊答案就等於謊報健康。
 
 ## 指令一覽
 

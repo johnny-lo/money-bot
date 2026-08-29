@@ -17,6 +17,7 @@ from routes.food_map import router as food_map_router
 from routes.device import router as device_router
 from routes.recipes import router as recipes_router
 from routes.videos import router as videos_router
+from routes.health import router as health_router
 from line_handler import register_line_routes
 from discordbot import (
     run_discord_bot,
@@ -117,9 +118,10 @@ app.include_router(food_map_router)
 app.include_router(device_router)
 app.include_router(recipes_router)
 app.include_router(videos_router)
+app.include_router(health_router)   # /healthz：免 token，給主機上的 healthcheck.sh 從公開路徑打
 register_line_routes(app)
 
-# 手機版 PWA（前端 build 後的靜態檔）；對外經 ngrok 走 /m/。沒 build 過則跳過（後端可獨立啟動）
+# 手機版 PWA（前端 build 後的靜態檔）；對外經 Tailscale Funnel 走 /m/。沒 build 過則跳過（後端可獨立啟動）
 if os.path.isdir("frontend/dist"):
     import mimetypes
     # Python 預設不認識 .webmanifest → 會用 text/plain 回，註冊正確的 MIME type
