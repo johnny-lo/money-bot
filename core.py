@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import func
 from database import SessionLocal
 from models import Transaction, Income, RecurringRecord
-from gemini import gemini_image, generate_persona_comment
+from gemini import vision_text, generate_persona_comment
 from categorize import classify_one, run_weekly_categorization
 from auth import generate_report_token
 from report_helpers import format_bucket_context, parse_bucket_ratios, split_shared
@@ -362,7 +362,7 @@ def handle_image(image_bytes: bytes, source: str | None = None) -> list[str]:
     ]
     如果完全無法辨識出任何項目，請回傳空陣列 []"""
 
-    result_text = gemini_image(prompt, image_bytes).strip()
+    result_text = vision_text(prompt, image_bytes).strip()
 
     if result_text.startswith("```json"):
         result_text = result_text[7:]
@@ -827,7 +827,7 @@ def handle_image_data(image_bytes: bytes, source: str | None = None) -> dict:
     ]
     如果完全無法辨識出任何項目，請回傳空陣列 []"""
 
-    result_text = gemini_image(prompt, image_bytes).strip()
+    result_text = vision_text(prompt, image_bytes).strip()
     if result_text.startswith("```json"):
         result_text = result_text[7:]
     if result_text.startswith("```"):

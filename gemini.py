@@ -2,8 +2,9 @@ import os
 import json
 import base64
 import urllib.request
+from typing import Callable
 
-from codex_cli import codex_text
+from codex_cli import codex_text, codex_image
 
 # 載入 persona 設定。persona.md 是**本機私人角色**（.gitignore，不入版控），
 # 找不到就退回 repo 附的範本 persona.example.md，讓全新 clone 也能直接跑。
@@ -30,10 +31,11 @@ def gemini_text(prompt: str, model: str | None = None) -> str:
     return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
-def gemini_image(prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+def gemini_image(prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg",
+                 model: str | None = None) -> str:
     """透過 HTTP 呼叫 Gemini 多模態，傳入文字 + 圖片。"""
     api_key = os.getenv("GEMINI_API_KEY")
-    model = os.getenv("MODEL_NAME")
+    model = model or os.getenv("MODEL_NAME")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     b64 = base64.b64encode(image_bytes).decode("utf-8")
     payload = json.dumps({
@@ -48,6 +50,78 @@ def gemini_image(prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg")
     with urllib.request.urlopen(req, timeout=60) as resp:
         data = json.loads(resp.read().decode("utf-8"))
     return data["candidates"][0]["content"]["parts"][0]["text"]
+
+
+def _fallback_models() -> list[str]:
+    """影像辨識要試的 Gemini 模型順序：主模型（MODEL_NAME）在前，備援在後。
+
+    備援清單放 GEMINI_FALLBACK_MODELS（逗號分隔）。之所以要有這層：MODEL_NAME 設的
+    是 `gemini-flash-latest` 這種 alias，Google 端一忙就整串回 503——2026/08/24~08/29
+    就是這樣連續多天辨識不出 CAPTCHA，發票同步全空轉。單一模型 = 單點故障。
+    """
+    models = [os.getenv("MODEL_NAME")]
+    models += [m.strip() for m in os.getenv("GEMINI_FALLBACK_MODELS", "").split(",")]
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for m in models:
+        if m and m not in seen:
+            seen.add(m)
+            ordered.append(m)
+    return ordered
+
+
+def vision_text(prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg",
+                *, allow_codex: bool = True,
+                validate: Callable[[str], bool] | None = None) -> str:
+    """影像 → 文字，逐層退避：主模型 → 備援 Gemini 模型 →（可選）codex。
+
+    allow_codex=False 是給 **CAPTCHA** 用的：codex 政策上拒絕辨識驗證碼，退過去
+    只會白等一輪再失敗一次，而 einvoice 的登入本來就已經重試 4 次。
+
+    validate：可選的「這個答案能不能用」檢查。**沒有它退避會有一半是假的**——
+    模型拒絕作答時是 HTTP 200 回一段「我無法協助辨識驗證碼」，不是例外；只 try/except
+    的話那段廢話會被當答案傳回去，後面的備援模型永遠輪不到。實測 gemini-3.5-flash
+    對 CAPTCHA 就是這種反應，而 gemini-3.6-flash 認得出來。
+
+    全掛才丟例外，訊息帶上每一層的失敗原因——否則 log 只剩一句「辨識失敗」，
+    根本分不出是模型忙、金鑰過期、還是模型名被 Google 下架（實測 gemini-2.5-flash 已 404）。
+    """
+    errors: list[str] = []
+
+    def _accept(raw: str, who: str) -> bool:
+        if validate is None:
+            return True
+        try:
+            ok = validate(raw)
+        except Exception as e:                      # 驗證器自己爆掉也當不合格
+            errors.append(f"{who}: 驗證器例外 {e}")
+            return False
+        if not ok:
+            errors.append(f"{who}: 回傳內容不合格 {raw.strip()[:40]!r}")
+            print(f"⚠️ 影像辨識回傳不合格（{who}）：{raw.strip()[:40]!r}")
+        return ok
+
+    for model in _fallback_models():
+        try:
+            raw = gemini_image(prompt, image_bytes, mime_type, model=model)
+        except Exception as e:
+            errors.append(f"{model}: {e}")
+            print(f"⚠️ Gemini 影像辨識失敗（{model}）：{e}")
+            continue
+        if _accept(raw, model):
+            return raw
+
+    if allow_codex:
+        try:
+            raw = codex_image(prompt, image_bytes, mime_type)
+        except Exception as e:
+            errors.append(f"codex: {e}")
+            print(f"⚠️ codex 影像辨識也失敗：{e}")
+        else:
+            if _accept(raw, "codex"):
+                return raw
+
+    raise RuntimeError("影像辨識全數失敗 —— " + "；".join(errors))
 
 
 def generate_persona_comment(transaction_summary: str, context: str | None = None) -> str:

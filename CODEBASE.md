@@ -21,8 +21,10 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── ingest_handlers.py # 美食/食譜/圖片記帳的 on_message 處理（handle_food_message/handle_recipe_message/do_image_recording）
 │   ├── reports.py       # 週報/月報/發票通知：_query_period 彙總 + _generate_ai_comment + notify_*
 │   └── bridge.py        # sync→async 橋接：set_bot/post_embeds_sync（排程 thread 投遞 embeds）
-├── gemini.py            # Gemini API 封裝：gemini_image()（影像辨識：拍照記帳、CAPTCHA，用 MODEL_NAME）、gemini_text()（保留作後備）、generate_persona_comment()（錢鼠阿財記帳評論，走 Gemini 文字）
-├── codex_cli.py         # codex_text(prompt)：shell 出去呼叫本機 `codex exec`（ChatGPT 訂閱制，預設 gpt-5.5），用 --output-last-message 取乾淨輸出。供「分類 + 週/月報評語」的文字生成用，取代計費的 Gemini 文字 API（CODEX_MODEL env 可覆蓋模型）
+├── gemini.py            # Gemini API 封裝：gemini_image(model=)（單次呼叫）、gemini_text()、generate_persona_comment()（錢鼠阿財記帳評論，走 Gemini 文字）。
+│                        # **影像一律走 vision_text()**：MODEL_NAME → GEMINI_FALLBACK_MODELS 逐個退避 →（allow_codex=True 才）codex_image。
+│                        # validate= 可傳「答案合不合格」檢查——模型拒答時是 HTTP 200 回一段道歉文，不驗內容退避會有一半是假的
+├── codex_cli.py         # codex_text(prompt) / codex_image(prompt, bytes)（`codex exec -i`，影像退避的最後一層；**CAPTCHA 不能用**，codex 政策上拒答）：shell 出去呼叫本機 `codex exec`（ChatGPT 訂閱制，預設 gpt-5.5），用 --output-last-message 取乾淨輸出。供「分類 + 週/月報評語」的文字生成用，取代計費的 Gemini 文字 API（CODEX_MODEL env 可覆蓋模型）
 ├── database.py          # SQLAlchemy engine/SessionLocal/Base 建立（讀 DATABASE_URL）
 ├── models.py            # ORM 模型：Transaction(支出)、Income(收入)、RecurringRecord(固定收支)
 ├── categorize.py        # AI 分類（走 codex_text / 訂閱制）：CATEGORIES(15 細類,含投資與家電3C)/CATEGORY_GROUPS(細→大組)/GROUP_ORDER、run_weekly_categorization()(只處理 NULL)、run_full_recategorization()(清掉全部重跑)、**classify_one(item, amount)**(單筆即時分類,重用 CATEGORIZE_RULES;給固定支出建立時用——品名每月都一樣,沒必要每筆留 NULL 等週日重猜,那會害「固定」桶每個月初空著、未分類暴增;越界值回 None 不硬塞)、category_group()。AI 分批 50 筆送，避免單次 prompt 太長
@@ -215,7 +217,7 @@ LINE/Discord 訊息
 
 ## Environment Variables
 
-BASE_URL (對外網址，報表/地圖連結用；未設=ngrok 保留域名), LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, CODEX_MODEL (optional, 留空=用 codex 預設 gpt-5.5), MONTHLY_BUDGET (optional, 0/不設=不顯示預算進度), DISCORD_BOT_TOKEN (optional), DISCORD_INVOICE_CHANNEL_ID (optional), DISCORD_REPORT_CHANNEL_ID (optional), DISCORD_RECORD_CHANNEL_ID (optional), EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional), GOOGLE_PLACES_SERVER_KEY (美食地圖；後端 Places API New 用), FOOD_INGEST_CHANNEL_ID (美食地圖；#美食輸入 頻道), RECIPE_INGEST_CHANNEL_ID (optional; #🍳-食譜 頻道；未設則食譜分支不啟用，不影響美食/記帳), HISTORY_VIDEO_INGEST_CHANNEL_ID (optional; #📜-歷史教學 頻道；未設則影片分支不啟用), GOOGLE_MAPS_BROWSER_KEY (美食地圖 Phase 2；前端 Maps JS,限 ngrok referrer), GOOGLE_MAPS_MAP_ID (美食地圖 Phase 2；AdvancedMarker 必需,未申請填 DEMO_MAP_ID), HEALTHCHECK_DISCORD_WEBHOOK (optional; 對外健康檢查告警,沒設就只寫 log), HEALTHCHECK_FAIL_THRESHOLD / HEALTHCHECK_RESOLVER / HEALTHCHECK_FUNNEL_PORT (optional; 預設 2 / 1.1.1.1 / 8000)
+BASE_URL (對外網址，報表/地圖連結用；未設=ngrok 保留域名), LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, GEMINI_FALLBACK_MODELS (optional, 逗號分隔；影像辨識退避鏈，留空=沒有備援), CODEX_MODEL (optional, 留空=用 codex 預設 gpt-5.5), MONTHLY_BUDGET (optional, 0/不設=不顯示預算進度), DISCORD_BOT_TOKEN (optional), DISCORD_INVOICE_CHANNEL_ID (optional), DISCORD_REPORT_CHANNEL_ID (optional), DISCORD_RECORD_CHANNEL_ID (optional), EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional), GOOGLE_PLACES_SERVER_KEY (美食地圖；後端 Places API New 用), FOOD_INGEST_CHANNEL_ID (美食地圖；#美食輸入 頻道), RECIPE_INGEST_CHANNEL_ID (optional; #🍳-食譜 頻道；未設則食譜分支不啟用，不影響美食/記帳), HISTORY_VIDEO_INGEST_CHANNEL_ID (optional; #📜-歷史教學 頻道；未設則影片分支不啟用), GOOGLE_MAPS_BROWSER_KEY (美食地圖 Phase 2；前端 Maps JS,限 ngrok referrer), GOOGLE_MAPS_MAP_ID (美食地圖 Phase 2；AdvancedMarker 必需,未申請填 DEMO_MAP_ID), HEALTHCHECK_DISCORD_WEBHOOK (optional; 對外健康檢查告警,沒設就只寫 log), HEALTHCHECK_FAIL_THRESHOLD / HEALTHCHECK_RESOLVER / HEALTHCHECK_FUNNEL_PORT (optional; 預設 2 / 1.1.1.1 / 8000)
 
 > ⚠️ `HEALTHCHECK_*` 是**主機上的 `scripts/healthcheck.sh` 讀的，不是容器讀的** → 刻意**不**寫進 `docker-compose.yml` 的 `environment:`（跟上面那條「channel ID 忘了寫進 compose」的坑方向相反，這裡是刻意不寫）。腳本只從 `.env` 挑 `BASE_URL` 與 `HEALTHCHECK_DISCORD_WEBHOOK` 兩個 key，**不 source 整個檔**（避免把一堆金鑰灌進環境、也避免執行檔案內容）。
 

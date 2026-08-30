@@ -24,7 +24,7 @@ import asyncio
 from datetime import datetime, timedelta
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
-from gemini import gemini_image
+from gemini import vision_text
 from database import SessionLocal
 from models import Transaction
 
@@ -81,11 +81,16 @@ async def _solve_captcha(page) -> str:
         "這張圖片是 5 位阿拉伯數字驗證碼，可能有一條橫線穿過。"
         "請只回傳 5 個數字，不要有空白、標點或其他字。"
     )
-    raw = gemini_image(prompt, img_bytes, mime_type="image/png").strip()
-    digits = re.sub(r"\D", "", raw)
-    if len(digits) != 5:
-        raise RuntimeError(f"Gemini 回傳不是 5 位數字：{raw!r}")
-    return digits
+    # 「必須是 5 位數字」當驗證器往下傳，而不是拿到答案才自己檢查：模型拒絕辨識
+    # 驗證碼時是 HTTP 200 回一段道歉文（實測 gemini-3.5-flash 就會），事後檢查只能
+    # 讓這一輪失敗，退避鏈上還認得出驗證碼的模型永遠輪不到。
+    # allow_codex=False：codex 政策上一律拒絕驗證碼，退過去純粹是白等。
+    raw = vision_text(
+        prompt, img_bytes, mime_type="image/png",
+        allow_codex=False,
+        validate=lambda text: len(re.sub(r"\D", "", text)) == 5,
+    ).strip()
+    return re.sub(r"\D", "", raw)
 
 
 async def _detect_error(page) -> str:

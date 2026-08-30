@@ -309,6 +309,39 @@
 - **教訓**：`docker restart` 與 `docker compose up` 不等價。前者保留容器，後者重建容器。
   只要 image 跟 requirements 有落差，這個差別就是「正常」與「全站掛」的差別。
 
+### 🔴 坑：新環境變數寫進 `.env` 卻進不了容器（compose 是白名單）
+- **怎麼發生的**：2026-08-30 加 `GEMINI_FALLBACK_MODELS`，寫進 `.env`、跑 `docker compose up -d`，
+  compose 回 `Container money-bot Running`（**沒有 Recreated**），容器裡 `printenv` 完全沒這個變數。
+- **根因**：`docker-compose.yml` 用的是 `environment:` **逐條白名單**（`- MODEL_NAME=${MODEL_NAME}`），
+  不是 `env_file:`。`.env` 只是給 compose 做變數插值用的——**沒列進 `environment:` 的變數，
+  compose 根本不會傳進容器**。而且因為服務設定沒變，compose 判定不需要 recreate，
+  `--force-recreate` 也一樣沒用（傳的東西本來就沒變）。
+- **解法**：**新增 env 變數是「兩個檔案」的事**——`.env`（值）+ `docker-compose.yml`（白名單那行），
+  少一邊就是靜默失效。選填的用 `${VAR:-}` 給預設，不然沒設會擋住整個 stack 起不來。
+- **驗收**：`docker exec money-bot printenv VAR`，看到值才算數。程式端讀 `os.getenv` 一律要能吃 None。
+- **教訓**：「改了 `.env` 就 `docker compose up -d`」這句只在**變數已經在白名單裡**時成立。
+  `Running` 而不是 `Recreated` 就是警訊——那代表 compose 認為什麼都沒變。
+
+### 🔴 坑：AI 模型 alias 是單點故障，而且「失敗」不一定是例外
+- **怎麼發生的**：`MODEL_NAME=gemini-flash-latest`，Google 端一忙整串回 `503 high demand`。
+  2026/08/24、08/27、08/29 三次排程的 CAPTCHA 辨識**四次重試全 503**，發票同步連續多天空轉，
+  DB 最後一筆停在 08/23——**沒有任何錯誤通知，因為程式層面「沒有例外沒有崩潰」，只是抓到 0 張**。
+- **根因二連**：
+  1. **alias = 單點故障**：`*-latest` 指向的是最熱門的模型，最容易被限流。實測同一支金鑰下
+     `gemini-flash-latest` 503、`gemini-3.7-flash` 503，而 `gemini-3.6-flash` / `gemini-3.1-flash-lite` 正常。
+     順帶一提 `gemini-2.5-flash` 已經 **404**（模型會被下架，寫死的模型名會過期）。
+  2. **拒答不是例外**：模型拒絕辨識驗證碼時回的是 **HTTP 200 + 一段道歉文**
+     （實測 `gemini-3.5-flash`：「我無法協助辨識或解密驗證碼（CAPTCHA）圖片」）。
+     只用 try/except 做退避的話，這段廢話會被當成答案往下傳，**後面的備援模型永遠輪不到**。
+- **解法**：`gemini.vision_text()` 一條退避鏈——`MODEL_NAME` → `GEMINI_FALLBACK_MODELS` →（可選）codex，
+  並且**收下 `validate=` 檢查答案能不能用**，不合格就當這一層失敗、換下一個。
+  CAPTCHA 那邊把「必須是 5 位數字」當驗證器傳下去，而不是拿到答案才自己檢查。
+- **codex 不是萬用備援**：codex CLI 0.148.0 支援 `-i/--image`，一般收據抽欄位實測 5.9 秒正確回 JSON，
+  **但驗證碼一律拒答**（「抱歉，我無法協助破解驗證碼。」）。所以 CAPTCHA 走 `allow_codex=False`，
+  退過去只是白等 6 秒 × N 次重試。
+- **教訓**：外部 AI 服務要當**會壞的依賴**看，不是當常數。而且「壞掉」有兩種形狀：
+  **丟例外**與**回一段沒用的正常回應**——只防前者的退避是假的退避。
+
 ## 3. 資料庫的坑
 
 ### 坑：以為加欄位/表會自動生效

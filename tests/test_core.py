@@ -192,7 +192,7 @@ def test_add_recurring_data_day_out_of_range(fake_db):
 # ── handle_image_data 圖片記帳（mock gemini）────────────────────
 
 def _set_gemini(monkeypatch, payload: str):
-    monkeypatch.setattr(core, "gemini_image", lambda prompt, b: payload)
+    monkeypatch.setattr(core, "vision_text", lambda prompt, b: payload)
 
 
 def test_image_data_with_discount(fake_db, monkeypatch):

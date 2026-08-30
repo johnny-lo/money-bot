@@ -2,7 +2,7 @@
 
 - parse_extracted_json：純函式，把 AI 回應字串解析成 {name, area, recommended_items, cuisine_type}
 - from_text：用 codex_text 把純文字抽成欄位
-- from_image：用 gemini_image 直接從截圖一步到位抽欄位
+- from_image：用 vision_text 直接從截圖一步到位抽欄位（Gemini→備援模型→codex）
 """
 import json
 import socket
@@ -10,7 +10,7 @@ import ipaddress
 import urllib.request
 import urllib.parse
 
-from gemini import gemini_image
+from gemini import vision_text
 from codex_cli import codex_text
 
 
@@ -66,7 +66,7 @@ def from_text(text: str) -> dict:
 
 def from_image(image_bytes: bytes, mime_type: str = "image/jpeg") -> dict:
     """截圖 → 欄位（Gemini Vision 一次到位）。"""
-    return parse_extracted_json(gemini_image(_IMAGE_PROMPT, image_bytes, mime_type=mime_type))
+    return parse_extracted_json(vision_text(_IMAGE_PROMPT, image_bytes, mime_type=mime_type))
 
 
 import re as _re
