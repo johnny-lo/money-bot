@@ -24,6 +24,7 @@ import asyncio
 from datetime import datetime, timedelta
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
+import captcha_ocr
 from gemini import vision_text
 from database import SessionLocal
 from models import Transaction
@@ -71,12 +72,24 @@ def format_item(line_item_name: str, seller: str) -> str:
 
 # ─────────────────── 爬蟲（Playwright async）───────────────────
 
-async def _solve_captcha(page) -> str:
+async def _solve_captcha(page) -> tuple[str, bytes]:
+    """辨識驗證碼，回 (5 位數字, 原始圖片 bytes)。
+
+    圖片一起回傳是給 `_login` 用的：**登入成功那一刻**才確定這個答案是對的，
+    那時才把 (圖, 答案) 存成樣本。在這裡就存會存進一堆錯的標註。
+    """
     await page.wait_for_selector("img[alt='圖形驗證碼']", timeout=10000)
     src = await page.locator("img[alt='圖形驗證碼']").first.get_attribute("src")
     if not src or not src.startswith("data:image/png;base64,"):
         raise RuntimeError(f"CAPTCHA src 異常：{str(src)[:60]!r}")
     img_bytes = base64.b64decode(src.split(",", 1)[1])
+
+    # 第一層：本地 ddddocr，4 ms、不出網、不會 503、不會被政策拒答。
+    # 實測 30 張真圖 30/30。解不出來（含沒裝 ddddocr）才往下走 AI。
+    local = captcha_ocr.recognize(img_bytes)
+    if local:
+        return local, img_bytes
+
     prompt = (
         "這張圖片是 5 位阿拉伯數字驗證碼，可能有一條橫線穿過。"
         "請只回傳 5 個數字，不要有空白、標點或其他字。"
@@ -90,7 +103,7 @@ async def _solve_captcha(page) -> str:
         allow_codex=False,
         validate=lambda text: len(re.sub(r"\D", "", text)) == 5,
     ).strip()
-    return re.sub(r"\D", "", raw)
+    return re.sub(r"\D", "", raw), img_bytes
 
 
 async def _detect_error(page) -> str:
@@ -127,7 +140,7 @@ async def _login(page, phone: str, password: str) -> bool:
         print(f"🔐 登入嘗試 {attempt}/{MAX_CAPTCHA_RETRIES}")
         await _enter_login_flow(page)
         try:
-            captcha = await _solve_captcha(page)
+            captcha, captcha_img = await _solve_captcha(page)
             print(f"   CAPTCHA: {captcha}")
         except Exception as e:
             print(f"   ⚠️ 辨識失敗：{e}")
@@ -181,6 +194,9 @@ async def _login(page, phone: str, password: str) -> bool:
             continue
         if any(kw in body for kw in ["發票清單", "查詢發票", "載具明細", "發票號碼", "消費時間"]):
             print(f"   ✅ 登入成功")
+            # 登入成功 = 這個驗證碼答案確定正確，現在才存樣本（best-effort，不影響回傳）。
+            # 這是「哪天財政部改字型」的保險：有標好的樣本才重訓得起來。
+            captcha_ocr.save_sample(captcha_img, captcha)
             return True
         print(f"   ❓ 未知狀態 URL={url}，重試")
     return False

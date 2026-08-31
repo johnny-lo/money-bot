@@ -12,3 +12,4 @@ playwright
 pytest
 yt-dlp
 httpx
+ddddocr
