@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 → 改完 Python 原始碼 container 立刻看得到，**不用 rebuild image**。
 
 ```bash
-# 全套測試（498 個，約 3.5 秒）
+# 全套測試（約 3.5 秒）
 docker exec -w /app money-bot python -m pytest tests/ -q
 
 # 單檔 / 單一測試
@@ -92,7 +92,7 @@ ingest.py   orchestrator：extract → 正規化 → upsert → 事後補強（b
 `main.py` 的 `Base.metadata.create_all` **只建新表、不改既有表結構**：
 
 - **新表** → 開機自動建，免 migration。
-- **既有表加欄位/FK** → 要手動 `ALTER`，照 `main.py:35-84` 的 inspector + `ALTER TABLE` 寫法補一段。
+- **既有表加欄位/FK** → 要手動 `ALTER`，照 `main.py` 裡 `create_all` 下方那段 inspector + `ALTER TABLE` 的 try 區塊補一段。
   那段 try 會吞例外 → 重啟後 `docker logs money-bot | grep -E '✅|⚠️'` 確認真的加成功。
 
 ## 測試姿態

@@ -164,7 +164,7 @@ docker compose exec app pytest tests/ -v
 
 | Job | 做什麼 |
 |-----|--------|
-| `backend` | `pytest tests/`（498 個）+ **import 預檢**（`python -c "import main"`）+ `scripts/healthcheck.sh --self-test`（31 項純邏輯，不出網）|
+| `backend` | `pytest tests/` + **import 預檢**（`python -c "import main"`）+ `scripts/healthcheck.sh --self-test`（31 項純邏輯，不出網）|
 | `frontend` | `npm ci` + `npm run build` |
 
 兩個細節是踩過才知道的：

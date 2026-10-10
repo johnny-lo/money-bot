@@ -1,7 +1,7 @@
 # Codebase Index (AI Quick Reference)
 
 > 供 AI 快速理解專案結構，每次 commit 時更新。
-> Last updated: 2026-08-29
+> Last updated: 2026-09-22
 
 ## Stack
 

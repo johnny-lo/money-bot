@@ -369,11 +369,11 @@
 ## 3. 資料庫的坑
 
 ### 坑：以為加欄位/表會自動生效
-- **根因**：`main.py:28` 的 `Base.metadata.create_all` **只建新表，不改既有表結構**。
+- **根因**：`main.py` 的 `Base.metadata.create_all` **只建新表，不改既有表結構**。
 - **規則**：
   - **新表**（如 `history_videos`/`video_tags`）→ 開機自動建，**免 migration**。
-    （`models.py` 在 `main.py:9` 經 `categorize` 被 import，create_all 前就註冊到 metadata。）
-  - **既有表加欄位/FK** → 要**手動 ALTER**，照 `main.py:30-57` 那段 inspector + `ALTER TABLE` 寫法。
+    （`models.py` 在 `main.py` 開頭經 `from categorize import …` 被 import，create_all 前就註冊到 metadata。）
+  - **既有表加欄位/FK** → 要**手動 ALTER**，照 `main.py` 裡 `create_all` 下方那段 inspector + `ALTER TABLE` 的 try 區塊寫法。
 - **教訓**：新表免錢、舊表加欄要手動補。
 
 ### 坑：out-of-process 產的 token，server 不認
@@ -493,7 +493,8 @@
 - **`pkill -f 'vite'` 會打到自己的 shell**（exit 144）→ 改用 port 找 PID（`:5173`）再殺特定 PID。
 - **rtk hook 會改寫 shell 指令**（`git status`→`rtk git status`，透明 0 token）；meta 指令 `rtk gain/discover/proxy`。
 - **雙 docker daemon 危險**：曾同時跑 Docker Desktop + 系統 docker → 排程重複觸發 / 報表數字不一 / ngrok 334。
-  **只在 Desktop context 起 stack**。
+  **2026-06-01 起全體改跑系統 docker（context `default`）**，Desktop 只留熱備份——
+  **只在 `default` 起 stack**，別 `docker --context desktop-linux compose up`。
 - **內容型別別用猜的**：Google Places 有時把 PNG 用 .jpg 檔名送 → 破圖「?」。用 `file`/magic bytes 驗，
   依 `Content-Type` 決定副檔名，別假設「太大」。
 
