@@ -13,9 +13,9 @@ ap.add_argument("--days", type=int, default=3)
 a = ap.parse_args()
 phone = os.environ.get(f"EINVOICE_PHONE_{a.carrier}", "")
 password = os.environ.get(f"EINVOICE_PASSWORD_{a.carrier}", "")
-phones = [v for k, v in os.environ.items() if k.startswith("EINVOICE_PHONE_") and v]
-guard.install(Path("/state") / f"{os.environ['AUTOFIX_INCIDENT']}.login_budget", phones,
-              Path("/app/.autofix-probe"))
+phones = [phone] if phone else []
+# 每次 probe 只放行 1 次登入送出；跨呼叫的上限（3 次）由主機端 bin/probe 計數，容器看不到也改不到
+guard.install(Path("/tmp/login_budget"), phones, Path("/app/.autofix-probe"), limit=1)
 
 sys.path.append("/app")            # guard 裝好之後才 import 被測程式
 import einvoice                    # noqa: E402

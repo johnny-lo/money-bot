@@ -4,5 +4,6 @@ Description=Money Bot 自動修復：合併、驗證、上線（失敗自動回�
 [Service]
 Type=oneshot
 ExecStart=%h/Desktop/linebot/autofix/deploy.sh
-TimeoutStartSec=15min
+# 最壞：測試 + 重啟等 3 分鐘 + 發票實登驗證 + 回滾再等 3 分鐘
+TimeoutStartSec=30min
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin

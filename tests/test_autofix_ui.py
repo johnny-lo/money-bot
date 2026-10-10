@@ -87,3 +87,65 @@ def test_process_outbox_壞檔不卡住整個佇列(monkeypatch, tmp_path, capsy
     (tmp_path / "outbox" / "1-report.json").write_text("{壞掉")
     asyncio.run(autofix_ui.process_outbox(FakeBot(FakeChannel())))
     assert (tmp_path / "outbox" / "1-report.json.bad").exists()
+
+
+# ── 最終審查的修正：任何失敗都不能讓事件卡在 dispatched/deploying ──
+
+def test_核可檔寫不出去_不改狀態_回錯誤(monkeypatch, tmp_path):
+    monkeypatch.setenv("AUTOFIX_DIR", str(tmp_path))          # 沒有 approved/ 目錄
+    marks = []
+    monkeypatch.setattr(autofix_ui.incidents, "mark", lambda *a, **k: marks.append(a))
+    err = autofix_ui.apply_action(7, "deploy")
+    assert err and "核可檔" in err and marks == []
+
+
+def test_核可成功_先寫檔再改狀態(monkeypatch, tmp_path):
+    (tmp_path / "approved").mkdir()
+    monkeypatch.setenv("AUTOFIX_DIR", str(tmp_path))
+    monkeypatch.setattr(autofix_ui.incidents, "now_tw", lambda: NOW)
+    marks = []
+    monkeypatch.setattr(autofix_ui.incidents, "mark",
+                        lambda i, s, **k: marks.append((i, s, (tmp_path / "approved" / "7.deploy").exists())))
+    assert autofix_ui.apply_action(7, "deploy") is None
+    assert marks == [(7, "deploying", True)]
+
+
+class GoneChannel(FakeChannel):
+    async def fetch_message(self, mid):
+        raise RuntimeError("Unknown Message")
+
+
+def test_報告卡被刪_部署結果改直接發_且仍更新狀態(monkeypatch, tmp_path):
+    (tmp_path / "outbox").mkdir()
+    monkeypatch.setenv("AUTOFIX_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOFIX_CHANNEL_ID", "123")
+    marks = []
+    monkeypatch.setattr(autofix_ui.incidents, "mark", lambda i, s, **f: marks.append((i, s)))
+    monkeypatch.setattr(autofix_ui.incidents, "get", lambda i: {"report_message_id": "555"})
+    monkeypatch.setattr(autofix_ui.incidents, "now_tw", lambda: NOW)
+    dep = {"type": "deploy", "incident_id": 7, "status": "resolved", "stage": "verify",
+           "message": "ok", "log_tail": ""}
+    (tmp_path / "outbox" / "7-deploy.json").write_text(json.dumps(dep))
+    ch = GoneChannel()
+    assert asyncio.run(autofix_ui.process_outbox(FakeBot(ch))) == 1
+    assert (7, "resolved") in marks and ch.sent and "embed" in ch.sent[0]
+
+
+class DeadChannel(FakeChannel):
+    async def send(self, **kw):
+        raise RuntimeError("Missing Access")
+
+
+def test_發卡失敗_事件結案_inconclusive_不讓感測器失聲(monkeypatch, tmp_path):
+    (tmp_path / "outbox").mkdir()
+    monkeypatch.setenv("AUTOFIX_DIR", str(tmp_path))
+    monkeypatch.setenv("AUTOFIX_CHANNEL_ID", "123")
+    marks = []
+    monkeypatch.setattr(autofix_ui.incidents, "mark", lambda i, s, **f: marks.append((i, s)))
+    monkeypatch.setattr(autofix_ui.incidents, "now_tw", lambda: NOW)
+    rep = {"type": "report", "incident_id": 8, "title": "t", "diff_file": None,
+           "report": {"verdict": "fixed", "tests": {"passed": 1, "failed": 0}}}
+    (tmp_path / "outbox" / "8-report.json").write_text(json.dumps(rep))
+    asyncio.run(autofix_ui.process_outbox(FakeBot(DeadChannel())))
+    assert marks == [(8, "inconclusive")]
+    assert (tmp_path / "outbox" / "8-report.json.bad").exists()

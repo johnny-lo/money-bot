@@ -47,7 +47,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── prompt.md / rules/<sensor>.md / prompt.py  # Claude 的 prompt：明確載入 superpowers systematic-debugging→TDD→verification、無頭改寫（不能問人→questions_for_human）、可用指令與禁區、各感測器重現規則。prompt.py **只用 stdlib**（主機 python3 跑）
 │   ├── report.py        # **stdlib only**：`validate` 把「宣稱 fixed 但測試沒全綠/沒 commit/改到禁區」降級 inconclusive；`finalize` 讀 worktree 的 .autofix-report.json + git 資訊 → outbox 訊息與 state/<id>.diff。測 tests/test_autofix_report.py
 │   ├── claude-settings.template.json  # claude -p 權限白名單（__AF__ 由 run.sh 代換）：只准讀/編輯 worktree、git 唯讀+commit、bin/test、bin/probe、Skill；禁 docker/.env/push/merge/上網/AskUserQuestion
-│   ├── run.sh           # 主機：取最舊 inbox → git worktree ../linebot-autofix-<id>（drill 先套 drill.patch）→ timeout 45m claude -p → report.py finalize → outbox。AUTOFIX_DRY_RUN=1 用 testing/fake-claude.sh
+│   ├── run.sh           # 主機：取最舊 inbox → git worktree `/var/tmp/linebot-autofix-<id>`（放家目錄外才能 deny Read //home/**；drill 先套 drill.patch）→ timeout 45m claude -p → report.py finalize → outbox。AUTOFIX_DRY_RUN=1 用 testing/fake-claude.sh
 │   ├── bin/test         # 一次性容器跑 worktree 的 import 預檢＋全套測試；附拋棄式 Postgres（--internal 網路，不能對外；main.py import 時就 create_all）
 │   ├── bin/probe        # Claude 唯一能碰外部網站的路：一次性容器（不接 compose 網路→連不到正式 DB）跑**主目錄唯讀**的 probes/*.py；`probe einvoice --carrier N`、`probe extract <url>`
 │   ├── probes/guard.py  # 登入預算安全帶：patch Playwright，在網路層數「帶手機號碼送往財政部的非 GET 請求」，每事件 >3 次直接 abort（Claude 改 worktree 程式也繞不過）；guard 永遠最後註冊=最先比對；browser 關閉前自動存頁面（遮罩手機/email）到 .autofix-probe/。測 tests/test_autofix_probe_guard.py（含真 Chromium 攔截）

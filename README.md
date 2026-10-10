@@ -271,8 +271,8 @@ journalctl --user -u linebot-healthcheck -n 30
 **❓ 沒找到可靠的修正**（附已排除的假設）。每張卡附 `claude --resume <id>` 讓你接手細看。
 
 **安全邊界**：部署鈕只有 `AUTOFIX_OWNER_USER_ID` 按得動、7 天內有效；Claude 只能在 worktree 內改後端 Python 與文件，
-不能碰 docker、`.env`、前端、`git push/merge`、上網；碰真實網站只能經 `autofix/bin/probe`，
-**財政部登入每事件最多 3 次，在網路層強制**（帳號累計 40 次錯誤會被鎖）；宣稱修好但測試沒全綠／沒 commit／改到禁區，一律降級不給部署鈕；
+worktree 放在 `/var/tmp`、讀取權限封鎖整個家目錄（讀不到你的其他專案、`.env`、憑證），不能碰 docker、前端、`git push/merge`、上網；碰真實網站只能經 `autofix/bin/probe`，
+**財政部登入每事件最多 3 次 probe、每次最多送出 1 次，由主機端計數**（帳號累計 40 次錯誤會被鎖；部署後的上線驗證另外會正常登入一次）；宣稱修好但測試沒全綠／沒 commit／改到禁區，一律降級不給部署鈕；
 修好不到 7 天又壞 → 不再自動修，直接請你處理。部署不會 push。
 
 **安裝**：

@@ -1,7 +1,8 @@
 """probe 的安全帶：在 Playwright 網路層數「送出登入表單」次數，超過預算直接 abort。
 
-為什麼在網路層：Claude 可以改 worktree 裡的 einvoice.py（重試次數、迴圈），但改不到這支
-（autofix/ 是禁區，而且 probe 跑的是主目錄的唯讀副本）。只要請求帶著手機號碼送往財政部，就算一次。
+擋得住：worktree 程式「不小心」的重試迴圈（只要請求帶著手機號碼送往財政部，就算一次）。
+擋不住：刻意繞過的程式——它跟被測程式在同一個行程、容器有網路，可以還原 patch 或不走 Playwright。
+所以跨呼叫的真正上限放在主機端 bin/probe（每事件 3 次呼叫、每次容器 timeout），這裡只是第一道。
 必須在 import 被測程式之前 install()。
 """
 import re
@@ -54,7 +55,7 @@ async def _dump(contexts: list, dump_dir: Path, phones: list[str]) -> None:
         print(f"📸 已存 {n} 個頁面到 {dump_dir}", flush=True)
 
 
-def install(budget_path: Path, phones: list[str], dump_dir: Path):
+def install(budget_path: Path, phones: list[str], dump_dir: Path, limit: int = 3):
     """patch Playwright：每個 context 自動掛 guard、browser 關閉前自動存頁面。回傳 uninstall()。"""
     from playwright.async_api import Browser, BrowserContext
 
@@ -66,8 +67,8 @@ def install(budget_path: Path, phones: list[str], dump_dir: Path):
     async def _guard(route, request):
         host = urlparse(request.url).hostname or ""
         if is_credential_submit(request.method, host, request.post_data or "", phones):
-            if not take_budget(budget_path):
-                print("⛔ 登入預算用完（本事件最多 3 次送出），已在網路層攔截", flush=True)
+            if not take_budget(budget_path, limit):
+                print(f"⛔ 登入預算用完（這次 probe 最多 {limit} 次送出），已在網路層攔截", flush=True)
                 await route.abort()
                 return
             print("🔑 送出登入表單（計入預算）", flush=True)

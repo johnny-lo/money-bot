@@ -6,8 +6,11 @@
 """
 import json
 import os
+import zlib
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+from sqlalchemy import text
 
 from database import SessionLocal
 from models import AutofixIncident
@@ -34,15 +37,27 @@ def inbox_payload(inc: AutofixIncident) -> dict:
             "escalated": inc.status == "needs_human"}
 
 
-def _write_inbox(inc: AutofixIncident) -> None:
+def _write_inbox(inc: AutofixIncident) -> bool:
+    """寫成功回 True。失敗只印 log——呼叫端據此決定要不要標 dispatched。"""
     d = _dir("inbox")
     if not os.path.isdir(d):
-        print(f"⚠️ autofix：{d} 不存在（主機沒跑 autofix/install.sh？），事件 #{inc.id} 只記 DB", flush=True)
-        return
-    tmp = os.path.join(d, f".{inc.id}.json.tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(inbox_payload(inc), f, ensure_ascii=False, indent=2)
-    os.replace(tmp, os.path.join(d, f"{inc.id}.json"))   # 原子：path unit 不會看到寫一半的檔
+        print(f"⚠️ autofix：{d} 不存在（主機沒跑 autofix/install.sh？），事件 #{inc.id} 先不派發", flush=True)
+        return False
+    try:
+        tmp = os.path.join(d, f".{inc.id}.json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(inbox_payload(inc), f, ensure_ascii=False, indent=2)
+        os.replace(tmp, os.path.join(d, f"{inc.id}.json"))   # 原子：path unit 不會看到寫一半的檔
+        return True
+    except OSError as ex:
+        print(f"⚠️ autofix：事件 #{inc.id} 寫 inbox 失敗，先不派發：{ex}", flush=True)
+        return False
+
+
+def _lock_key(sensor: str, signature: str) -> int:
+    """(sensor, signature) → 穩定的 signed 64-bit，給 pg_advisory_xact_lock。"""
+    raw = f"{sensor}|{signature}".encode("utf-8")
+    return (zlib.crc32(raw) << 32 | zlib.adler32(raw)) - 2**63
 
 
 def _latest(db, sensor: str, signature: str):
@@ -58,6 +73,8 @@ def _raise(sensor, signature, title, context, dedupe_key) -> None:
     now = now_tw()
     db = SessionLocal()
     try:
+        # 交易級鎖：連「還沒有任何資料列」的情況也序列化（with_for_update 只鎖得到已存在的列）
+        db.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _lock_key(sensor, signature)})
         latest = _latest(db, sensor, signature)
         snap = None if latest is None else Snapshot(latest.status, latest.hit_keys or [], latest.closed_at)
         d = decide(snap, dedupe_key, now, policy)
@@ -79,12 +96,13 @@ def _raise(sensor, signature, title, context, dedupe_key) -> None:
             inc.status = "dispatched"
         else:
             inc.status = "counting"
-        db.flush()
+        db.flush()   # 先拿到 id
+        # 先寫 inbox、成功才算派發：沒有 inbox 檔卻標 dispatched，這個簽名的感測器就永遠失聲
+        if d.action in ("dispatch", "escalate") and not _write_inbox(inc) and d.action == "dispatch":
+            inc.status = "counting"   # 門檻已到，下次命中會再試派發
         db.commit()
-        print(f"🛠 autofix 事件 #{inc.id} {sensor}/{signature}：{d.action}"
+        print(f"🛠 autofix 事件 #{inc.id} {sensor}/{signature}：{d.action} → {inc.status}"
               f"（{len(d.hit_keys)}/{policy.threshold}）", flush=True)
-        if d.action in ("dispatch", "escalate"):
-            _write_inbox(inc)
     finally:
         db.close()
 

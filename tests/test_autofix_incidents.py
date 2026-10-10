@@ -23,6 +23,7 @@ class FakeSession:
         self.rows = rows or []
         self.added, self.deleted, self.committed = [], [], 0
     def query(self, *a, **k): return FakeQuery(self.rows)
+    def execute(self, *a, **k): pass
     def add(self, r):
         r.id = r.id or 100 + len(self.added)
         self.added.append(r); self.rows.append(r)
@@ -108,3 +109,36 @@ def test_clear_只刪_counting(monkeypatch, env):
     s2 = FakeSession([b]); _use(monkeypatch, s2)
     incidents.clear("scheduler_job", "j|E|f:g")
     assert s2.deleted == []
+
+
+# ── 最終審查的修正 ────────────────────────────────────────────
+
+class LockingSession(FakeSession):
+    def __init__(self, rows=None):
+        super().__init__(rows)
+        self.executed = []
+    def execute(self, stmt, params=None):
+        self.executed.append((str(stmt), params))
+
+
+def test_查詢最新事件前先拿_advisory_lock_沒有資料列時也鎖得住(monkeypatch, env):
+    s = LockingSession(); _use(monkeypatch, s)
+    incidents.raise_incident("drill", "drill", "演習", {}, "k")
+    assert s.executed and "pg_advisory_xact_lock" in s.executed[0][0]
+    assert s.executed[0][1]["k"] == incidents._lock_key("drill", "drill")
+
+
+def test_lock_key_穩定且分得開不同簽名():
+    assert incidents._lock_key("a", "b") == incidents._lock_key("a", "b")
+    assert incidents._lock_key("a", "b") != incidents._lock_key("a", "c")
+    assert -2**63 <= incidents._lock_key("a", "b") < 2**63
+
+
+def test_inbox_寫不出去_事件留在_counting_下次命中再派發(monkeypatch, env):
+    (env / "inbox").rmdir()
+    row = AutofixIncident(id=7, sensor="einvoice_login", signature="載具1", title="t",
+                          status="counting", context={},
+                          hit_keys=[["2026-10-08", "x"], ["2026-10-09", "x"]])
+    s = LockingSession([row]); _use(monkeypatch, s)
+    incidents.raise_incident("einvoice_login", "載具1", "t", {}, "2026-10-10")
+    assert row.status == "counting"          # 沒有 inbox 檔就不能標 dispatched，否則感測器永遠失聲

@@ -6,8 +6,10 @@ f=$(ls -1tr "$AF"/approved/* 2>/dev/null | head -1 || true)
 [ -n "$f" ] || exit 0
 name=$(basename "$f"); id="${name%%.*}"; action="${name##*.}"
 rm -f "$f"
-WT="$(dirname "$REPO")/linebot-autofix-$id"; BR="autofix/$id"
+# worktree 放在家目錄以外：Claude 的讀取權限是黑名單制，放外面才能整個 deny //home/**
+WT="${AUTOFIX_WT_ROOT:-/var/tmp}/linebot-autofix-$id"; BR="autofix/$id"
 DRY="${AUTOFIX_DRY_RUN:-}"
+TARGET="${AUTOFIX_DEPLOY_BRANCH:-master}"
 
 cleanup_branch() {
   # 保險：worktree 裡若殘留容器（root）寫的檔，先還給主機使用者，不然 worktree remove 會失敗
@@ -25,6 +27,14 @@ PY
 if [ "$action" = abandon ]; then cleanup_branch; exit 0; fi
 
 cd "$REPO"
+# 連按兩次：第二個核可檔進來時，分支早就合進去（或部署成功後已刪除）→ 什麼都別做、也別發卡
+# （否則 merge 找不到分支會被誤報成「合併衝突」，還把事件改回 reported）
+git rev-parse --verify -q "refs/heads/$BR" >/dev/null || exit 0
+if git merge-base --is-ancestor "$BR" HEAD 2>/dev/null; then exit 0; fi
+cur=$(git rev-parse --abbrev-ref HEAD)
+if [ "$cur" != "$TARGET" ]; then
+  emit reported precheck "正式目錄目前在 $cur 分支，不是 $TARGET，沒有部署。切回 $TARGET 後再按一次。"; exit 0
+fi
 if [ -n "$(git status --porcelain)" ]; then
   emit reported precheck "正式目錄有未提交的改動，沒有部署。commit 或 stash 後再按一次。" "$(git status --short | head -20)"; exit 0
 fi
@@ -42,9 +52,20 @@ wait_ready() { # 等 startup complete，最多 180 秒
   done; return 1; }
 
 rollback() { # stage message log
-  git revert -m 1 --no-edit "$merge_sha" >/dev/null 2>&1
+  trap - TERM
+  local note
+  if git revert -m 1 --no-edit "$merge_sha" >/tmp/af-revert-$id.log 2>&1; then
+    note="已 revert 並重啟回到合併前"
+  else
+    # 卡片絕不能在 revert 失敗時說「已回滾」——那會讓人以為正式環境復原了
+    git revert --abort >/dev/null 2>&1
+    note="⚠️ revert 失敗，正式目錄仍是合併後的狀態（$merge_sha），請立刻開 session 處理"
+  fi
   if [ -z "$DRY" ]; then local t; t=$(date -Iseconds); docker restart money-bot >/dev/null; wait_ready "$t"; fi
-  emit failed "$1" "$2，已 revert 並重啟回到合併前" "$3"; exit 0; }
+  emit failed "$1" "$2，$note" "$3
+$(cat /tmp/af-revert-$id.log 2>/dev/null)"; exit 0; }
+# systemd 逾時會送 SIGTERM：合併後被砍＝半套上線，一樣要回滾並發卡
+trap 'rollback timeout "部署逾時被中止" ""' TERM
 
 run() { [ -n "$DRY" ] && { echo "DRY: $*"; return 0; }; "$@"; }
 

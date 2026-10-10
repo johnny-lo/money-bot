@@ -44,6 +44,22 @@ def write_approval(incident_id: int, action: str) -> None:
         f.write(incidents.now_tw().isoformat())
 
 
+def apply_action(incident_id: int, action: str) -> str | None:
+    """先寫核可檔、成功才改狀態。寫不出去就回錯誤訊息、狀態不動（按鈕還能再按）。
+
+    反過來（先 mark deploying 再寫檔）的話，寫檔失敗＝事件永遠卡在 deploying、感測器失聲。
+    """
+    try:
+        write_approval(incident_id, action)
+    except OSError as ex:
+        return f"寫不出核可檔（主機有跑 autofix/install.sh 嗎？）：{ex}"
+    if action == "deploy":
+        incidents.mark(incident_id, "deploying")
+    else:
+        incidents.mark(incident_id, "abandoned", closed_at=incidents.now_tw())
+    return None
+
+
 class AutofixButton(discord.ui.DynamicItem[discord.ui.Button],
                     template=r"autofix:(?P<action>deploy|abandon):(?P<id>\d+)"):
     def __init__(self, action: str, incident_id: int):
@@ -64,14 +80,12 @@ class AutofixButton(discord.ui.DynamicItem[discord.ui.Button],
         if why:
             await interaction.response.send_message(f"⛔ {why}", ephemeral=True)
             return
-        if self.action == "deploy":
-            incidents.mark(self.incident_id, "deploying")
-            write_approval(self.incident_id, "deploy")
-            note = "🚀 部署中…合併 → 測試 → 重啟 → 上線驗證，結果會回在這張卡底下"
-        else:
-            incidents.mark(self.incident_id, "abandoned", closed_at=incidents.now_tw())
-            write_approval(self.incident_id, "abandon")
-            note = "已放棄，修正分支會被清掉"
+        err = apply_action(self.incident_id, self.action)
+        if err:
+            await interaction.response.send_message(f"⛔ {err}", ephemeral=True)
+            return
+        note = ("🚀 部署中…合併 → 測試 → 重啟 → 上線驗證，結果會回在這張卡底下"
+                if self.action == "deploy" else "已放棄，修正分支會被清掉")
         await interaction.response.edit_message(view=None)   # 收掉按鈕，避免按第二次
         await interaction.followup.send(f"{note}（by {interaction.user.display_name}）")
 
@@ -105,18 +119,22 @@ async def _handle(bot, ch, msg: dict) -> None:
         inc = incidents.get(iid) or {}
         embed = autofix_deploy_embed(msg)
         mid = inc.get("report_message_id")
-        if mid:
-            m = await ch.fetch_message(int(mid))
+        st = msg["status"]
+        # 先改狀態再發卡：發卡失敗頂多少一張卡，狀態不會卡在 deploying
+        if st == "reported":
+            incidents.mark(iid, "reported", reported_at=now)
+        else:
+            incidents.mark(iid, st, closed_at=now)
+        try:
+            m = await ch.fetch_message(int(mid)) if mid else None
+        except Exception:
+            m = None   # 報告卡被刪了 → 直接發在頻道
+        if m is not None:
             await m.reply(embed=embed)
         else:
             await ch.send(embed=embed)
-        st = msg["status"]
         if st == "reported":   # 前置檢查沒過：恢復按鈕讓使用者處理完再按
-            incidents.mark(iid, "reported", reported_at=now)
-            if mid:
-                await ch.send(content=f"#{iid} 處理完可以再按一次：", view=autofix_view(iid))
-        else:
-            incidents.mark(iid, st, closed_at=now)
+            await ch.send(content=f"#{iid} 處理完可以再按一次：", view=autofix_view(iid))
     elif msg["type"] == "escalated":
         await ch.send(embed=autofix_escalated_embed(msg))
 
@@ -140,6 +158,7 @@ async def process_outbox(bot) -> int:
     n = 0
     for name in sorted((x for x in os.listdir(d) if x.endswith(".json")), key=_outbox_order):
         path = os.path.join(d, name)
+        msg = None
         try:
             with open(path, encoding="utf-8") as f:
                 msg = json.load(f)
@@ -149,4 +168,11 @@ async def process_outbox(bot) -> int:
         except Exception as ex:
             print(f"⚠️ autofix outbox {name} 處理失敗：{type(ex).__name__}: {ex}", flush=True)
             os.replace(path, path + ".bad")   # 壞檔改名，別每 30 秒重試卡住佇列
+            # 報告卡發不出去 → 事件結案，不然它卡在 dispatched、這個簽名的感測器永遠失聲
+            if isinstance(msg, dict) and msg.get("type") == "report":
+                try:
+                    incidents.mark(int(msg["incident_id"]), "inconclusive",
+                                   closed_at=incidents.now_tw())
+                except Exception:
+                    pass
     return n

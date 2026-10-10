@@ -8,7 +8,7 @@ INC = {"id": 7, "sensor": "einvoice_login", "signature": "載具1", "title": "t"
 def test_prompt_含事件資料_規則_與_skill_指示():
     p = build_prompt(INC, "/home/u/linebot/autofix")
     assert '"signature": "載具1"' in p
-    assert "最多送出 3 次" in p                              # einvoice 規則
+    assert "最多呼叫 3 次" in p                              # einvoice 規則
     assert "superpowers:systematic-debugging" in p
     assert "/home/u/linebot/autofix/bin/test" in p
     assert "{{" not in p                                      # 沒有殘留佔位符

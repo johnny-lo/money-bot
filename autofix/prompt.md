@@ -18,7 +18,8 @@ systematic-debugging 說「3 次修正都失敗就停下來討論架構」→ �
 
 - `{{AF}}/bin/test`：在一次性容器跑 import 預檢＋全套測試（不連正式 DB、不出網）。
 - `{{AF}}/bin/probe <einvoice|extract> [參數]`：用真實外部資料重現／驗證。這是唯一能碰外部網站的路。
-- `git diff/log/status/show/add/commit`，以及讀檔、搜尋、在目前目錄內編輯。
+- `git status`、`git diff`、`git diff --stat`、`git diff HEAD`、`git log --oneline -20`、`git add …`、`git commit …`（只有這些固定形式），
+  以及在目前目錄內讀檔、搜尋、編輯（目前目錄以外一律讀不到、改不了）。
 - **不能**：docker、讀 `.env`、git push/merge/reset/checkout、上網、改 `autofix/`、`frontend/`、`scripts/systemd/`、
   `Dockerfile`、`docker-compose.yml`、`.env*`。需要動這些才修得好 → 結論 `needs_human` 並說明要改什麼。
 
