@@ -68,7 +68,7 @@
   - **投資**：投資
   - **其他**：其他
 - **AI 角色回應** — 記帳後由 persona 角色給出有趣評論（走 Gemini，求即時）。角色設定放 `persona.md`（本機私人檔，不入版控）；repo 附範本 `persona.example.md`（原創角色「錢鼠阿財」），沒有 `persona.md` 時自動退回範本。**看得到水位再說話**：每次記帳會附上本月四桶（投資/固定/生活/爽）用量、未分類金額與月份進度，角色依「桶位百分比 vs 月份進度」判斷該捧場還是該唸（**固定桶排除在外**——房租車貸月初一次付清，1 號就 100%，拿去比月份進度只會得出「你花太快」的荒謬結論，而且不可壓縮的支出唸了也沒用），**不以單筆金額大小論斷**（花三萬買 ETF 是好事，第五杯手搖才該被挑眉）。算不出水位時完全不傳，角色走保守模式、不做超支告誡
-- **AI 週/月評語** — 週報/月報的理財評語走 codex CLI（ChatGPT 訂閱制，預設 `gpt-5.5`），免 Gemini 計費 API 的 429 配額困擾
+- **AI 週/月評語** — 週報/月報的理財評語走 codex CLI（ChatGPT 訂閱制，模型用 `~/.codex/config.toml` 的設定），免 Gemini 計費 API 的 429 配額困擾
 
 > **文字 vs 影像分工**：帳目分類、週/月報評語等「純文字」生成走 codex 訂閱制；拍照記帳辨識、發票 CAPTCHA 破解等「影像」仍由 Gemini Vision 處理。
 > **影像有退避鏈**（`gemini.vision_text()`）：`MODEL_NAME` → `GEMINI_FALLBACK_MODELS` 逐個試 → 最後退 codex。單一模型是單點故障——`gemini-flash-latest` 這種 alias 一忙就整串 503，2026/08/24~08/29 就這樣讓發票同步連續多天空轉。**CAPTCHA 例外，不退 codex**（codex 政策上拒絕辨識驗證碼），只在 Gemini 各模型間退避。codex 裝在 app 容器映像內（**非獨立服務**），登入憑證由 compose 掛載主機 `~/.codex` 到容器 `/root/.codex`。
@@ -118,7 +118,7 @@
 | `GEMINI_FALLBACK_MODELS` | 選填。影像辨識備援模型，逗號分隔，主模型失敗**或拒答**時依序往下試 |
 | `CAPTCHA_SAMPLE_DIR` | 選填。驗證碼樣本目錄，預設 `data/captcha`（已 gitignore） |
 | `CAPTCHA_SAMPLE_MAX_BYTES` | 選填。樣本目錄容量上限，預設 1GB，超過從最舊的開始刪 |
-| `CODEX_MODEL` | codex 模型覆蓋（選填，留空＝用 codex 預設 `gpt-5.5`；分類與週/月報評語用） |
+| `CODEX_MODEL` | codex 模型覆蓋（選填，留空＝用 `~/.codex/config.toml` 設定的模型；分類與週/月報評語用） |
 | `MONTHLY_BUDGET` | 月度預算金額（選填，0 = 不顯示預算進度）|
 | `MONTHLY_INCOME` | 四桶水位的收入基準（選填但**建議設**）。優先序：本月實收 → 上月實收 → 此值；都沒有則角色拿不到水位，走保守模式 |
 | `BUCKET_RATIOS` | 四桶比例 `投資:固定:生活:爽`（選填，預設等分；建議 `2:4:2:2`）|

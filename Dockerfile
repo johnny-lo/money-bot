@@ -14,8 +14,15 @@ RUN playwright install --with-deps chromium
 # 安裝 Node 與 OpenAI Codex CLI
 # 週報/月報評語 + 帳目分類的「文字」生成走 codex（ChatGPT 訂閱），取代計費的 Gemini 文字 API；
 # 影像辨識（拍照記帳、CAPTCHA）仍由 gemini.py 用 Gemini Vision 處理。
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
-    && npm install -g @openai/codex \
+# 版本釘死：~/.codex 與主機共用，主機的 codex 升級後 config.toml 的 model 可能換成新模型，
+# 舊 CLI 會被 API 拒絕（"requires a newer version of Codex"）。升級＝改這個數字再 build——
+# 不寫版本號的話這層會被 Docker 快取住，`--build` 也不會拉新版。
+# apt 換台灣鏡像（build 內直連 deb.debian.org 曾卡在 77 KB/s；只改這層，不動上面已快取的層）
+ARG CODEX_VERSION=0.154.0
+#（只換主庫；debian-security 台灣鏡像沒有 → 404，留官方）
+RUN sed -i 's|deb.debian.org/debian$|ftp.tw.debian.org/debian|' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+    && npm install -g @openai/codex@${CODEX_VERSION} \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # 複製程式碼

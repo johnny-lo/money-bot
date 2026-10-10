@@ -497,6 +497,64 @@
 - **內容型別別用猜的**：Google Places 有時把 PNG 用 .jpg 檔名送 → 破圖「?」。用 `file`/magic bytes 驗，
   依 `Content-Type` 決定副檔名，別假設「太大」。
 
+### 坑：主機 codex 升級，容器 codex 就一起掛（美食深度抽取 / 分類 / 週報評語全滅）
+- **現象**：`codex exit 1: The 'gpt-6-astra' model requires a newer version of Codex`。
+  所有走 `codex_cli.py` 的文字生成同時失敗，美食貼文抽不到店名。
+- **根因**：`~/.codex` 是**跟主機共用**的 rw 掛載。主機 codex（或 Codex App）升級後把
+  `config.toml` 的 `model` 換成新模型，容器裡的舊 CLI 帶著新模型名去打 API → 400。
+  而 Dockerfile 原本寫 `npm install -g @openai/codex` 不帶版本 → 那層被 Docker 快取，
+  **`docker compose up --build` 也不會拉新版**，rebuild 了還是舊的。
+- **解法**：Dockerfile 改 `ARG CODEX_VERSION=x.y.z` + `@openai/codex@${CODEX_VERSION}`。
+  升級 = 對齊主機版本改數字 → `docker compose up -d --build app`（數字變了快取自然失效）。
+  那層的 apt 已換 `ftp.tw.debian.org`——build 內直連 deb.debian.org 曾卡在 77 KB/s 十幾分鐘
+  （主機直連卻有 3 MB/s，是單條連線撞到慢節點，不是整體網路）。
+  **只換主庫**（`sed 's|deb.debian.org/debian$|…|'`）：無腦全換會連 `debian-security` 一起換，
+  台灣鏡像沒有那個路徑 → 404 → apt exit 100。
+  ```bash
+  codex --version; docker exec money-bot codex --version   # 兩邊要一致
+  ```
+- **教訓**：共用設定檔的兩端，版本也得綁在一起；「沒寫版本號」在 Docker 裡 ≠「永遠最新」，而是「永遠第一次 build 那版」。
+
+### 坑：外部服務死掉，但 log 一行都沒有（2026-09 Google Places 全滅）
+- **現象**：使用者回報「每個美食解析都失敗」。`docker logs` 整份 321 行、唯一一個 ERROR 是無關的
+  yt-dlp 會員限定影片。**故障完全不在 log 裡**——它只出現在 Discord 的補件卡片上。
+- **根因**：Google Cloud **免費試用到期**，專案 `979794256721` 的服務被停用 →
+  Places API (New) 每一發 403、同專案的 Maps JS 也載不出來。
+- **診斷怎麼走的**（值得記下來，因為 Google 的錯誤訊息會騙人）：
+  1. 逐層打 API 分離變因：codex ✅、yt-dlp ✅、**Places ❌**。故障點只有一個。
+  2. Places (New) 只回 `"The caller does not have permission"`，**沒有 reason、沒有 consumer**。
+  3. 拿同一把金鑰打舊版 API 逼出囉嗦版訊息：「請檢查**金鑰的 API 限制設定**」
+     → **這句話把我們騙去翻金鑰設定，是錯的方向**（使用者回報限制清單早就勾好了）。
+  4. 關鍵一招：**故意打一個一定不在允許清單裡的 API**（Routes）。它回 `API_KEY_SERVICE_BLOCKED`
+     **附 consumer=`projects/979794256721`** → 證明金鑰有效、限制清單正常運作、且拿到了專案編號。
+  5. 對照另外兩把金鑰：一把回 `API_KEY_SERVICE_BLOCKED`、一把回 `API_KEY_HTTP_REFERRER_BLOCKED`，
+     **都有 details**。只有目標請求「全部金鑰檢查都過了卻被拒、且無 details」
+     → 結論：不是金鑰層，是**專案層**。再加上同專案的 Maps JS 也死 → 一件專案層級的事。
+- **教訓（診斷）**：Google 的 403 分兩類——**有 `details.reason` 的是金鑰層**（限制清單／referer／IP），
+  **沒有 reason 的是專案層**（帳單／試用到期／服務未啟用）。後者不會告訴你原因，
+  而舊版 API 的「請檢查金鑰限制」是通用文案，**不能當證據**。
+  想知道金鑰屬於哪個專案：故意打一個它沒被授權的 API，錯誤裡就有 consumer。
+- **教訓（程式）**：I/O 邊界靜悄悄地失敗＝故障可以活很久。現在 `food/places.py` 一定留 log
+  （含**連續失敗次數**＝壞多久了），並用 `PlacesUnavailable` 讓呼叫端分得出
+  「服務掛了」與「Google 查無此店」——原本批次匯入 `except Exception: place = None`
+  會把前者顯示成「❌ 找不到 N 家（加上地區再重貼）」，照著做一百次也不會成功。
+- **測試**：`tests/test_places_errors.py`（13 個，含「無 reason 的 403 要指向專案而不是金鑰」）
+  與 `tests/test_food_ingest_unavailable.py`（8 個，含「這時不能叫人加地區重貼」）。
+
+### 坑：加一條「鑄幣路徑」就把既有的認證不變式弄破了
+- **背景**：認證原本是單向的——短效 token（LINE/Discord 的邀請函）能換長效裝置 token，反向不行。
+  `routes/device.py` 的註解寫得很清楚：「洩漏的裝置 token 沒辦法自我繁殖」。
+- **差點踩到**：PWA 要開 `/report`，但網頁導航送不出 `X-Device-Token` header，
+  所以加了 `POST /api/report-token`（裝置 token → 短效 token）。這條一加，
+  device → short → device 就**成環**，上面那句話當場變成謊話，而且沒有任何測試會紅。
+- **解法**：短效 token 帶 `can_mint_device` 旗標（`auth.generate_report_token(..., can_mint_device=)`），
+  PWA 自鑄的那顆是 `False`，`routes/device.py` 換發前先問 `report_token_can_mint_device()`，
+  否則 403。查詢函式**預設關閉**（`.get(key, False)`）——之後再有新的鑄幣路徑忘了標記，
+  後果會是「換不到」而不是「默默放行」。
+- **教訓**：新增憑證的產生路徑時，先問「現有的守衛是靠什麼成立的？這條路徑會不會讓它成環？」
+  這類回歸不會讓任何既有測試變紅，只能靠人想到——所以**想到的當下就補一個測試把它釘住**
+  （`tests/test_report_token.py::test_device_token_refused_for_pwa_minted_token`）。
+
 ## 8. 工作流程（這個 session 怎麼推進的）
 1. **brainstorming**（skill）→ 一次問一題、定方案 → 寫 spec 到 `docs/superpowers/specs/`。
 2. **writing-plans**（skill）→ 拆成可逐步 TDD 的任務 → `docs/superpowers/plans/`。

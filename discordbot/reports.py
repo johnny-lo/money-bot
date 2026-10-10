@@ -90,7 +90,7 @@ def _generate_ai_comment(
     anomalies: list[dict] | None = None,
     top_records: list[dict] | None = None,
 ) -> str:
-    """用 codex CLI（ChatGPT 訂閱，gpt-5.5）生成期間評語（錢鼠阿財口吻）。失敗回錯誤訊息字串。
+    """用 codex CLI（ChatGPT 訂閱）生成期間評語（persona.md 的角色口吻）。失敗回錯誤訊息字串。
 
     傳入報表已算好的 vs 上期對比 / 儲蓄率 / 異常暴增 / 單筆 Top 3，
     讓評語能講出具體數字與可執行建議，而非空泛鼓勵。
@@ -139,6 +139,8 @@ def _generate_ai_comment(
 
     prompt = (
         f"{PERSONA_TEXT}\n\n---\n"
+        f"這次不是記帳當下的單筆回應，而是{period_kind}結算評語：角色設定裡寫給單筆回應的"
+        f"長度限制與「資料不足時」的保守規則，這裡都不適用——判斷依據就是下面的結算數字。\n\n"
         f"以下是主人{period_kind}（{period_label}）的記帳結算：\n"
         + "\n".join(facts)
         + "\n\n" + ask
