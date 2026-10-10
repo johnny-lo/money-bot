@@ -40,3 +40,11 @@ persona.md
 .claude/worktrees/
 .captcha_eval/
 data/captcha/
+
+# 自動修復交接目錄與 worktree 內的暫存（autofix/）
+autofix/inbox/
+autofix/approved/
+autofix/outbox/
+autofix/state/
+.autofix-report.json
+.autofix-probe/

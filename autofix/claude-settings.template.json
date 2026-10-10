@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Read", "Grep", "Glob", "Edit", "Write", "Skill", "TodoWrite",
+      "Bash(git diff:*)", "Bash(git log:*)", "Bash(git status:*)", "Bash(git show:*)",
+      "Bash(git add:*)", "Bash(git commit:*)",
+      "Bash(__AF__/bin/test)", "Bash(__AF__/bin/probe:*)",
+      "Bash(ls:*)", "Bash(grep:*)", "Bash(head:*)", "Bash(tail:*)", "Bash(wc:*)"
+    ],
+    "deny": [
+      "Read(.env)", "Read(.env.*)", "Read(//**/.env)", "Read(//**/.env.*)",
+      "Edit(autofix/**)", "Write(autofix/**)", "Edit(frontend/**)", "Write(frontend/**)",
+      "Edit(scripts/systemd/**)", "Edit(Dockerfile)", "Edit(docker-compose.yml)", "Edit(.env*)",
+      "Bash(docker:*)", "Bash(git push:*)", "Bash(git merge:*)", "Bash(git reset:*)",
+      "Bash(git checkout:*)", "Bash(git rebase:*)", "Bash(curl:*)", "Bash(wget:*)",
+      "WebFetch", "WebSearch", "AskUserQuestion"
+    ]
+  }
+}
