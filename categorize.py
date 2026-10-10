@@ -64,6 +64,31 @@ CATEGORIZE_RULES = """請依下列規則分類，每筆從這 15 類選一個：
 - 投資     = 股票、ETF、基金、定期定額、證券扣款、複委託、債券（保險與儲蓄險歸分期保險，那是義務不是投資）
 - 其他     = 確實兜不到任何一類"""
 
+# 輸出形狀交給 codex --output-schema 保證；enum 讓模型只能從 15 類裡選。
+_CATEGORY_FIELD = {"type": "string", "enum": CATEGORIES}
+_BATCH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "results": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"id": {"type": "integer"}, "category": _CATEGORY_FIELD},
+                "required": ["id", "category"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["results"],
+    "additionalProperties": False,
+}
+_ONE_SCHEMA = {
+    "type": "object",
+    "properties": {"category": _CATEGORY_FIELD},
+    "required": ["category"],
+    "additionalProperties": False,
+}
+
 
 def _categorize_batch(items: list[Transaction]) -> dict[int, str]:
     """送一批帳目給 AI，回傳 {id: category}。category 不在封閉清單者剔除。"""
@@ -71,19 +96,9 @@ def _categorize_batch(items: list[Transaction]) -> dict[int, str]:
     prompt = (
         f"你是一個記帳分類助手。請幫以下每一筆消費記錄分類。\n\n"
         f"帳目清單：\n{items_list}\n\n"
-        f"{CATEGORIZE_RULES}\n\n"
-        f"請嚴格只回傳 JSON 陣列格式，每個元素包含 id 和 category 兩個欄位。\n"
-        f'範例：[{{"id": 1, "category": "三餐"}}, {{"id": 2, "category": "飲料零食"}}]\n'
-        f"不要包含任何其他文字或 Markdown 標籤。"
+        f"{CATEGORIZE_RULES}"
     )
-    result_text = codex_text(prompt).strip()
-    if result_text.startswith("```json"):
-        result_text = result_text[7:]
-    if result_text.startswith("```"):
-        result_text = result_text[3:]
-    if result_text.endswith("```"):
-        result_text = result_text[:-3]
-    data = json.loads(result_text.strip())
+    data = json.loads(codex_text(prompt, schema=_BATCH_SCHEMA))["results"]
     out: dict[int, str] = {}
     for item in data:
         rid = item.get("id")
@@ -107,10 +122,9 @@ def classify_one(item: str, amount: int) -> str | None:
         prompt = (
             f"你是一個記帳分類助手。請幫這一筆消費分類。\n\n"
             f"品名：{item}\n金額：{amount} 元\n\n"
-            f"{CATEGORIZE_RULES}\n\n"
-            f"只回傳分類名稱四個字以內，不要任何其他文字、標點或說明。"
+            f"{CATEGORIZE_RULES}"
         )
-        got = codex_text(prompt).strip().strip('「」"\'')
+        got = json.loads(codex_text(prompt, schema=_ONE_SCHEMA))["category"]
         return got if got in CATEGORIES else None
     except Exception as e:
         print(f"⚠️ 單筆分類失敗（留給週日 AI 補）：{e}")

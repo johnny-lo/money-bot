@@ -35,6 +35,94 @@ def test_codex_image_passes_image_flag(monkeypatch):
     assert img_path.endswith(".png")
 
 
+def test_codex_schema_becomes_output_schema_file_and_is_cleaned_up(monkeypatch):
+    """給 schema → codex 帶 --output-schema <暫存檔>，檔案內容就是那份 schema，用完即刪。"""
+    import json
+    import os
+    seen = {}
+
+    def fake_run(cmd, input=None, text=None, capture_output=None, timeout=None):
+        schema_path = cmd[cmd.index("--output-schema") + 1]
+        with open(schema_path, encoding="utf-8") as f:
+            seen["schema"] = json.load(f)
+        seen["schema_path"] = schema_path
+        assert cmd[-1] == "-"                     # stdin 旗標仍在最後
+        out_path = cmd[cmd.index("-o") + 1]
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write('{"name":"x"}')
+        return type("P", (), {"returncode": 0, "stderr": ""})()
+
+    monkeypatch.setattr(codex_cli.subprocess, "run", fake_run)
+    schema = {"type": "object", "properties": {"name": {"type": "string"}},
+              "required": ["name"], "additionalProperties": False}
+    assert codex_cli.codex_text("抽菜名", schema=schema) == '{"name":"x"}'
+    assert seen["schema"] == schema
+    assert not os.path.exists(seen["schema_path"])
+
+
+def test_codex_without_schema_has_no_output_schema_flag(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, input=None, text=None, capture_output=None, timeout=None):
+        seen["cmd"] = cmd
+        out_path = cmd[cmd.index("-o") + 1]
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write("自由文字")
+        return type("P", (), {"returncode": 0, "stderr": ""})()
+
+    monkeypatch.setattr(codex_cli.subprocess, "run", fake_run)
+    codex_cli.codex_text("寫評語")
+    assert "--output-schema" not in seen["cmd"]
+
+
+def test_gemini_image_schema_goes_into_generation_config(monkeypatch):
+    import json as _json
+    seen = {}
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return _json.dumps({"candidates": [{"content": {"parts": [{"text": "{}"}]}}]}).encode()
+
+    def fake_urlopen(req, timeout=None):
+        seen["body"] = _json.loads(req.data.decode("utf-8"))
+        return FakeResp()
+
+    monkeypatch.setattr(gemini.urllib.request, "urlopen", fake_urlopen)
+    schema = {"type": "object", "properties": {}, "required": [], "additionalProperties": False}
+    gemini.gemini_image("看圖", b"img", model="m", schema=schema)
+    assert seen["body"]["generationConfig"] == {
+        "responseMimeType": "application/json", "responseJsonSchema": schema,
+    }
+    gemini.gemini_image("看圖", b"img", model="m")
+    assert "generationConfig" not in seen["body"]
+
+
+def test_vision_passes_same_schema_to_every_layer(monkeypatch):
+    monkeypatch.setenv("MODEL_NAME", "primary")
+    monkeypatch.setenv("GEMINI_FALLBACK_MODELS", "")
+    got = []
+
+    def fake_gemini_image(prompt, image_bytes, mime_type="image/jpeg", model=None, schema=None):
+        got.append(("gemini", schema))
+        raise RuntimeError("503")
+
+    def fake_codex_image(prompt, image_bytes, mime_type="image/jpeg", schema=None):
+        got.append(("codex", schema))
+        return "{}"
+
+    monkeypatch.setattr(gemini, "gemini_image", fake_gemini_image)
+    monkeypatch.setattr(gemini, "codex_image", fake_codex_image)
+    schema = {"type": "object"}
+    gemini.vision_text("p", b"img", schema=schema)
+    assert got == [("gemini", schema), ("codex", schema)]
+
+
 def test_codex_image_writes_real_bytes_and_cleans_up(monkeypatch):
     captured = {}
 
@@ -94,7 +182,7 @@ def _stub_gemini(monkeypatch, behaviour):
     """behaviour: {model: 回傳值 or Exception}"""
     calls = []
 
-    def fake_gemini_image(prompt, image_bytes, mime_type="image/jpeg", model=None):
+    def fake_gemini_image(prompt, image_bytes, mime_type="image/jpeg", model=None, schema=None):
         calls.append(model)
         result = behaviour[model]
         if isinstance(result, Exception):
@@ -108,7 +196,7 @@ def _stub_gemini(monkeypatch, behaviour):
 def _stub_codex(monkeypatch, result):
     calls = []
 
-    def fake_codex_image(prompt, image_bytes, mime_type="image/jpeg"):
+    def fake_codex_image(prompt, image_bytes, mime_type="image/jpeg", schema=None):
         calls.append(mime_type)
         if isinstance(result, Exception):
             raise result
@@ -252,5 +340,30 @@ def test_photo_and_food_use_vision_text():
     import inspect
     import core
     import food.extract as fx
-    assert "vision_text" in inspect.getsource(core.handle_image_data)
+    assert "vision_text" in inspect.getsource(core._read_receipt)
+    assert "_read_receipt" in inspect.getsource(core.handle_image_data)
+    assert "_read_receipt" in inspect.getsource(core.handle_image)
     assert "vision_text" in inspect.getsource(fx.from_image)
+
+
+def test_gemini_logs_token_usage(monkeypatch, capsys):
+    """計費 API 要看得到用量——沒有這行 log，就無從量測 prompt 瘦身省了多少。"""
+    import json as _json
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return _json.dumps({
+                "candidates": [{"content": {"parts": [{"text": "嗨"}]}}],
+                "usageMetadata": {"promptTokenCount": 120, "candidatesTokenCount": 8,
+                                  "totalTokenCount": 128},
+            }).encode()
+
+    monkeypatch.setattr(gemini.urllib.request, "urlopen", lambda req, timeout=None: FakeResp())
+    assert gemini.gemini_text("hi", model="m") == "嗨"
+    assert "m tokens：in=120 out=8 total=128" in capsys.readouterr().out

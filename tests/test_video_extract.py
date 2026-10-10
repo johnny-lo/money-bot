@@ -6,11 +6,6 @@ def test_parse_clean_json():
     assert out == {"topic": "唐朝", "tags": ["經濟", "戰爭", "制度"]}
 
 
-def test_parse_strips_markdown_fence():
-    out = parse_video_meta('```json\n{"topic":"明清","tags":["科舉"]}\n```')
-    assert out == {"topic": "明清", "tags": ["科舉"]}
-
-
 def test_parse_dedupes_and_caps_five_tags():
     out = parse_video_meta('{"topic":"x","tags":["a","a","b","c","d","e","f"]}')
     assert out["tags"] == ["a", "b", "c", "d", "e"]   # 去重後截 5

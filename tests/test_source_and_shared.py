@@ -114,19 +114,37 @@ def test_分類結果必須在封閉清單內(monkeypatch):
     """AI 回了清單外的東西就當作沒分到（留 NULL 給週日補），不要硬塞進 DB
     ——越界值會讓下游的桶位映射與大組統計全部對不上。"""
     import categorize
-    monkeypatch.setattr(categorize, "codex_text", lambda p: "外太空消費")
+    monkeypatch.setattr(categorize, "codex_text",
+                        lambda p, **kw: '{"category":"外太空消費"}')
     assert categorize.classify_one("不明品項", 100) is None
 
 
-def test_分類結果會去掉引號與空白(monkeypatch):
+def test_單筆分類走結構化輸出並取出_category(monkeypatch):
     import categorize
-    monkeypatch.setattr(categorize, "codex_text", lambda p: '  「居住水電」  ')
+    seen = {}
+
+    def fake(p, schema=None):
+        seen["schema"] = schema
+        return '{"category":"居住水電"}'
+    monkeypatch.setattr(categorize, "codex_text", fake)
     assert categorize.classify_one("房租", 12000) == "居住水電"
+    # enum 就是封閉清單本身——兩邊不同步，模型會被逼去選一個 DB 不收的值
+    assert seen["schema"]["properties"]["category"]["enum"] == categorize.CATEGORIES
+
+
+def test_批次分類走結構化輸出(monkeypatch):
+    import categorize
+    from types import SimpleNamespace as NS
+    monkeypatch.setattr(categorize, "codex_text", lambda p, schema=None: (
+        '{"results":[{"id":1,"category":"三餐"},{"id":2,"category":"外太空"}]}'))
+    got = categorize._categorize_batch([NS(id=1, item="便當", price=100),
+                                        NS(id=2, item="?", price=1)])
+    assert got == {1: "三餐"}            # 清單外的值照樣剔除
 
 
 def test_分類失敗回_None_而不是炸掉(monkeypatch):
     """記帳/建立固定收支不能因為分類失敗而失敗。"""
     import categorize
-    def boom(p): raise RuntimeError("codex 掛了")
+    def boom(p, **kw): raise RuntimeError("codex 掛了")
     monkeypatch.setattr(categorize, "codex_text", boom)
     assert categorize.classify_one("房租", 12000) is None

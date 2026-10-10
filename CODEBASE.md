@@ -21,7 +21,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── ingest_handlers.py # 美食/食譜/圖片記帳的 on_message 處理（handle_food_message/handle_recipe_message/do_image_recording）
 │   ├── reports.py       # 週報/月報/發票通知：_query_period 彙總 + _generate_ai_comment + notify_*
 │   └── bridge.py        # sync→async 橋接：set_bot/post_embeds_sync（排程 thread 投遞 embeds）
-├── gemini.py            # Gemini API 封裝：gemini_image(model=)（單次呼叫）、gemini_text()、generate_persona_comment()（錢鼠阿財記帳評論，走 Gemini 文字）。
+├── gemini.py            # Gemini API 封裝：gemini_image(model=, schema=)（單次呼叫；schema → generationConfig.responseJsonSchema）、gemini_text()、generate_persona_comment()（錢鼠阿財記帳評論，走 Gemini 文字）。
 │                        # **影像一律走 vision_text()**：MODEL_NAME → GEMINI_FALLBACK_MODELS 逐個退避 →（allow_codex=True 才）codex_image。
 │                        # validate= 可傳「答案合不合格」檢查——模型拒答時是 HTTP 200 回一段道歉文，不驗內容退避會有一半是假的
 ├── captcha_ocr.py       # 本地 CAPTCHA 辨識（ddddocr，4ms/張、不出網）+ 樣本收集。
@@ -29,7 +29,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │                        # save_sample() 只在**登入成功後**存（那時答案才確定對），檔名即標註；
 │                        # 目錄容量上限 CAPTCHA_SAMPLE_MAX_BYTES（預設 1GB），超過從最舊刪起。
 │                        # ddddocr 是**可選依賴**：沒裝就回 None，退回 gemini.vision_text
-├── codex_cli.py         # codex_text(prompt) / codex_image(prompt, bytes)（`codex exec -i`，影像退避的最後一層；**CAPTCHA 不能用**，codex 政策上拒答）：shell 出去呼叫本機 `codex exec`（ChatGPT 訂閱制，預設 gpt-5.5），用 --output-last-message 取乾淨輸出。供「分類 + 週/月報評語」的文字生成用，取代計費的 Gemini 文字 API（CODEX_MODEL env 可覆蓋模型）
+├── codex_cli.py         # codex_text(prompt, schema=) / codex_image(prompt, bytes, schema=)（schema → `--output-schema`；`codex exec -i`，影像退避的最後一層；**CAPTCHA 不能用**，codex 政策上拒答）：shell 出去呼叫本機 `codex exec`（ChatGPT 訂閱制，模型見 ~/.codex/config.toml），用 --output-last-message 取乾淨輸出。供「分類 + 週/月報評語」的文字生成用，取代計費的 Gemini 文字 API（CODEX_MODEL env 可覆蓋模型）
 ├── database.py          # SQLAlchemy engine/SessionLocal/Base 建立（讀 DATABASE_URL）
 ├── models.py            # ORM 模型：Transaction(支出)、Income(收入)、RecurringRecord(固定收支)
 ├── categorize.py        # AI 分類（走 codex_text / 訂閱制）：CATEGORIES(15 細類,含投資與家電3C)/CATEGORY_GROUPS(細→大組)/GROUP_ORDER、run_weekly_categorization()(只處理 NULL)、run_full_recategorization()(清掉全部重跑)、**classify_one(item, amount)**(單筆即時分類,重用 CATEGORIZE_RULES;給固定支出建立時用——品名每月都一樣,沒必要每筆留 NULL 等週日重猜,那會害「固定」桶每個月初空著、未分類暴增;越界值回 None 不硬塞)、category_group()。AI 分批 50 筆送，避免單次 prompt 太長
@@ -192,7 +192,8 @@ LINE/Discord 訊息
 - **LINE handler**: 同步函式，純文字回覆（`line_bot_api.reply_message`），呼叫 `core.handle_*()` 取 `list[str]`
 - **Discord handler**: 非同步，slash commands + embeds，呼叫 `core.*_data()` 取結構化 dict 後組 embed
 - **Auth**: in-memory token store (dict)，30 分鐘過期，非持久化
-- **Gemini 呼叫**: 直接用 urllib.request（非 SDK），手動組 JSON payload
+- **Gemini 呼叫**: 直接用 urllib.request（非 SDK），手動組 JSON payload；每次呼叫把 `usageMetadata` 印成一行 `📊 Gemini <model> tokens：…`（計費 API 的用量只看得到這裡）
+- **結構化輸出**: 要抽欄位的 AI 呼叫都帶 JSON Schema（`vision_text(schema=)` / `codex_text(schema=)`），prompt 只描述欄位語意；schema 根節點一律是 object（OpenAI strict 限制），陣列包一層（`items` / `results` / `places`）
 - **雙介面 API 設計**:
   - LINE 用 `core.handle_*()` 系列 → 回 `list[str]`（既有純文字風格）
   - Discord 用 `core.*_data()` 系列 → 回 `dict` / `list[dict]`（給 embed builder 組卡片）

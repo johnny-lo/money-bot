@@ -192,12 +192,12 @@ def test_add_recurring_data_day_out_of_range(fake_db):
 # ── handle_image_data 圖片記帳（mock gemini）────────────────────
 
 def _set_gemini(monkeypatch, payload: str):
-    monkeypatch.setattr(core, "vision_text", lambda prompt, b: payload)
+    monkeypatch.setattr(core, "vision_text", lambda prompt, b, **kw: payload)
 
 
 def test_image_data_with_discount(fake_db, monkeypatch):
-    _set_gemini(monkeypatch, '```json\n[{"item":"雞肉","price":150},'
-                             '{"item":"促銷折抵","price":-20},{"item":"忽略","price":0}]\n```')
+    _set_gemini(monkeypatch, '{"items":[{"item":"雞肉","price":150},'
+                             '{"item":"促銷折抵","price":-20},{"item":"忽略","price":0}]}')
     out = core.handle_image_data(b"img")
     assert out["success"] is True
     assert out["total_expense"] == 150
@@ -215,7 +215,7 @@ def test_image_data_bad_json(fake_db, monkeypatch):
 
 
 def test_image_data_empty_list(fake_db, monkeypatch):
-    _set_gemini(monkeypatch, "[]")
+    _set_gemini(monkeypatch, '{"items":[]}')
     out = core.handle_image_data(b"img")
     assert out["success"] is False
 

@@ -349,29 +349,44 @@ def handle_record_text(msg: str, source: str | None = None) -> list[str] | None:
         db.close()
 
 
+# 拍照記帳的 prompt + 輸出形狀（LINE handle_image / Discord handle_image_data 共用一份）。
+# 形狀由 schema 在 API 層保證（Gemini responseJsonSchema / codex --output-schema），
+# prompt 只講「要抽什麼」。
+_RECEIPT_PROMPT = (
+    "這是一張消費明細或發票。請列出上面所有的「消費項目」與對應的「金額」。\n"
+    "遇到折扣或折扣碼，用負數金額表示，或直接扣除在單項金額內。\n"
+    "完全辨識不出任何項目，items 就給空陣列。"
+)
+_RECEIPT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "item": {"type": "string"},
+                    "price": {"type": "integer"},
+                },
+                "required": ["item", "price"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["items"],
+    "additionalProperties": False,
+}
+
+
+def _read_receipt(image_bytes: bytes) -> list:
+    """收據照片 → [{item, price}, ...]。"""
+    raw = vision_text(_RECEIPT_PROMPT, image_bytes, schema=_RECEIPT_SCHEMA)
+    return json.loads(raw)["items"]
+
+
 def handle_image(image_bytes: bytes, source: str | None = None) -> list[str]:
     """處理圖片記帳。回傳 [記帳結果, AI回應]。"""
-    prompt = """這是一張消費明細或發票。請幫我列出上面所有的「消費項目」與對應的「金額」。
-    請嚴格只回傳 JSON 陣列 (Array) 格式，不要包含任何其他文字或 Markdown 標籤。
-    如果遇到折扣或折扣碼，請用負數金額表示，或直接扣除在單項金額內。
-    格式範例：
-    [
-      {"item": "雞胸肉", "price": 150},
-      {"item": "高麗菜", "price": 45},
-      {"item": "鮮奶", "price": 180}
-    ]
-    如果完全無法辨識出任何項目，請回傳空陣列 []"""
-
-    result_text = vision_text(prompt, image_bytes).strip()
-
-    if result_text.startswith("```json"):
-        result_text = result_text[7:]
-    if result_text.startswith("```"):
-        result_text = result_text[3:]
-    if result_text.endswith("```"):
-        result_text = result_text[:-3]
-
-    items_data = json.loads(result_text.strip())
+    items_data = _read_receipt(image_bytes)
 
     if not items_data or not isinstance(items_data, list):
         return ["🤔 AI 找不到明細上的具體項目，請確認照片是否清晰。"]
@@ -817,26 +832,8 @@ def delete_recurring_data(target_id: int) -> dict:
 
 def handle_image_data(image_bytes: bytes, source: str | None = None) -> dict:
     """處理圖片記帳，回傳結構化資料。"""
-    prompt = """這是一張消費明細或發票。請幫我列出上面所有的「消費項目」與對應的「金額」。
-    請嚴格只回傳 JSON 陣列 (Array) 格式，不要包含任何其他文字或 Markdown 標籤。
-    如果遇到折扣或折扣碼，請用負數金額表示，或直接扣除在單項金額內。
-    格式範例：
-    [
-      {"item": "雞胸肉", "price": 150},
-      {"item": "高麗菜", "price": 45}
-    ]
-    如果完全無法辨識出任何項目，請回傳空陣列 []"""
-
-    result_text = vision_text(prompt, image_bytes).strip()
-    if result_text.startswith("```json"):
-        result_text = result_text[7:]
-    if result_text.startswith("```"):
-        result_text = result_text[3:]
-    if result_text.endswith("```"):
-        result_text = result_text[:-3]
-
     try:
-        items_data = json.loads(result_text.strip())
+        items_data = _read_receipt(image_bytes)
     except Exception as e:
         return {"success": False, "error": f"AI 回傳無法解析：{e}"}
 

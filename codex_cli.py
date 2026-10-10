@@ -8,9 +8,11 @@
   破解驗證碼。」），所以 einvoice 的 CAPTCHA 走 gemini.vision_text(allow_codex=False)，
   只在 Gemini 的多個模型之間退避。
 """
+import json
 import os
 import subprocess
 import tempfile
+from contextlib import contextmanager
 
 # 圖片暫存檔的副檔名——codex 靠副檔名認圖片格式，給錯會被當成不支援的檔。
 _MIME_EXT = {
@@ -27,13 +29,37 @@ CODEX_BIN = os.getenv("CODEX_BIN", "codex")
 CODEX_MODEL = os.getenv("CODEX_MODEL") or None
 
 
+@contextmanager
+def schema_file(schema: dict | None):
+    """把 JSON Schema 落成暫存檔給 `codex exec --output-schema` 用；None 就不落檔。
+
+    有給 schema，codex 的最終回覆由 API 約束成符合它的 JSON。OpenAI strict 模式的限制：
+    根節點必須是 object、每個 properties 都列進 required、additionalProperties 為 false。
+    """
+    if schema is None:
+        yield None
+        return
+    fd, path = tempfile.mkstemp(suffix=".json")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(schema, f, ensure_ascii=False)
+        yield path
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 def _codex_exec(prompt: str, model: str | None = None,
-                image_path: str | None = None) -> str:
+                image_path: str | None = None,
+                schema: dict | None = None) -> str:
     """呼叫 `codex exec` 跑 prompt，回傳模型最終回覆。文字與影像共用這一條路。
 
     用 --output-last-message 把最終訊息寫到暫存檔取乾淨結果，
     避免 codex 的過程訊息（如「Shell cwd was reset…」）混入 stdout 破壞解析。
     prompt 一律從 stdin 餵（exec 的 `-`），可承載超長 batch 內容。
+    schema：要結構化輸出時給 JSON Schema（見 schema_file）。
     """
     fd, out_path = tempfile.mkstemp(suffix=".txt")
     os.close(fd)
@@ -51,11 +77,14 @@ def _codex_exec(prompt: str, model: str | None = None,
         ]
         if image_path:
             cmd += ["-i", image_path]
-        cmd += ["-"]                  # prompt 從 stdin 讀
-        proc = subprocess.run(
-            cmd, input=prompt, text=True,
-            capture_output=True, timeout=180,
-        )
+        with schema_file(schema) as schema_path:
+            if schema_path:
+                cmd += ["--output-schema", schema_path]
+            cmd += ["-"]              # prompt 從 stdin 讀
+            proc = subprocess.run(
+                cmd, input=prompt, text=True,
+                capture_output=True, timeout=180,
+            )
         if proc.returncode != 0:
             raise RuntimeError(
                 f"codex exit {proc.returncode}: {proc.stderr.strip()[-300:]}"
@@ -72,13 +101,15 @@ def _codex_exec(prompt: str, model: str | None = None,
             pass
 
 
-def codex_text(prompt: str, model: str | None = None) -> str:
-    """純文字 prompt → codex 回覆。"""
-    return _codex_exec(prompt, model=model)
+def codex_text(prompt: str, model: str | None = None,
+               schema: dict | None = None) -> str:
+    """純文字 prompt → codex 回覆。給 schema 則回覆保證是符合它的 JSON 字串。"""
+    return _codex_exec(prompt, model=model, schema=schema)
 
 
 def codex_image(prompt: str, image_bytes: bytes,
-                mime_type: str = "image/jpeg", model: str | None = None) -> str:
+                mime_type: str = "image/jpeg", model: str | None = None,
+                schema: dict | None = None) -> str:
     """圖片 + prompt → codex 回覆（`codex exec -i`）。
 
     codex 只吃檔案路徑不吃 bytes，所以先落一個暫存圖檔，**無論成敗都要刪掉**——
@@ -91,7 +122,7 @@ def codex_image(prompt: str, image_bytes: bytes,
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(image_bytes)
-        return _codex_exec(prompt, model=model, image_path=img_path)
+        return _codex_exec(prompt, model=model, image_path=img_path, schema=schema)
     finally:
         try:
             os.remove(img_path)
