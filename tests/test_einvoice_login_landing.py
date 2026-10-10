@@ -26,5 +26,10 @@ def test_沒有登出鈕不能當成已登入():
     assert _login_landing(SETTINGS, "資料設定") == "unknown"
 
 
+def test_只有登入鈕代表沒登入_不能當成已登入():
+    # 判斷依據是「登出」鈕；頁上寫「登入」恰恰是未登入的樣子（drill 演習弄反過）
+    assert _login_landing(SETTINGS, "登入\n手機條碼專區\n資料設定") == "unknown"
+
+
 def test_不在手機條碼專區不能當成已登入():
     assert _login_landing("https://www.einvoice.nat.gov.tw/", "登出") == "unknown"
