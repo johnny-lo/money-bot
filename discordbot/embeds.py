@@ -433,3 +433,69 @@ def build_items_embed(new_items: list[dict]) -> discord.Embed | None:
         color=COLOR_INFO,
     )
     return e
+
+
+# ── 自動修復（autofix）──────────────────────────────────────
+
+_VERDICT_HEAD = {"fixed": ("✅", "修好了，等你核可部署"),
+                 "needs_human": ("🙋", "需要你處理（改程式沒用）"),
+                 "inconclusive": ("❓", "沒找到可靠的修正")}
+_FENCE = "`" * 3
+
+
+def _clip(s, n=1024) -> str:
+    s = str(s or "—")
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def _bullets(items) -> str:
+    return "\n".join(f"• {x}" for x in (items or [])) or "—"
+
+
+def autofix_report_embed(msg: dict) -> discord.Embed:
+    """自動修復報告卡：結論、根因、證據、修正、測試、重現、風險、待決事項、接手指令。"""
+    r = msg.get("report") or {}
+    emoji, head = _VERDICT_HEAD.get(r.get("verdict"), ("❓", "結論不明"))
+    e = discord.Embed(title=_clip(f"{emoji} 自動修復 #{msg['incident_id']}：{head}", 256),
+                      description=_clip(msg.get("title"), 4000), color=COLOR_WARN)
+    e.add_field(name="根因", value=_clip(r.get("root_cause")), inline=False)
+    e.add_field(name="證據", value=_clip(_bullets(r.get("evidence"))), inline=False)
+    if r.get("verdict") == "fixed":
+        e.add_field(name="修正", value=_clip(r.get("fix_summary")), inline=False)
+        stat = _clip(msg.get("diff_stat"), 1000 - 2 * len(_FENCE))
+        e.add_field(name="改動", value=f"{_FENCE}\n{stat}\n{_FENCE}", inline=False)
+    t = r.get("tests") or {}
+    e.add_field(name="測試", value=f"{t.get('passed', 0)} passed / {t.get('failed', 0)} failed", inline=True)
+    e.add_field(name="風險", value=_clip(r.get("risk"), 200), inline=True)
+    e.add_field(name="重現/驗證", value=_clip(r.get("probe")), inline=False)
+    if r.get("questions_for_human"):
+        e.add_field(name="需要你決定", value=_clip(_bullets(r["questions_for_human"])), inline=False)
+    if r.get("downgraded"):
+        e.add_field(name="降級原因", value=_clip(_bullets(r["downgraded"])), inline=False)
+    if msg.get("session_id"):
+        e.add_field(name="接手", value=f"`claude --resume {msg['session_id']}`", inline=False)
+    e.set_footer(text=f"🛠 autofix · superpowers {msg.get('superpowers_version') or '?'}")
+    return e
+
+
+def autofix_deploy_embed(msg: dict) -> discord.Embed:
+    """部署結果卡（回覆在報告卡底下）。"""
+    st = msg.get("status")
+    title = {"resolved": "🚀 已上線並驗證通過",
+             "failed": "↩️ 部署失敗，已回滾",
+             "reported": "⏸ 沒有部署（前置檢查沒過）"}.get(st, f"部署狀態：{st}")
+    e = discord.Embed(title=f"{title}（#{msg['incident_id']}）", color=COLOR_WARN)
+    desc = msg.get("message") or ""
+    if msg.get("log_tail"):
+        desc += f"\n{_FENCE}\n{msg['log_tail'][-1500:]}\n{_FENCE}"
+    e.description = _clip(desc, 4000)
+    e.set_footer(text=f"🛠 autofix · 階段 {msg.get('stage') or '?'}")
+    return e
+
+
+def autofix_escalated_embed(msg: dict) -> discord.Embed:
+    """修好不到 7 天又壞：不再自動修，請人接手。"""
+    e = discord.Embed(title=_clip(f"🙋 #{msg['incident_id']} {msg.get('title')}", 256), color=COLOR_WARN)
+    e.description = ("上次自動修正上線不到 7 天，同一個問題又出現了——這次不再自動修，"
+                     "請開 session 看看。")
+    return e
