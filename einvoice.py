@@ -154,7 +154,7 @@ def _login_landing(url: str, body: str) -> str:
     """
     if any(kw in body for kw in _SEARCH_KEYWORDS):
         return "search"
-    if "/portal/btc/" in url and "登出" in body:
+    if "/portal/btc/" in url and "登入" in body:
         return "elsewhere"
     return "unknown"
 
