@@ -14,6 +14,23 @@ sensor=$(field sensor); title=$(field title); escalated=$(field escalated)
 emit() { # $1=json 檔內容 → outbox（原子）
   printf '%s' "$1" > "$AF/outbox/.$id-$2.tmp" && mv "$AF/outbox/.$id-$2.tmp" "$AF/outbox/$id-$2.json"; }
 
+# 事件已經搬出 inbox：之後任何一步失敗都要發卡，不然事件卡在 dispatched、沒人知道
+on_fail() {
+  python3 - "$id" "$title" "$1" "$(tail -c 800 "$AF/state/$id.claude.err" 2>/dev/null)" > "$AF/outbox/.$id-report.tmp" <<'PY'
+import json, sys
+i, title, line, err = sys.argv[1:5]
+print(json.dumps({"type": "report", "incident_id": int(i), "title": title, "diff_file": None,
+                  "diff_stat": "", "session_id": None, "superpowers_version": "?",
+                  "report": {"verdict": "inconclusive", "root_cause": "", "evidence": [err] if err else [],
+                             "fix_summary": "", "files_changed": [], "tests": {"passed": 0, "failed": 0},
+                             "probe": "", "risk": "", "questions_for_human": [],
+                             "downgraded": [f"autofix/run.sh 第 {line} 行失敗，Claude 沒有跑完（看 journalctl --user -u linebot-autofix-run）"]}},
+                 ensure_ascii=False))
+PY
+  mv "$AF/outbox/.$id-report.tmp" "$AF/outbox/$id-report.json"
+}
+trap 'on_fail $LINENO' ERR
+
 if [ "$escalated" = "True" ]; then
   emit "$(python3 -c 'import json,sys;d=json.load(open(sys.argv[1]));print(json.dumps({"type":"escalated","incident_id":d["id"],"title":d["title"],"context":d["context"]},ensure_ascii=False))' "$inbox")" escalated
   exit 0
