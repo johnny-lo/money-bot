@@ -9,7 +9,10 @@ rm -f "$f"
 WT="$(dirname "$REPO")/linebot-autofix-$id"; BR="autofix/$id"
 DRY="${AUTOFIX_DRY_RUN:-}"
 
-cleanup_branch() { git -C "$REPO" worktree remove --force "$WT" 2>/dev/null; git -C "$REPO" branch -D "$BR" >/dev/null 2>&1; }
+cleanup_branch() {
+  # 保險：worktree 裡若殘留容器（root）寫的檔，先還給主機使用者，不然 worktree remove 會失敗
+  [ -d "$WT" ] && [ -z "$DRY" ] && docker run --rm -v "$WT":/w money-bot chown -R "$(id -u):$(id -g)" /w >/dev/null 2>&1
+  git -C "$REPO" worktree remove --force "$WT" 2>/dev/null; git -C "$REPO" branch -D "$BR" >/dev/null 2>&1; }
 emit() { # status stage message [log_tail]
   python3 - "$id" "$1" "$2" "$3" "${4:-}" > "$AF/outbox/.$id-deploy.tmp" <<'PY'
 import json, sys

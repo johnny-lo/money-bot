@@ -7,14 +7,16 @@ WT="$(pwd)"
 case "$(basename "$WT")" in linebot-autofix-*) ;; *) echo "只能在 autofix worktree 裡執行" >&2; exit 2;; esac
 id="${WT##*linebot-autofix-}"
 kind="${1:-}"; shift || true
-common=(--rm -v "$WT":/app -v "$AF":/probes-root/autofix:ro -w /app
+common=(--rm -v "$WT":/app -v "$AF":/probes-root/autofix:ro -w /app -e OWNER="$(id -u):$(id -g)"
         -e DATABASE_URL=postgresql://none:none@127.0.0.1:1/none -e PYTHONPATH=/probes-root)
+# 容器是 root：跑完把 worktree（.autofix-probe/、__pycache__…）擁有者還給主機使用者
+own='rc=$?; chown -R "$OWNER" /app; exit $rc'
 case "$kind" in
   einvoice)
     docker run "${common[@]}" -v "$AF/state":/state -e AUTOFIX_INCIDENT="$id" \
       --env-file <(grep -E '^(EINVOICE_(PHONE|PASSWORD)_[0-9]|GEMINI_API_KEY|MODEL_NAME|GEMINI_FALLBACK_MODELS)=' "$REPO/.env") \
-      money-bot python /probes-root/autofix/probes/einvoice_probe.py "$@" ;;
+      money-bot sh -c "python /probes-root/autofix/probes/einvoice_probe.py \"\$@\"; $own" sh "$@" ;;
   extract)
-    docker run "${common[@]}" money-bot python /probes-root/autofix/probes/extract_probe.py "$@" ;;
+    docker run "${common[@]}" money-bot sh -c "python /probes-root/autofix/probes/extract_probe.py \"\$@\"; $own" sh "$@" ;;
   *) echo "用法：probe einvoice --carrier N [--days D] | probe extract <url>" >&2; exit 2 ;;
 esac

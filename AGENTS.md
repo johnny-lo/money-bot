@@ -402,6 +402,9 @@
   把指令改寫成 `rtk docker ps` 並直接放行。所以 `claude-settings.template.json` 必須 `"disableAllHooks": true`，
   deny 也補上 `rtk` 變體。**改白名單後一定要重跑 plan Task 10 Step 4 的煙霧測試**，別相信設定檔「看起來對」。
   另外 `Write(...)` deny 規則無效，`Edit(...)` 才涵蓋所有寫檔工具。
+- **一次性容器是 root，會在 worktree 留下 root 擁有的 `__pycache__`/`.autofix-probe/`** → `git worktree remove` 刪一半就失敗，
+  而且會先把 git metadata 刪掉，留下一個不是 repo 的殘骸目錄（煙霧測試時真的發生）。`bin/test`、`bin/probe` 結束前在容器內
+  `chown -R` 還給主機使用者；`deploy.sh` 清理前再 chown 一次當保險。
 - 非 `fixed` 的事件**保留 worktree**（`../linebot-autofix-<id>`），讓 `claude --resume` 能回原目錄接手；處理完手動
   `git worktree remove`。
 
