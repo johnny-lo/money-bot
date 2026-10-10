@@ -51,6 +51,10 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── bin/test         # 一次性容器跑 worktree 的 import 預檢＋全套測試；附拋棄式 Postgres（--internal 網路，不能對外；main.py import 時就 create_all）
 │   ├── bin/probe        # Claude 唯一能碰外部網站的路：一次性容器（不接 compose 網路→連不到正式 DB）跑**主目錄唯讀**的 probes/*.py；`probe einvoice --carrier N`、`probe extract <url>`
 │   ├── probes/guard.py  # 登入預算安全帶：patch Playwright，在網路層數「帶手機號碼送往財政部的非 GET 請求」，每事件 >3 次直接 abort（Claude 改 worktree 程式也繞不過）；guard 永遠最後註冊=最先比對；browser 關閉前自動存頁面（遮罩手機/email）到 .autofix-probe/。測 tests/test_autofix_probe_guard.py（含真 Chromium 攔截）
+│   ├── deploy.sh        # 主機：approved/<id>.deploy → 前置檢查（目錄乾淨、可乾淨合併，否則回報 reported 保留按鈕）→ merge --no-ff → import 預檢 → 全套測試 → restart → 等 startup → `python -m autofix.verify <id>`；任一步失敗 revert -m 1 + 重啟。.abandon → 清 worktree/分支。不 push
+│   ├── verify.py        # 上線驗證（正式容器內）：einvoice＝該載具實抓一次；extract＝當初失敗網址過半抽得到；scheduler＝待下次排程確認；drill＝登入落地測試。測 tests/test_autofix_verify.py
+│   ├── drill.py / drill.patch  # 演習：`python -m autofix.drill` 觸發 drill 事件；run.sh 在 worktree 套 drill.patch（把 _login_landing 的「登出」改「登入」）讓 Claude 修
+│   └── install.sh       # 主機：mkdir 交接目錄（inbox/approved/outbox/state，gitignore）+ 連結並啟用 scripts/systemd/linebot-autofix-{inbox,deploy}.path
 ├── persona.md           # AI 角色設定（**本機私人檔,.gitignore 不入版控**）。gemini.py 找不到就退回 `persona.example.md`,全新 clone 也能跑。判斷基準是**四桶（投資/固定/生活/爽）桶位**而非金額大小;摘要沒帶桶位資訊時**預設沒超支、禁止說教**（舊版只看金額→每筆稍大的都被念）。寫法與踩過的坑見 persona.example.md
 ├── resource/            # Discord 頻道歡迎 banner 圖（手動放入，由 _setup_discord 一次性上傳；已 .gitignore 不入版本控制）
 ├── food/
@@ -169,6 +173,8 @@ LINE/Discord 訊息
 | daily_invoice_sync | 週一 ~ 週六 21:00 | `_daily_invoice_with_notify()` — `sync_with_backfill()` 智能補拓 + 通知 Discord `#🧾-發票通知`（含「新增明細」second embed；失敗改發失敗卡） |
 | weekly_pipeline | 週日 21:00 | `_weekly_pipeline()` — 一條龍：(1) 補拓+通知 → (2) `run_weekly_categorization()` → (3) `notify_weekly_summary()` 週報。**每月第一個週日**（即 `day ≤ 7` 的週日）會額外串接 (4) `notify_monthly_summary()` 推上月完整月結 |
 | startup_catchup | 開機後 3 分鐘（一次性 `date` job） | `_startup_catchup()` — 背景補拓一次（機器關了又開盡快追上）；只在有新發票或失敗才發卡 |
+
+> 所有排程 job 都掛了 autofix 監聽器（`_autofix_job_listener`，EVENT_JOB_ERROR|EXECUTED）：同簽名連 3 次例外 → 自動修復；成功一次歸零。
 
 ## Category Schema (categorize.py)
 

@@ -72,7 +72,7 @@ hit_count, hit_keys(JSON：去重鍵), context(JSON), first_seen, last_seen, ver
 | 感測器 | 簽名 | 去重鍵 | 門檻 | 恢復判定 |
 |---|---|---|---|---|
 | `einvoice_login` | `載具{n}` | 台北日曆日 | 3 個不同日 | 該載具登入成功 → clear |
-| `scheduler_job` | `job_id + 例外類別 + 最內層 repo 檔案:行號` | 每次執行時間 | 連 3 次 | 該 job 成功一次 → clear |
+| `scheduler_job` | `job_id + 例外類別 + 最內層 repo 檔案:函式名`（不用行號：修正會讓行號漂移） | 每次執行時間 | 連 3 次 | 該 job 成功一次 → clear |
 | `link_extract` | `模組 + 平台`（`links.py` 分類） | 網址 | 7 天內 3 條不同網址 | 同模組同平台抽取成功 → clear |
 
 前置修正：`_login` 全敗改拋 `LoginFailed`，補拓記為失敗、高水位不推進。

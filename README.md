@@ -255,6 +255,35 @@ journalctl --user -u linebot-healthcheck -n 30
 
 其他指令：`--status`（看狀態檔）、`--reset`（解除「已停手」閂鎖）、`--help`。
 
+### 🛠 自動修復（持續性 bug 自動喚醒 Claude Code）
+
+同一個問題**持續發生**時，主機上的 Claude Code 會被自動叫醒：在隔離的 git worktree 裡照
+`superpowers:systematic-debugging` 找根因、照 TDD 修好，把 debug 報告丟到 Discord `#🛠-自動修復`。
+**不會自己上線**——你在手機上按 **✅ 部署** 才合併、測試、重啟、上線驗證；任何一步失敗自動 revert 回合併前。
+
+| 感測器 | 觸發條件 |
+|---|---|
+| 發票登入失敗 | 同一載具 3 個不同日子都登入失敗 |
+| 排程任務例外 | 同一個 job 以同一種例外連續失敗 3 次 |
+| 連結抽取失敗 | 同一模組同一平台（IG、Threads…）7 天內 3 條不同網址抽取失敗 |
+
+報告卡三種結論：**✅ 修好了**（附 diff、測試、重現結果，有部署/放棄鈕）／**🙋 需要你處理**（根因不在程式：密碼過期、帳號被鎖、外部服務掛了）／
+**❓ 沒找到可靠的修正**（附已排除的假設）。每張卡附 `claude --resume <id>` 讓你接手細看。
+
+**安全邊界**：部署鈕只有 `AUTOFIX_OWNER_USER_ID` 按得動、7 天內有效；Claude 只能在 worktree 內改後端 Python 與文件，
+不能碰 docker、`.env`、前端、`git push/merge`、上網；碰真實網站只能經 `autofix/bin/probe`，
+**財政部登入每事件最多 3 次，在網路層強制**（帳號累計 40 次錯誤會被鎖）；宣稱修好但測試沒全綠／沒 commit／改到禁區，一律降級不給部署鈕；
+修好不到 7 天又壞 → 不再自動修，直接請你處理。部署不會 push。
+
+**安裝**：
+```bash
+bash autofix/install.sh                       # 建交接目錄 + 安裝 systemd user units
+# .env 加 AUTOFIX_ENABLED=1、AUTOFIX_CHANNEL_ID、AUTOFIX_OWNER_USER_ID
+docker compose up -d                          # env 變更要 up -d，不是 restart
+docker exec -w /app money-bot python -m autofix.drill   # 演習：故意弄壞一個函式，走完整流程
+```
+看進度：`journalctl --user -u linebot-autofix-run -f`、`journalctl --user -u linebot-autofix-deploy -f`。
+
 ### `/healthz`
 
 ```

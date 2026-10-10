@@ -1,0 +1,8 @@
+[Unit]
+Description=Money Bot 自動修復：合併、驗證、上線（失敗自動回滾）
+
+[Service]
+Type=oneshot
+ExecStart=%h/Desktop/linebot/autofix/deploy.sh
+TimeoutStartSec=15min
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin

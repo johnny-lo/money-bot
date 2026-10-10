@@ -1,0 +1,9 @@
+[Unit]
+Description=Money Bot 自動修復：使用者按了部署/放棄
+
+[Path]
+PathExistsGlob=%h/Desktop/linebot/autofix/approved/*
+Unit=linebot-autofix-deploy.service
+
+[Install]
+WantedBy=default.target

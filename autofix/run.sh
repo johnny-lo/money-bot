@@ -47,7 +47,7 @@ sed "s#__AF__#$AF#g" "$AF/claude-settings.template.json" > "$AF/state/$id.settin
 prompt=$(cd "$REPO" && python3 -m autofix.prompt "$inbox" "$AF")
 CLAUDE=claude; [ "${AUTOFIX_DRY_RUN:-}" = 1 ] && CLAUDE="$AF/testing/fake-claude.sh"
 ( cd "$WT" && timeout 45m "$CLAUDE" -p "$prompt" --max-turns 60 --output-format json \
-    --permission-mode acceptEdits --settings "$AF/state/$id.settings.json" ) \
+    --permission-mode acceptEdits --settings "$AF/state/$id.settings.json" < /dev/null ) \
   > "$AF/state/$id.claude.json" 2> "$AF/state/$id.claude.err" || true
 sp=$(ls -1 "$HOME/.claude/plugins/cache/claude-plugins-official/superpowers/" 2>/dev/null | sort -V | tail -1)
 out=$(cd "$REPO" && python3 -m autofix.report finalize --id "$id" --worktree "$WT" --branch "$BR" \

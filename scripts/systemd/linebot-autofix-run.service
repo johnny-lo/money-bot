@@ -1,0 +1,10 @@
+[Unit]
+Description=Money Bot 自動修復：處理一個 inbox 事件（worktree + claude -p）
+
+[Service]
+Type=oneshot
+ExecStart=%h/Desktop/linebot/autofix/run.sh
+# claude 本身 timeout 45m；留 5 分鐘給 worktree 與報告
+TimeoutStartSec=50min
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Nice=10
