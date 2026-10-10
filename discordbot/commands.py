@@ -167,11 +167,15 @@ def register_commands(bot) -> None:
     @app_commands.describe(店名="店名", 區域="縣市/城市（幫助定位，選填）", 推薦品項="想吃什麼（選填）")
     async def cmd_food_add(ix: discord.Interaction, 店名: str, 區域: str = "", 推薦品項: str = ""):
         await ix.response.defer()
-        from food.places import search_text
+        from food.places import search_text, PlacesUnavailable
         from food.repo import upsert_place
         query = f"{店名} {區域}".strip()
         try:
             place = search_text(query)
+        except PlacesUnavailable as ex:
+            # 跟下面的「找不到」分開：服務不可用時叫人換店名是錯的建議
+            await ix.followup.send(embed=error_embed(f"{ex}，不是店名的問題，稍後再試"))
+            return
         except Exception as ex:
             await ix.followup.send(embed=error_embed(f"查 Google 失敗：{ex}"))
             return

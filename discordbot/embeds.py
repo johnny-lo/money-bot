@@ -324,8 +324,17 @@ def food_batch_summary_embed(buckets: dict) -> discord.Embed:
         if len(review) > 15:
             lines.append(f"　…還有 {len(review) - 15} 家")
     fail = buckets.get("fail") or []
+    unavailable = buckets.get("unavailable") or 0
     if fail:
-        lines.append(f"❌ 找不到 {len(fail)} 家（加上地區再重貼）：")
+        # 服務掛掉時不能叫人「加上地區再重貼」——那是對「Google 查無此店」的建議，
+        # 這裡是根本沒問到 Google，重貼幾次都一樣。
+        if unavailable >= len(fail):
+            lines.append(f"❌ {len(fail)} 家沒入庫：Google 服務暫時不可用，稍後整批重貼即可：")
+        elif unavailable:
+            lines.append(f"❌ 沒入庫 {len(fail)} 家（其中 {unavailable} 家是 Google 服務不可用，"
+                         f"其餘加上地區再重貼）：")
+        else:
+            lines.append(f"❌ 找不到 {len(fail)} 家（加上地區再重貼）：")
         for raw in fail[:15]:
             lines.append(f"　· 「{raw}」")
         if len(fail) > 15:

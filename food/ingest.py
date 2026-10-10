@@ -10,7 +10,7 @@ import re
 import asyncio
 from food import extract
 from food.links import classify_platform
-from food.places import search_text, caution_for_place_id
+from food.places import search_text, caution_for_place_id, PlacesUnavailable
 from food.repo import upsert_place, update_caution, set_visited
 
 
@@ -40,6 +40,10 @@ def _from_fields(fields: dict, *, source_url: str | None) -> tuple[dict | None, 
     query = f"{name} {fields.get('area') or ''}".strip()
     try:
         place = search_text(query)
+    except PlacesUnavailable as ex:
+        # 「服務掛了」跟「查無此店」給的建議完全相反——後者叫你加地區重試，
+        # 前者你重試一百次也一樣。訊息裡不能出現「找不到」。
+        return None, f"{ex}，不是這家店的問題，稍後再試"
     except Exception as ex:
         return None, f"查 Google 失敗：{ex}"
     if not place:
@@ -198,15 +202,23 @@ def _resolve_one(fields: dict, status: str, content: str) -> dict:
     name = (fields.get("name") or "").strip()
     if not name:
         return {"bucket": "fail", "place": None, "fields": fields,
-                "status": status, "raw": content}
+                "status": status, "raw": content, "unavailable": False}
     query = f"{name} {fields.get('area') or ''}".strip()
+    unavailable = False
     try:
         place = search_text(query)
-    except Exception:
+    except PlacesUnavailable:
+        # 原本這裡是 `except Exception: place = None`，於是服務掛掉時
+        # 整批都變成「❌ 找不到（加上地區再重貼）」——照做一百次也不會成功。
+        # search_text 已經印過 log，這裡只負責把「不是使用者的錯」帶出去。
+        place = None
+        unavailable = True
+    except Exception as ex:
+        print(f"⚠️ 批次正名失敗「{query}」：{ex}", flush=True)
         place = None
     bucket = bucket_line(fields, place)
     return {"bucket": bucket, "place": place, "fields": fields,
-            "status": status, "raw": content}
+            "status": status, "raw": content, "unavailable": unavailable}
 
 
 async def batch_from_text(blob: str) -> dict:
@@ -218,14 +230,16 @@ async def batch_from_text(blob: str) -> dict:
       "wishlist": int, "visited": int,   # 想去/去過計數（標題用）
       "ok": int,                   # ✅ 高信心家數（已入庫,預設只給計數）
       "review": list[dict],        # ⚠️ 需確認：[{id, raw_name, resolved_name}]
-      "fail": list[str],           # ❌ 找不到：[原始該行文字]
+      "fail": list[str],           # ❌ 沒入庫：[原始該行文字]
+      "unavailable": int,          # 其中「Google 服務不可用」造成的（不是查無此店）
       "error": str | None,         # 整批 codex 掛掉 → 一句訊息,其餘欄位空
     }
     """
     lines = split_lines(blob)
     kept, dropped = take_capped(lines)
     base = {"total_lines": len(kept), "dropped": dropped, "wishlist": 0,
-            "visited": 0, "ok": 0, "review": [], "fail": [], "error": None}
+            "visited": 0, "ok": 0, "review": [], "fail": [],
+            "unavailable": 0, "error": None}
     if not kept:
         return base
 
@@ -264,6 +278,8 @@ async def batch_from_text(blob: str) -> dict:
             continue
         if res["bucket"] == "fail":
             base["fail"].append(res["raw"])
+            if res.get("unavailable"):
+                base["unavailable"] += 1
             continue
         resolved.append(res)
 
