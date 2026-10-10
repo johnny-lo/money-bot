@@ -1,0 +1,9 @@
+[Unit]
+Description=Money Bot 自動修復：inbox 有事件就喚醒 Claude
+
+[Path]
+PathExistsGlob=%h/Desktop/linebot/autofix/inbox/*.json
+Unit=linebot-autofix-run.service
+
+[Install]
+WantedBy=default.target

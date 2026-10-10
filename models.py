@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Date, Float, ForeignKey, func
+from sqlalchemy import Column, Integer, String, DateTime, Date, Float, ForeignKey, JSON, func
 from database import Base
 
 class Transaction(Base):
@@ -145,3 +145,21 @@ class InvoiceSyncState(Base):
     id = Column(Integer, primary_key=True)             # 永遠 1
     last_covered_date = Column(Date, nullable=True)    # 已成功涵蓋到的最後一天（含）；NULL=尚未 bootstrap
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+class AutofixIncident(Base):
+    """自動修復事件（autofix/）。一個 (sensor, signature) 同時最多一筆未結案。"""
+    __tablename__ = "autofix_incidents"
+
+    id = Column(Integer, primary_key=True)
+    sensor = Column(String(40), nullable=False, index=True)       # einvoice_login / scheduler_job / link_extract / drill
+    signature = Column(String(300), nullable=False, index=True)   # 同一個 bug 的身分證
+    title = Column(String(200), nullable=False)
+    status = Column(String(20), nullable=False, default="counting", index=True)
+    hit_keys = Column(JSON, nullable=False, default=list)         # [[去重鍵, iso 時間], ...]
+    context = Column(JSON, nullable=False, default=dict)          # 感測器給的現場資料
+    first_seen = Column(DateTime, default=func.now())
+    last_seen = Column(DateTime, default=func.now())
+    verdict = Column(String(20), nullable=True)                   # fixed / needs_human / inconclusive
+    report_message_id = Column(String(30), nullable=True)         # 報告卡的 Discord message id（結果回覆在它底下）
+    reported_at = Column(DateTime, nullable=True)
+    closed_at = Column(DateTime, nullable=True)

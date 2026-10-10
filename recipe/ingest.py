@@ -8,6 +8,7 @@
 """
 from food.links import classify_platform
 from food.extract import from_url as _extract_from_url
+from autofix import sensors
 from recipe import repo
 from recipe.extract import name_from_text
 
@@ -25,7 +26,9 @@ def from_url(url: str, *, caption: str = "") -> tuple[dict | None, str]:
     try:
         blob = _extract_from_url(url, platform)
     except Exception as ex:
+        sensors.extract_failed("recipe", platform, url, ex)
         return None, f"連結抽取失敗：{ex}"
+    sensors.extract_ok("recipe", platform)
 
     # None-blob guard（比照 food/ingest.py:77）
     pieces = [p for p in (caption.strip() if caption else "", blob or "") if p]

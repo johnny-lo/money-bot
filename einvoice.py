@@ -38,6 +38,14 @@ UA = (
 MAX_CAPTCHA_RETRIES = 4
 
 
+class LoginFailed(RuntimeError):
+    """登入全部嘗試都失敗。attempts＝每次嘗試一行摘要（不含帳密），給 log 與自動修復當現場。"""
+
+    def __init__(self, attempts: list[str]):
+        self.attempts = attempts
+        super().__init__("登入失敗：" + " | ".join(attempts[-4:]))
+
+
 # ─────────────────── 品名格式化 ───────────────────
 
 def is_code(name: str) -> bool:
@@ -170,79 +178,96 @@ async def _goto_search_page(page) -> str:
 
 
 async def _login(page, phone: str, password: str) -> bool:
+    """成功回 True；全部失敗拋 LoginFailed（不再回 False——回 False 會被當成「0 張」）。"""
+    attempts: list[str] = []
     for attempt in range(1, MAX_CAPTCHA_RETRIES + 1):
         print(f"🔐 登入嘗試 {attempt}/{MAX_CAPTCHA_RETRIES}")
-        await _enter_login_flow(page)
         try:
-            captcha, captcha_img = await _solve_captcha(page)
-            print(f"   CAPTCHA: {captcha}")
-        except Exception as e:
-            print(f"   ⚠️ 辨識失敗：{e}")
-            continue
-
-        await page.fill("#mobile_phone", phone)
-        await page.fill("#password", password)
-        await page.fill("#captcha", captcha)
-        await page.click("#submitBtn")
-
-        # 等 URL 連續 3 秒沒變才算穩定（OAuth 會多次 redirect）
-        last_url = page.url
-        stable = 0
-        for _ in range(30):
-            await page.wait_for_timeout(1000)
-            try:
-                cur = page.url
-            except Exception:
-                continue
-            if cur == last_url:
-                stable += 1
-                if stable >= 3:
-                    break
-            else:
-                stable = 0
-                last_url = cur
-        try:
-            await page.wait_for_load_state("domcontentloaded", timeout=5000)
-        except PWTimeout:
-            pass
-        await page.wait_for_timeout(1000)
-
-        url = page.url
-        body = ""
-        for _ in range(5):
-            try:
-                body = await page.locator("body").inner_text()
-                break
-            except Exception:
-                await page.wait_for_timeout(1500)
-
-        err = await _detect_error(page)
-
-        if "系統訊息" in body and ("409" in body or "已過期" in body):
-            print("   ⚠️ 撞到 409，重試")
-            continue
-        if "/accounts/login" in url:
-            print(f"   ❌ 留在登入頁：{err or '(無錯誤元素)'}")
-            if err and ("密碼" in err or "帳號" in err) and "驗證碼" not in err:
-                return False
-            continue
-        landing = _login_landing(url, body)
-        if landing == "elsewhere":
-            print(f"   ↪️ 已登入但落在 {url}，改走發票查詢頁")
-            try:
-                body = await _goto_search_page(page)
-                landing = _login_landing(page.url, body)
-            except Exception as e:
-                print(f"   ⚠️ 轉往查詢頁失敗：{e}")
-            url = page.url
-        if landing == "search":
-            print(f"   ✅ 登入成功")
-            # 登入成功 = 這個驗證碼答案確定正確，現在才存樣本（best-effort，不影響回傳）。
-            # 這是「哪天財政部改字型」的保險：有標好的樣本才重訓得起來。
-            captcha_ocr.save_sample(captcha_img, captcha)
+            ok, note = await _login_attempt(page, phone, password, attempt)
+        except Exception as e:   # 例：session 已登入時等不到登入頁 → timeout
+            ok, note = None, f"第{attempt}次例外：{type(e).__name__}: {str(e)[:120]}"
+            print(f"   ⚠️ {note}")
+        if ok is True:
             return True
-        print(f"   ❓ 未知狀態 URL={url}，重試")
-    return False
+        attempts.append(note)
+        if ok is False:
+            break
+    raise LoginFailed(attempts)
+
+
+async def _login_attempt(page, phone: str, password: str, attempt: int) -> tuple[bool | None, str]:
+    """單次登入嘗試。回 (True, …) 成功／(False, …) 帳密錯誤別再試／(None, 摘要) 可重試。"""
+    await _enter_login_flow(page)
+    try:
+        captcha, captcha_img = await _solve_captcha(page)
+        print(f"   CAPTCHA: {captcha}")
+    except Exception as e:
+        print(f"   ⚠️ 辨識失敗：{e}")
+        return None, f"第{attempt}次：驗證碼辨識失敗：{e}"
+
+    await page.fill("#mobile_phone", phone)
+    await page.fill("#password", password)
+    await page.fill("#captcha", captcha)
+    await page.click("#submitBtn")
+
+    # 等 URL 連續 3 秒沒變才算穩定（OAuth 會多次 redirect）
+    last_url = page.url
+    stable = 0
+    for _ in range(30):
+        await page.wait_for_timeout(1000)
+        try:
+            cur = page.url
+        except Exception:
+            continue
+        if cur == last_url:
+            stable += 1
+            if stable >= 3:
+                break
+        else:
+            stable = 0
+            last_url = cur
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=5000)
+    except PWTimeout:
+        pass
+    await page.wait_for_timeout(1000)
+
+    url = page.url
+    body = ""
+    for _ in range(5):
+        try:
+            body = await page.locator("body").inner_text()
+            break
+        except Exception:
+            await page.wait_for_timeout(1500)
+
+    err = await _detect_error(page)
+
+    if "系統訊息" in body and ("409" in body or "已過期" in body):
+        print("   ⚠️ 撞到 409，重試")
+        return None, f"第{attempt}次：撞到 409"
+    if "/accounts/login" in url:
+        print(f"   ❌ 留在登入頁：{err or '(無錯誤元素)'}")
+        if err and ("密碼" in err or "帳號" in err) and "驗證碼" not in err:
+            return False, f"第{attempt}次：帳密錯誤：{err}"
+        return None, f"第{attempt}次：留在登入頁：{err or '(無錯誤元素)'}"
+    landing = _login_landing(url, body)
+    if landing == "elsewhere":
+        print(f"   ↪️ 已登入但落在 {url}，改走發票查詢頁")
+        try:
+            body = await _goto_search_page(page)
+            landing = _login_landing(page.url, body)
+        except Exception as e:
+            print(f"   ⚠️ 轉往查詢頁失敗：{e}")
+        url = page.url
+    if landing == "search":
+        print(f"   ✅ 登入成功")
+        # 登入成功 = 這個驗證碼答案確定正確，現在才存樣本（best-effort，不影響回傳）。
+        # 這是「哪天財政部改字型」的保險：有標好的樣本才重訓得起來。
+        captcha_ocr.save_sample(captcha_img, captcha)
+        return True, "登入成功"
+    print(f"   ❓ 未知狀態 URL={url}，重試")
+    return None, f"第{attempt}次：未知狀態 URL={url}"
 
 
 _DETAIL_MODAL = ".modal_barcode_detail.show"
@@ -477,8 +502,7 @@ async def _scrape_carrier(phone: str, password: str, days: int, headless: bool =
         )
         page = await ctx.new_page()
         try:
-            if not await _login(page, phone, password):
-                return []
+            await _login(page, phone, password)   # 失敗拋 LoginFailed，由呼叫端記失敗
             if month:
                 await _set_query_month(page, month[0], month[1])
             await page.locator("button.blue_btn", has_text="查詢").first.click()

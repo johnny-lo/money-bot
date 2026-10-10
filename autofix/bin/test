@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# 一次性容器跑 worktree 的 import 預檢＋全套測試。
+# main.py 在 import 時就 create_all → 需要一個 DB：開一個拋棄式 Postgres 在 --internal 網路上（不能對外）。
+set -euo pipefail
+WT="$(pwd)"
+case "$(basename "$WT")" in linebot-autofix-*) ;; *) echo "只能在 autofix worktree 裡執行" >&2; exit 2;; esac
+tag="af-$(basename "$WT")-$$"
+cleanup() { docker rm -f "$tag-db" >/dev/null 2>&1 || true; docker network rm "$tag" >/dev/null 2>&1 || true; }
+trap cleanup EXIT
+docker network create --internal "$tag" >/dev/null
+docker run -d --name "$tag-db" --network "$tag" -e POSTGRES_PASSWORD=t -e POSTGRES_USER=t -e POSTGRES_DB=t postgres:15-alpine >/dev/null
+for _ in $(seq 1 30); do docker exec "$tag-db" pg_isready -U t >/dev/null 2>&1 && break; sleep 1; done
+# 容器是 root：結束前把 worktree 擁有者還給主機使用者，否則 __pycache__ 等 root 檔讓 git worktree remove 失敗
+docker run --rm --network "$tag" -v "$WT":/app -w /app \
+  -e DATABASE_URL="postgresql://t:t@$tag-db:5432/t" -e OWNER="$(id -u):$(id -g)" money-bot \
+  sh -c 'python -c "import main" >/dev/null && echo "IMPORT_OK" && python -m pytest tests/ -q -p no:cacheprovider; rc=$?; chown -R "$OWNER" /app; exit $rc'

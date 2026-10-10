@@ -386,6 +386,39 @@
 - **解法**：`datetime.now(scheduler.timezone)`。
 - **教訓**：容器時區 ≠ 排程時區時，**丟給排程器的時間一律帶 tz**；`grep missed` 是這類 bug 唯一的痕跡。
 
+### 自動修復（autofix/）的邊界——改它之前先讀
+- **交接目錄只能由主機建立**（`autofix/install.sh`）。容器是 root，它建的目錄主機使用者刪不掉
+  → `incidents.py` 遇到目錄不存在只印 log、不 `mkdir`。
+- **DB 只有容器寫**。主機（`run.sh`/`deploy.sh`）只寫 `autofix/outbox/`，由 bot 每 30 秒輪詢後轉換事件狀態。
+  別讓主機腳本 `docker exec` 去改 DB——兩個寫入者遲早打架。
+- **Claude 碰外部世界只能經 `autofix/bin/probe`**，probe 跑的是**主目錄唯讀副本**的 harness，
+  所以 Claude 改 worktree 程式繞不過登入預算。`autofix/` 整個是 Claude 的禁區，也是這個原因。
+- 新 env（`AUTOFIX_*`）一樣要進 `docker-compose.yml` 白名單，套用要 `docker compose up -d`（見上一條坑）。
+- 排程例外簽名是 `job|例外類別|檔案:函式`，**刻意不含行號**：修正一定會讓行號漂移，同一個 bug 會變成新簽名，
+  防循環（修好 7 天內再犯就升級人工）就失效了。
+- `run.sh` 把事件搬出 inbox 後任何一步失敗都靠 ERR trap 發 `inconclusive` 卡——拿掉 trap，事件會永遠卡在 dispatched 且沒人知道
+  （DRY_RUN 時真的發生過：drill.patch 還不存在）。
+- 🔴 **PreToolUse hook 會繞過權限白名單**：煙霧測試時 deny 清單有 `Bash(docker:*)`，`docker ps` 卻成功——全域的 RTK hook
+  把指令改寫成 `rtk docker ps` 並直接放行。所以 `claude-settings.template.json` 必須 `"disableAllHooks": true`，
+  deny 也補上 `rtk` 變體。**改白名單後一定要重跑 plan Task 10 Step 4 的煙霧測試**，別相信設定檔「看起來對」。
+  另外 `Write(...)` deny 規則無效，`Edit(...)` 才涵蓋所有寫檔工具。
+- **一次性容器是 root，會在 worktree 留下 root 擁有的 `__pycache__`/`.autofix-probe/`** → `git worktree remove` 刪一半就失敗，
+  而且會先把 git metadata 刪掉，留下一個不是 repo 的殘骸目錄（煙霧測試時真的發生）。`bin/test`、`bin/probe` 結束前在容器內
+  `chown -R` 還給主機使用者；`deploy.sh` 清理前再 chown 一次當保險。
+- 🔴 **Claude Code 的讀取權限是黑名單制**：allow `Read(//<worktree>/**)` 不代表 worktree 外讀不到——煙霧測試時
+  worktree 外的 canary、主目錄 README 全讀得到（寫入倒是確實被鎖在 worktree 內）。deny 優先於 allow，
+  所以 worktree 若在家目錄底下就沒辦法 deny `//home/**`。解法：**worktree 放 `/var/tmp`**，再 deny 整個 `//home/**`、
+  `//tmp/**`、`//root/**`——實測主目錄、其他專案、`/etc` 都讀不到，git／bin/test／probe 照常（它們是子行程，不受工具權限規則管）。
+  bash 的 `head`/`git diff --no-index`/`git diff --output=` 能讀寫任意路徑 → git 只開固定形式指令，不開 head/tail/find。
+- **probe 的登入預算有兩層，真正的上限在主機端**：容器裡的 guard 跟被測程式同一個行程、有網路，擋得住「不小心的重試迴圈」，
+  擋不住刻意繞過的程式。所以 `bin/probe einvoice` 在主機端計數（每事件 3 次呼叫，`state/<id>.probe_calls`，容器看不到），
+  每次容器只放行 1 次送出、只帶該載具一組帳密、`timeout 6m`。`probe extract` 只准事件 `context.urls` 裡的網址（不然就是任意對外 GET）。
+- **任何讓事件卡在 dispatched/deploying 的路徑都會讓那個簽名的感測器永遠失聲**（busy 狀態＝noop）。現有防線：
+  先寫 inbox 成功才標 dispatched、先寫核可檔成功才標 deploying、outbox 發卡失敗就結案 inconclusive、run.sh 的 ERR+TERM trap、
+  deploy.sh 合併後的 TERM trap（逾時被砍＝自動回滾）。新增狀態轉換時照這個原則：**先做會失敗的副作用，成功才改狀態**。
+- 非 `fixed` 的事件**保留 worktree**（`/var/tmp/linebot-autofix-<id>`），讓 `claude --resume` 能回原目錄接手；處理完手動
+  `git worktree remove`。
+
 ## 3. 資料庫的坑
 
 ### 坑：以為加欄位/表會自動生效

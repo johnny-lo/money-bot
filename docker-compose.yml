@@ -37,6 +37,10 @@ services:
       - EINVOICE_PASSWORD_1=${EINVOICE_PASSWORD_1}
       - EINVOICE_PHONE_2=${EINVOICE_PHONE_2}
       - EINVOICE_PASSWORD_2=${EINVOICE_PASSWORD_2}
+      # 自動修復（autofix/）：AUTOFIX_ENABLED=1 才啟用感測器；報告頻道與唯一能按部署的人
+      - AUTOFIX_ENABLED=${AUTOFIX_ENABLED:-}
+      - AUTOFIX_CHANNEL_ID=${AUTOFIX_CHANNEL_ID:-}
+      - AUTOFIX_OWNER_USER_ID=${AUTOFIX_OWNER_USER_ID:-}
     depends_on:
       - db
     volumes:

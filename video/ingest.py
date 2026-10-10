@@ -8,6 +8,7 @@
 """
 from food.links import classify_platform
 from food.extract import from_url as _extract_from_url
+from autofix import sensors
 from video import repo
 from video.extract import meta_from_text
 
@@ -22,7 +23,9 @@ def from_url(url: str, *, caption: str = "") -> tuple[dict | None, str]:
     try:
         blob = _extract_from_url(url, platform)
     except Exception as ex:
+        sensors.extract_failed("video", platform, url, ex)
         return None, f"連結抽取失敗：{ex}"
+    sensors.extract_ok("video", platform)
 
     pieces = [p for p in (caption.strip() if caption else "", blob or "") if p]
     text = "\n".join(pieces)

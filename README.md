@@ -75,7 +75,7 @@
 > **結構化輸出**：要抽欄位的呼叫（拍照記帳、分類、美食／食譜／影片抽取、推薦菜）都帶 JSON Schema——Gemini 走 `responseJsonSchema`、codex 走 `--output-schema`，退避鏈上不論哪一層接手，回來的都是同一個形狀的 JSON。
 
 ### 電子發票自動同步
-- **智能補拓（打卡高水位）** — 內部記錄「已成功涵蓋到哪一天」（`invoice_sync_state`）；每次同步自動算缺口並補抓：本月漏天加大查詢天數、跨月缺口逐月補（政府站限制同月查詢）。機器/網站關過幾天，恢復時自動把漏掉的天補回來，不再只抓前兩天。上限 60 天（更舊平台多半也查不到）。**全部載具全部月成功才推進高水位**；失敗則**在 `#🧾-發票通知` 發失敗卡 + 高水位不推進 + 下次自動重抓整段**（同張發票靠 `invoice_no` 去重，重抓安全）。
+- **智能補拓（打卡高水位）** — 內部記錄「已成功涵蓋到哪一天」（`invoice_sync_state`）；每次同步自動算缺口並補抓：本月漏天加大查詢天數、跨月缺口逐月補（政府站限制同月查詢）。機器/網站關過幾天，恢復時自動把漏掉的天補回來，不再只抓前兩天。上限 60 天（更舊平台多半也查不到）。**全部載具全部月成功才推進高水位**；失敗則**在 `#🧾-發票通知` 發失敗卡 + 高水位不推進 + 下次自動重抓整段**（同張發票靠 `invoice_no` 去重，重抓安全）。**登入失敗也算失敗**——不會被當成「這幾天沒有發票」默默跳過。
 - **週一 ~ 週六 21:00 自動補拓** 並把當次新增明細以 embed 推到 Discord `#🧾-發票通知`
 - **週日 21:00** 順序執行「補拓 → AI 分類 → 週報卡片」一條龍 pipeline，週報推到 `#📊-報表查詢`
 - **開機後 3 分鐘** 背景補拓一次（機器關了又開盡快追上；只在有新發票或失敗才發卡）
@@ -254,6 +254,35 @@ journalctl --user -u linebot-healthcheck -n 30
   那會走 MagicDNS，等於又在驗內網。
 
 其他指令：`--status`（看狀態檔）、`--reset`（解除「已停手」閂鎖）、`--help`。
+
+### 🛠 自動修復（持續性 bug 自動喚醒 Claude Code）
+
+同一個問題**持續發生**時，主機上的 Claude Code 會被自動叫醒：在隔離的 git worktree 裡照
+`superpowers:systematic-debugging` 找根因、照 TDD 修好，把 debug 報告丟到 Discord `#🛠-自動修復`。
+**不會自己上線**——你在手機上按 **✅ 部署** 才合併、測試、重啟、上線驗證；任何一步失敗自動 revert 回合併前。
+
+| 感測器 | 觸發條件 |
+|---|---|
+| 發票登入失敗 | 同一載具 3 個不同日子都登入失敗 |
+| 排程任務例外 | 同一個 job 以同一種例外連續失敗 3 次 |
+| 連結抽取失敗 | 同一模組同一平台（IG、Threads…）7 天內 3 條不同網址抽取失敗 |
+
+報告卡三種結論：**✅ 修好了**（附 diff、測試、重現結果，有部署/放棄鈕）／**🙋 需要你處理**（根因不在程式：密碼過期、帳號被鎖、外部服務掛了）／
+**❓ 沒找到可靠的修正**（附已排除的假設）。每張卡附 `claude --resume <id>` 讓你接手細看。
+
+**安全邊界**：部署鈕只有 `AUTOFIX_OWNER_USER_ID` 按得動、7 天內有效；Claude 只能在 worktree 內改後端 Python 與文件，
+worktree 放在 `/var/tmp`、讀取權限封鎖整個家目錄（讀不到你的其他專案、`.env`、憑證），不能碰 docker、前端、`git push/merge`、上網；碰真實網站只能經 `autofix/bin/probe`，
+**財政部登入每事件最多 3 次 probe、每次最多送出 1 次，由主機端計數**（帳號累計 40 次錯誤會被鎖；部署後的上線驗證另外會正常登入一次）；宣稱修好但測試沒全綠／沒 commit／改到禁區，一律降級不給部署鈕；
+修好不到 7 天又壞 → 不再自動修，直接請你處理。部署不會 push。
+
+**安裝**：
+```bash
+bash autofix/install.sh                       # 建交接目錄 + 安裝 systemd user units
+# .env 加 AUTOFIX_ENABLED=1、AUTOFIX_CHANNEL_ID、AUTOFIX_OWNER_USER_ID
+docker compose up -d                          # env 變更要 up -d，不是 restart
+docker exec -w /app money-bot python -m autofix.drill   # 演習：故意弄壞一個函式，走完整流程
+```
+看進度：`journalctl --user -u linebot-autofix-run -f`、`journalctl --user -u linebot-autofix-deploy -f`。
 
 ### `/healthz`
 

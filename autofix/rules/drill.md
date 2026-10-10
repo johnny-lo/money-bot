@@ -1,0 +1,2 @@
+- 這是演習：分支上有一個故意弄壞的 commit（`drill:` 開頭）。用 `bin/test` 找出哪裡壞、修好它（新 commit，不要 revert 那個 commit）。
+- 不需要 probe；`probe` 欄位寫測試轉綠的證據即可。

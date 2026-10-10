@@ -20,7 +20,8 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── embeds.py        # 全部 embed builders + 顏色常數 + fmt_money/fmt_dt（純呈現層）
 │   ├── ingest_handlers.py # 美食/食譜/圖片記帳的 on_message 處理（handle_food_message/handle_recipe_message/do_image_recording）
 │   ├── reports.py       # 週報/月報/發票通知：_query_period 彙總 + _generate_ai_comment + notify_*
-│   └── bridge.py        # sync→async 橋接：set_bot/post_embeds_sync（排程 thread 投遞 embeds）
+│   ├── bridge.py        # sync→async 橋接：set_bot/post_embeds_sync（排程 thread 投遞 embeds）
+│   └── autofix_ui.py    # 自動修復 Discord 端：`can_act`（只限 AUTOFIX_OWNER_USER_ID、狀態 reported、7 天內）、`AutofixButton`（DynamicItem，custom_id `autofix:deploy|abandon:<id>`，bot.setup_hook add_dynamic_items → 重啟後仍可按）、`process_outbox`（bot 每 30 秒輪詢 autofix/outbox/，同事件先報告後部署結果，壞檔改名 .bad）。測 tests/test_autofix_ui.py
 ├── gemini.py            # Gemini API 封裝：gemini_image(model=, schema=)（單次呼叫；schema → generationConfig.responseJsonSchema）、gemini_text()、generate_persona_comment()（錢鼠阿財記帳評論，走 Gemini 文字）。
 │                        # **影像一律走 vision_text()**：MODEL_NAME → GEMINI_FALLBACK_MODELS 逐個退避 →（allow_codex=True 才）codex_image。
 │                        # validate= 可傳「答案合不合格」檢查——模型拒答時是 HTTP 200 回一段道歉文，不驗內容退避會有一半是假的
@@ -37,8 +38,23 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── tests/               # pytest 測試。跑法：`docker compose exec app pytest tests/ -v`
 ├── recurring.py         # 固定收支：run_daily_recurring() 每日自動寫入到期項目
 ├── auth.py              # 認證兩層：短效報表 token(30min,in-memory)generate/validate_report_token + PWA 長效裝置 token(DB,無期限,記 last_used_at)create/validate/revoke_device_token。require_token 收 query token 或 X-Device-Token header 擇一。**短效 token 帶 `can_mint_device` 旗標**(`report_token_can_mint_device()` 查詢,預設 False)：LINE/Discord 發的邀請函 True,PWA 用裝置 token 鑄來開報表頁的那顆 False——否則 device→short→device 成環,`routes/device.py`「洩漏的裝置 token 無法自我繁殖」就不成立。測 tests/test_report_token.py
-├── einvoice.py          # 財政部電子發票同步：Playwright 登入 → CAPTCHA(Gemini) → 抓發票 → 寫 transactions。`sync_invoices()` 回傳 `{"summary": str, "new_items": list[dict]}`，支援多組載具（EINVOICE_PHONE_1/2 + PASSWORD_1/2）。**明細逐品項抓取**：清單與明細同一 SPA URL，明細開在 Bootstrap modal；`_parse_current_page` 對每筆「點號碼→等 modal→`_fetch_detail_items`(限定 modal 內品名表)→`_close_detail_modal`(關 modal,**嚴禁 go_back**)→下一筆」，故每張發票的每個品項各寫一筆 transaction（抓不到明細才退化成賣方+總額一筆）。回歸測試 tests/test_einvoice_detail.py（Playwright 靜態 fixture，主機無 Playwright 則 skip）。**歷史月份回填**：`_scrape_carrier(..., month=(y,m))` 用 `_set_query_month` 操作 vue-datepicker 把查詢區間設成『單月』(政府站限制每次查詢須同月，跨月會被擋)；翻頁用 `_NEXT_PAGE_FIND/_NEXT_PAGE_CLICK`(Bootstrap `a.page-link「下一頁」`，舊版 aria-label/rel=next 從沒中過 → 多頁只抓第 1 頁)。回歸測 tests/test_einvoice_pagination.py。**`_save_invoices()` 兩條寫入路徑（逐品項 / 抓不到明細的保底）都會存 `seller`＝賣方原始全名**（不是 `simplify_seller()` 的結果——簡化有損且讀取時隨時能做，原始值沒存就救不回來；空字串→NULL）。寫入契約測 tests/test_invoice_seller.py。**登入落地判斷**：`_login_landing(url, body)` 分 search／elsewhere／unknown——財政部可能把帳號導到資料設定頁（btc508w），已登入（有「登出」）就由 `_goto_search_page` 點「發票查詢及捐贈」轉去查詢頁，測 tests/test_einvoice_login_landing.py
+├── einvoice.py          # 財政部電子發票同步：Playwright 登入 → CAPTCHA(Gemini) → 抓發票 → 寫 transactions。`sync_invoices()` 回傳 `{"summary": str, "new_items": list[dict]}`，支援多組載具（EINVOICE_PHONE_1/2 + PASSWORD_1/2）。**明細逐品項抓取**：清單與明細同一 SPA URL，明細開在 Bootstrap modal；`_parse_current_page` 對每筆「點號碼→等 modal→`_fetch_detail_items`(限定 modal 內品名表)→`_close_detail_modal`(關 modal,**嚴禁 go_back**)→下一筆」，故每張發票的每個品項各寫一筆 transaction（抓不到明細才退化成賣方+總額一筆）。回歸測試 tests/test_einvoice_detail.py（Playwright 靜態 fixture，主機無 Playwright 則 skip）。**歷史月份回填**：`_scrape_carrier(..., month=(y,m))` 用 `_set_query_month` 操作 vue-datepicker 把查詢區間設成『單月』(政府站限制每次查詢須同月，跨月會被擋)；翻頁用 `_NEXT_PAGE_FIND/_NEXT_PAGE_CLICK`(Bootstrap `a.page-link「下一頁」`，舊版 aria-label/rel=next 從沒中過 → 多頁只抓第 1 頁)。回歸測 tests/test_einvoice_pagination.py。**`_save_invoices()` 兩條寫入路徑（逐品項 / 抓不到明細的保底）都會存 `seller`＝賣方原始全名**（不是 `simplify_seller()` 的結果——簡化有損且讀取時隨時能做，原始值沒存就救不回來；空字串→NULL）。寫入契約測 tests/test_invoice_seller.py。**登入落地判斷**：`_login_landing(url, body)` 分 search／elsewhere／unknown——財政部可能把帳號導到資料設定頁（btc508w），已登入（有「登出」）就由 `_goto_search_page` 點「發票查詢及捐贈」轉去查詢頁，測 tests/test_einvoice_login_landing.py。**登入全敗拋 `LoginFailed(attempts)`**（`_login` 逐次呼叫 `_login_attempt` 回 True/False/None；以前全敗回 `[]` 被當「抓 0 張成功」、高水位照推→漏抓），補拓記失敗、高水位不推進，測 tests/test_einvoice_login_failed.py
 ├── invoice_backfill.py  # 發票智能補拓：`build_month_plan(gap_start,today)`(純函式,缺口拆逐月查詢計畫,政府站同月限制)、`get/set_last_covered`(invoice_sync_state 高水位 repo)、`sync_with_backfill(today=None)`(算缺口→`_scrape_one` 複用 einvoice `_scrape_carrier`/`_save_invoices`→去重存→全成功才推進高水位;失敗回 failures、不推進)。BACKFILL_CAP_DAYS=60、bootstrap=today-1。測 tests/test_invoice_backfill.py(純 plan + monkeypatch 編排)
+├── autofix/             # 自動修復流水線（spec: docs/superpowers/specs/2026-10-10-autofix-pipeline-design.md）：持續性 bug 到門檻 → 喚醒主機 Claude 修 → Discord 核可 → 部署
+│   ├── policy.py        # 純函式決策：`decide(latest Snapshot, key, now, Policy)`→noop/new/count/dispatch/escalate；門檻 `POLICIES`、修好 7 天內再犯升級人工、`merge_context`。測 tests/test_autofix_policy.py
+│   ├── incidents.py     # DB 外殼：`raise_incident(sensor,signature,title,context,dedupe_key)`（with_for_update 鎖列防重複派發；到門檻原子寫 `autofix/inbox/<id>.json`）、`clear(prefix=)`、`get`、`mark`。**對外函式全吞例外**（感測器不能讓業務失敗）；`AUTOFIX_ENABLED!=1` 全 no-op；交接目錄不存在只印 log 不建立。測 tests/test_autofix_incidents.py
+│   ├── sensors.py       # 三種感測器：`login_failed/login_ok`（invoice_backfill 捕 LoginFailed，台北日期去重，同載具其他月份直接 break 不燒登入次數）、`extract_failed/extract_ok`（food/recipe/video ingest 抽取點，網址去重、簽名 模組:平台）、`job_failed/job_ok`（main.py APScheduler EVENT_JOB_ERROR|EXECUTED 監聽器；簽名 `job|例外|檔案:函式` 刻意不含行號）。測 tests/test_autofix_sensors.py
+│   ├── prompt.md / rules/<sensor>.md / prompt.py  # Claude 的 prompt：明確載入 superpowers systematic-debugging→TDD→verification、無頭改寫（不能問人→questions_for_human）、可用指令與禁區、各感測器重現規則。prompt.py **只用 stdlib**（主機 python3 跑）
+│   ├── report.py        # **stdlib only**：`validate` 把「宣稱 fixed 但測試沒全綠/沒 commit/改到禁區」降級 inconclusive；`finalize` 讀 worktree 的 .autofix-report.json + git 資訊 → outbox 訊息與 state/<id>.diff。測 tests/test_autofix_report.py
+│   ├── claude-settings.template.json  # claude -p 權限白名單（__AF__ 由 run.sh 代換）：只准讀/編輯 worktree、git 唯讀+commit、bin/test、bin/probe、Skill；禁 docker/.env/push/merge/上網/AskUserQuestion
+│   ├── run.sh           # 主機：取最舊 inbox → git worktree `/var/tmp/linebot-autofix-<id>`（放家目錄外才能 deny Read //home/**；drill 先套 drill.patch）→ timeout 45m claude -p → report.py finalize → outbox。AUTOFIX_DRY_RUN=1 用 testing/fake-claude.sh
+│   ├── bin/test         # 一次性容器跑 worktree 的 import 預檢＋全套測試；附拋棄式 Postgres（--internal 網路，不能對外；main.py import 時就 create_all）
+│   ├── bin/probe        # Claude 唯一能碰外部網站的路：一次性容器（不接 compose 網路→連不到正式 DB）跑**主目錄唯讀**的 probes/*.py；`probe einvoice --carrier N`、`probe extract <url>`
+│   ├── probes/guard.py  # 登入預算安全帶：patch Playwright，在網路層數「帶手機號碼送往財政部的非 GET 請求」，每事件 >3 次直接 abort（Claude 改 worktree 程式也繞不過）；guard 永遠最後註冊=最先比對；browser 關閉前自動存頁面（遮罩手機/email）到 .autofix-probe/。測 tests/test_autofix_probe_guard.py（含真 Chromium 攔截）
+│   ├── deploy.sh        # 主機：approved/<id>.deploy → 前置檢查（目錄乾淨、可乾淨合併，否則回報 reported 保留按鈕）→ merge --no-ff → import 預檢 → 全套測試 → restart → 等 startup → `python -m autofix.verify <id>`；任一步失敗 revert -m 1 + 重啟。.abandon → 清 worktree/分支。不 push
+│   ├── verify.py        # 上線驗證（正式容器內）：einvoice＝該載具實抓一次；extract＝當初失敗網址過半抽得到；scheduler＝待下次排程確認；drill＝登入落地測試。測 tests/test_autofix_verify.py
+│   ├── drill.py / drill.patch  # 演習：`python -m autofix.drill` 觸發 drill 事件；run.sh 在 worktree 套 drill.patch（把 _login_landing 的「登出」改「登入」）讓 Claude 修
+│   └── install.sh       # 主機：mkdir 交接目錄（inbox/approved/outbox/state，gitignore）+ 連結並啟用 scripts/systemd/linebot-autofix-{inbox,deploy}.path
 ├── persona.md           # AI 角色設定（**本機私人檔,.gitignore 不入版控**）。gemini.py 找不到就退回 `persona.example.md`,全新 clone 也能跑。判斷基準是**四桶（投資/固定/生活/爽）桶位**而非金額大小;摘要沒帶桶位資訊時**預設沒超支、禁止說教**（舊版只看金額→每筆稍大的都被念）。寫法與踩過的坑見 persona.example.md
 ├── resource/            # Discord 頻道歡迎 banner 圖（手動放入，由 _setup_discord 一次性上傳；已 .gitignore 不入版本控制）
 ├── food/
@@ -112,6 +128,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 | `device_tokens` | id(PK), token(UNIQUE index), label?, created_at, last_used_at? | PWA 長效裝置 token；撤銷=刪列（auth.revoke_device_token） |
 | `food_photos` | id(PK), food_place_id(FK→food_places.id, ON DELETE CASCADE, index), path(str, media/ 相對路徑), source("app"/"bot"/"google"), created_at | 店家照片；檔案在 media/，DB 只記路徑 |
 | `invoice_sync_state` | id(PK,恆1), last_covered_date(Date?), updated_at | 發票打卡高水位（單列）；已成功涵蓋到的最後一天，驅動智能補拓 |
+| `autofix_incidents` | id, sensor, signature, title, status, hit_keys(JSON), context(JSON), first_seen, last_seen, verdict, report_message_id, reported_at, closed_at | 自動修復事件；同 (sensor, signature) 同時最多一筆未結案。新表，開機 create_all 自動建 |
 | `history_videos` | id(PK), title(str), url(str, UNIQUE 去重鍵), topic(str?, index, 主分類書架), channel(str?, v1 不自動填), platform(str?), discord_message_id(str?, index), created_at | 歷史教學影片；topic=單一書架 |
 | `video_tags` | id(PK), video_id(FK→history_videos.id, ON DELETE CASCADE, index), tag(str, index) | 影片標籤（去正規化多對多）：標籤直接存字串，查=WHERE tag=?、全部=DISTINCT tag |
 
@@ -156,6 +173,8 @@ LINE/Discord 訊息
 | daily_invoice_sync | 週一 ~ 週六 21:00 | `_daily_invoice_with_notify()` — `sync_with_backfill()` 智能補拓 + 通知 Discord `#🧾-發票通知`（含「新增明細」second embed；失敗改發失敗卡） |
 | weekly_pipeline | 週日 21:00 | `_weekly_pipeline()` — 一條龍：(1) 補拓+通知 → (2) `run_weekly_categorization()` → (3) `notify_weekly_summary()` 週報。**每月第一個週日**（即 `day ≤ 7` 的週日）會額外串接 (4) `notify_monthly_summary()` 推上月完整月結 |
 | startup_catchup | 開機後 3 分鐘（一次性 `date` job） | `_startup_catchup()` — 背景補拓一次（機器關了又開盡快追上）；只在有新發票或失敗才發卡 |
+
+> 所有排程 job 都掛了 autofix 監聽器（`_autofix_job_listener`，EVENT_JOB_ERROR|EXECUTED）：同簽名連 3 次例外 → 自動修復；成功一次歸零。
 
 ## Category Schema (categorize.py)
 
@@ -235,6 +254,8 @@ LINE/Discord 訊息
 ## Environment Variables
 
 BASE_URL (對外網址，報表/地圖連結用；未設=ngrok 保留域名), LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, GEMINI_FALLBACK_MODELS (optional, 逗號分隔；影像辨識退避鏈，留空=沒有備援), CAPTCHA_SAMPLE_DIR (optional, 預設 data/captcha), CAPTCHA_SAMPLE_MAX_BYTES (optional, 預設 1GB；樣本目錄上限，超過從最舊刪起), CODEX_MODEL (optional, 留空=用 ~/.codex/config.toml 設定的模型), MONTHLY_BUDGET (optional, 0/不設=不顯示預算進度), DISCORD_BOT_TOKEN (optional), DISCORD_INVOICE_CHANNEL_ID (optional), DISCORD_REPORT_CHANNEL_ID (optional), DISCORD_RECORD_CHANNEL_ID (optional), EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional), GOOGLE_PLACES_SERVER_KEY (美食地圖；後端 Places API New 用), FOOD_INGEST_CHANNEL_ID (美食地圖；#美食輸入 頻道), RECIPE_INGEST_CHANNEL_ID (optional; #🍳-食譜 頻道；未設則食譜分支不啟用，不影響美食/記帳), HISTORY_VIDEO_INGEST_CHANNEL_ID (optional; #📜-歷史教學 頻道；未設則影片分支不啟用), GOOGLE_MAPS_BROWSER_KEY (美食地圖 Phase 2；前端 Maps JS,限 ngrok referrer), GOOGLE_MAPS_MAP_ID (美食地圖 Phase 2；AdvancedMarker 必需,未申請填 DEMO_MAP_ID), HEALTHCHECK_DISCORD_WEBHOOK (optional; 對外健康檢查告警,沒設就只寫 log), HEALTHCHECK_FAIL_THRESHOLD / HEALTHCHECK_RESOLVER / HEALTHCHECK_FUNNEL_PORT (optional; 預設 2 / 1.1.1.1 / 8000)
+
+自動修復：AUTOFIX_ENABLED（1＝啟用感測器）, AUTOFIX_CHANNEL_ID（報告頻道）, AUTOFIX_OWNER_USER_ID（唯一能按部署的人）——容器讀，已進 docker-compose.yml 白名單；改了要 `docker compose up -d`。
 
 > ⚠️ `HEALTHCHECK_*` 是**主機上的 `scripts/healthcheck.sh` 讀的，不是容器讀的** → 刻意**不**寫進 `docker-compose.yml` 的 `environment:`（跟上面那條「channel ID 忘了寫進 compose」的坑方向相反，這裡是刻意不寫）。腳本只從 `.env` 挑 `BASE_URL` 與 `HEALTHCHECK_DISCORD_WEBHOOK` 兩個 key，**不 source 整個檔**（避免把一堆金鑰灌進環境、也避免執行檔案內容）。
 

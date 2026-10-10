@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Claude 唯一能碰外部網站的路。一次性容器、掛 worktree 為 /app、跑主目錄的 probe（唯讀）。
+# 不接 compose 網路 → 連不到正式 DB。
+#
+# 邊界（在主機端強制，容器裡跑的 worktree 程式改不到）：
+# - einvoice：只能測這個事件的那一個載具、只帶那一組帳密（不帶 Gemini key）；
+#   每事件最多呼叫 3 次（主機端計數檔，容器看不到），每次容器內 guard 只放行 1 次登入送出。
+#   ⚠️ 容器內的 guard 擋得住「不小心的重試迴圈」，擋不住刻意繞過的程式（同一個行程、有網路）——
+#   真正的上限是這裡的呼叫次數 × 每次的容器 timeout。
+# - extract：只准抽事件 context.urls 裡記錄的網址（不能拿來對任意網址送資料）。
+set -euo pipefail
+AF="$(cd "$(dirname "$0")/.." && pwd)"; REPO="$(dirname "$AF")"
+WT="$(pwd)"
+case "$(basename "$WT")" in linebot-autofix-*) ;; *) echo "只能在 autofix worktree 裡執行" >&2; exit 2;; esac
+id="${WT##*linebot-autofix-}"
+inbox="$AF/state/$id.inbox.json"
+[ -f "$inbox" ] || { echo "找不到事件 #$id 的現場資料" >&2; exit 2; }
+kind="${1:-}"; shift || true
+common=(--rm -v "$WT":/app -v "$AF":/probes-root/autofix:ro -w /app -e OWNER="$(id -u):$(id -g)"
+        -e DATABASE_URL=postgresql://none:none@127.0.0.1:1/none -e PYTHONPATH=/probes-root)
+# 容器是 root：跑完把 worktree（.autofix-probe/、__pycache__…）擁有者還給主機使用者
+own='rc=$?; chown -R "$OWNER" /app; exit $rc'
+case "$kind" in
+  einvoice)
+    [ "${1:-}" = "--carrier" ] && [ -n "${2:-}" ] || { echo "用法：probe einvoice --carrier N [--days D]" >&2; exit 2; }
+    n="$2"
+    want=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("signature",""))' "$inbox")
+    [ "$want" = "載具$n" ] || { echo "這個事件是「$want」，不能測載具$n" >&2; exit 2; }
+    budget="$AF/state/$id.probe_calls"
+    used=$(cat "$budget" 2>/dev/null || echo 0)
+    [ "$used" -lt 3 ] || { echo "⛔ 這個事件的 einvoice probe 已用完 3 次（每次最多送出 1 次登入），不能再試" >&2; exit 3; }
+    echo $((used + 1)) > "$budget"
+    timeout 6m docker run "${common[@]}" -e AUTOFIX_INCIDENT="$id" -e PROBE_CARRIER="$n" \
+      --env-file <(grep -E "^EINVOICE_(PHONE|PASSWORD)_${n}=" "$REPO/.env") \
+      money-bot sh -c "python /probes-root/autofix/probes/einvoice_probe.py \"\$@\"; $own" sh "$@" ;;
+  extract)
+    url="${1:-}"
+    python3 -c 'import json,sys;sys.exit(0 if sys.argv[2] in (json.load(open(sys.argv[1])).get("context",{}).get("urls") or []) else 1)' "$inbox" "$url" \
+      || { echo "只能抽這個事件記錄過的網址（context.urls）" >&2; exit 2; }
+    timeout 3m docker run "${common[@]}" money-bot sh -c "python /probes-root/autofix/probes/extract_probe.py \"\$@\"; $own" sh "$url" ;;
+  *) echo "用法：probe einvoice --carrier N [--days D] | probe extract <事件記錄過的網址>" >&2; exit 2 ;;
+esac

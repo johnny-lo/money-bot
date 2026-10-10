@@ -153,7 +153,7 @@ def test_login_saves_sample_only_after_success():
     """樣本只在登入成功後存——那一刻才確定答案是對的。辨識完就存會存進錯的標註。"""
     import inspect
     import einvoice
-    src = inspect.getsource(einvoice._login)
+    src = inspect.getsource(einvoice._login_attempt)   # 單次嘗試的成功分支
     assert "save_sample" in src
     save_pos = src.index("save_sample")
     ok_pos = src.index("登入成功")

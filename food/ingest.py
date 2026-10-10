@@ -12,6 +12,7 @@ from food import extract
 from food.links import classify_platform
 from food.places import search_text, caution_for_place_id, PlacesUnavailable
 from food.repo import upsert_place, update_caution, set_visited
+from autofix import sensors
 
 
 def from_image(image_bytes: bytes, mime_type: str = "image/jpeg",
@@ -79,7 +80,9 @@ def from_url(url: str, *, caption: str = "") -> tuple[dict | None, str]:
     try:
         blob = extract.from_url(url, platform)
     except Exception as ex:
+        sensors.extract_failed("food", platform, url, ex)
         return None, f"連結抽取失敗:{ex}"
+    sensors.extract_ok("food", platform)
     pieces = [p for p in (caption.strip() if caption else "", blob or "") if p]
     if pieces:
         text = "\n".join(pieces)
