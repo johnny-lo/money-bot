@@ -20,7 +20,8 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── embeds.py        # 全部 embed builders + 顏色常數 + fmt_money/fmt_dt（純呈現層）
 │   ├── ingest_handlers.py # 美食/食譜/圖片記帳的 on_message 處理（handle_food_message/handle_recipe_message/do_image_recording）
 │   ├── reports.py       # 週報/月報/發票通知：_query_period 彙總 + _generate_ai_comment + notify_*
-│   └── bridge.py        # sync→async 橋接：set_bot/post_embeds_sync（排程 thread 投遞 embeds）
+│   ├── bridge.py        # sync→async 橋接：set_bot/post_embeds_sync（排程 thread 投遞 embeds）
+│   └── autofix_ui.py    # 自動修復 Discord 端：`can_act`（只限 AUTOFIX_OWNER_USER_ID、狀態 reported、7 天內）、`AutofixButton`（DynamicItem，custom_id `autofix:deploy|abandon:<id>`，bot.setup_hook add_dynamic_items → 重啟後仍可按）、`process_outbox`（bot 每 30 秒輪詢 autofix/outbox/，同事件先報告後部署結果，壞檔改名 .bad）。測 tests/test_autofix_ui.py
 ├── gemini.py            # Gemini API 封裝：gemini_image(model=, schema=)（單次呼叫；schema → generationConfig.responseJsonSchema）、gemini_text()、generate_persona_comment()（錢鼠阿財記帳評論，走 Gemini 文字）。
 │                        # **影像一律走 vision_text()**：MODEL_NAME → GEMINI_FALLBACK_MODELS 逐個退避 →（allow_codex=True 才）codex_image。
 │                        # validate= 可傳「答案合不合格」檢查——模型拒答時是 HTTP 200 回一段道歉文，不驗內容退避會有一半是假的
@@ -240,6 +241,8 @@ LINE/Discord 訊息
 ## Environment Variables
 
 BASE_URL (對外網址，報表/地圖連結用；未設=ngrok 保留域名), LINE_CHANNEL_SECRET, LINE_CHANNEL_ACCESS_TOKEN, DATABASE_URL, GEMINI_API_KEY, MODEL_NAME, GEMINI_FALLBACK_MODELS (optional, 逗號分隔；影像辨識退避鏈，留空=沒有備援), CAPTCHA_SAMPLE_DIR (optional, 預設 data/captcha), CAPTCHA_SAMPLE_MAX_BYTES (optional, 預設 1GB；樣本目錄上限，超過從最舊刪起), CODEX_MODEL (optional, 留空=用 ~/.codex/config.toml 設定的模型), MONTHLY_BUDGET (optional, 0/不設=不顯示預算進度), DISCORD_BOT_TOKEN (optional), DISCORD_INVOICE_CHANNEL_ID (optional), DISCORD_REPORT_CHANNEL_ID (optional), DISCORD_RECORD_CHANNEL_ID (optional), EINVOICE_PHONE_1, EINVOICE_PASSWORD_1, EINVOICE_PHONE_2 (optional), EINVOICE_PASSWORD_2 (optional), GOOGLE_PLACES_SERVER_KEY (美食地圖；後端 Places API New 用), FOOD_INGEST_CHANNEL_ID (美食地圖；#美食輸入 頻道), RECIPE_INGEST_CHANNEL_ID (optional; #🍳-食譜 頻道；未設則食譜分支不啟用，不影響美食/記帳), HISTORY_VIDEO_INGEST_CHANNEL_ID (optional; #📜-歷史教學 頻道；未設則影片分支不啟用), GOOGLE_MAPS_BROWSER_KEY (美食地圖 Phase 2；前端 Maps JS,限 ngrok referrer), GOOGLE_MAPS_MAP_ID (美食地圖 Phase 2；AdvancedMarker 必需,未申請填 DEMO_MAP_ID), HEALTHCHECK_DISCORD_WEBHOOK (optional; 對外健康檢查告警,沒設就只寫 log), HEALTHCHECK_FAIL_THRESHOLD / HEALTHCHECK_RESOLVER / HEALTHCHECK_FUNNEL_PORT (optional; 預設 2 / 1.1.1.1 / 8000)
+
+自動修復：AUTOFIX_ENABLED（1＝啟用感測器）, AUTOFIX_CHANNEL_ID（報告頻道）, AUTOFIX_OWNER_USER_ID（唯一能按部署的人）——容器讀，已進 docker-compose.yml 白名單；改了要 `docker compose up -d`。
 
 > ⚠️ `HEALTHCHECK_*` 是**主機上的 `scripts/healthcheck.sh` 讀的，不是容器讀的** → 刻意**不**寫進 `docker-compose.yml` 的 `environment:`（跟上面那條「channel ID 忘了寫進 compose」的坑方向相反，這裡是刻意不寫）。腳本只從 `.env` 挑 `BASE_URL` 與 `HEALTHCHECK_DISCORD_WEBHOOK` 兩個 key，**不 source 整個檔**（避免把一堆金鑰灌進環境、也避免執行檔案內容）。
 

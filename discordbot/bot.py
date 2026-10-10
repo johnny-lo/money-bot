@@ -5,10 +5,12 @@ import time
 
 import discord
 from discord import app_commands
+from discord.ext import tasks
 
 from .bridge import set_bot
 from .commands import register_commands
 from . import ingest_handlers
+from . import autofix_ui
 
 # 非目標頻道圖片提示的防洗版：{channel_id: last_hint_ts}
 _HINT_DEBOUNCE: dict[int, float] = {}
@@ -24,7 +26,21 @@ class MoneyBot(discord.Client):
         register_commands(self)
 
     async def setup_hook(self):
+        self.add_dynamic_items(autofix_ui.AutofixButton)   # 自動修復報告卡按鈕：重啟後仍可按
         await self.tree.sync()
+        self._autofix_outbox.start()
+
+    @tasks.loop(seconds=30)
+    async def _autofix_outbox(self):
+        """主機（run.sh / deploy.sh）丟進 autofix/outbox/ 的結果 → 發卡、轉換事件狀態。"""
+        try:
+            await autofix_ui.process_outbox(self)
+        except Exception as e:
+            print(f"⚠️ autofix outbox 輪詢失敗：{e}", flush=True)
+
+    @_autofix_outbox.before_loop
+    async def _before_autofix_outbox(self):
+        await self.wait_until_ready()
 
     async def on_ready(self):
         # flush=True：stdout 在 container 內是塊緩衝，健康訊號要即時可見（AGENTS.md 健康檢查靠這行）
