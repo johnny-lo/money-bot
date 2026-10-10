@@ -135,6 +135,40 @@ async def _enter_login_flow(page):
         pass
 
 
+_SEARCH_KEYWORDS = ["發票清單", "查詢發票", "載具明細", "發票號碼", "消費時間"]
+
+
+def _login_landing(url: str, body: str) -> str:
+    """登入後落在哪：'search' 查詢頁／'elsewhere' 已登入但在別頁／'unknown'。
+
+    'elsewhere' 是實際踩過的坑：財政部會把帳號導到「資料設定／變更驗證碼(密碼)」
+    (btc508w)，登入其實成功，只是頁上沒有查詢關鍵字——舊邏輯當未知狀態重試到死。
+    """
+    if any(kw in body for kw in _SEARCH_KEYWORDS):
+        return "search"
+    if "/portal/btc/" in url and "登出" in body:
+        return "elsewhere"
+    return "unknown"
+
+
+async def _goto_search_page(page) -> str:
+    """從手機條碼專區任一頁點「發票查詢及捐贈」，回傳到站後的 body。
+
+    SPA 換頁後內容是慢慢畫出來的，URL 到了不代表查詢區塊在了 → 輪詢到關鍵字出現（最多 ~20 秒）。
+    """
+    await page.get_by_text("發票查詢及捐贈", exact=True).first.click()
+    body = ""
+    for _ in range(20):
+        await page.wait_for_timeout(1000)
+        try:
+            body = await page.locator("body").inner_text()
+        except Exception:
+            continue
+        if any(kw in body for kw in _SEARCH_KEYWORDS):
+            break
+    return body
+
+
 async def _login(page, phone: str, password: str) -> bool:
     for attempt in range(1, MAX_CAPTCHA_RETRIES + 1):
         print(f"🔐 登入嘗試 {attempt}/{MAX_CAPTCHA_RETRIES}")
@@ -192,7 +226,16 @@ async def _login(page, phone: str, password: str) -> bool:
             if err and ("密碼" in err or "帳號" in err) and "驗證碼" not in err:
                 return False
             continue
-        if any(kw in body for kw in ["發票清單", "查詢發票", "載具明細", "發票號碼", "消費時間"]):
+        landing = _login_landing(url, body)
+        if landing == "elsewhere":
+            print(f"   ↪️ 已登入但落在 {url}，改走發票查詢頁")
+            try:
+                body = await _goto_search_page(page)
+                landing = _login_landing(page.url, body)
+            except Exception as e:
+                print(f"   ⚠️ 轉往查詢頁失敗：{e}")
+            url = page.url
+        if landing == "search":
             print(f"   ✅ 登入成功")
             # 登入成功 = 這個驗證碼答案確定正確，現在才存樣本（best-effort，不影響回傳）。
             # 這是「哪天財政部改字型」的保險：有標好的樣本才重訓得起來。

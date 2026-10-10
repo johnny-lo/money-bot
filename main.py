@@ -220,8 +220,10 @@ def _startup_catchup():
 @app.on_event("startup")
 async def startup_event():
     scheduler.start()
+    # 必須帶排程器時區：容器是 UTC，naive now() 會被當台北時間解讀 → 排在 8 小時前 → 直接 missed
     scheduler.add_job(_startup_catchup, "date",
-                      run_date=datetime.now() + timedelta(minutes=3), id="startup_catchup")
+                      run_date=datetime.now(scheduler.timezone) + timedelta(minutes=3),
+                      id="startup_catchup")
     print(
         "⏰ 排程已啟動："
         "每日 00:05 固定收支 / "
