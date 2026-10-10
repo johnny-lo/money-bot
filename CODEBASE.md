@@ -49,6 +49,8 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── claude-settings.template.json  # claude -p 權限白名單（__AF__ 由 run.sh 代換）：只准讀/編輯 worktree、git 唯讀+commit、bin/test、bin/probe、Skill；禁 docker/.env/push/merge/上網/AskUserQuestion
 │   ├── run.sh           # 主機：取最舊 inbox → git worktree ../linebot-autofix-<id>（drill 先套 drill.patch）→ timeout 45m claude -p → report.py finalize → outbox。AUTOFIX_DRY_RUN=1 用 testing/fake-claude.sh
 │   ├── bin/test         # 一次性容器跑 worktree 的 import 預檢＋全套測試；附拋棄式 Postgres（--internal 網路，不能對外；main.py import 時就 create_all）
+│   ├── bin/probe        # Claude 唯一能碰外部網站的路：一次性容器（不接 compose 網路→連不到正式 DB）跑**主目錄唯讀**的 probes/*.py；`probe einvoice --carrier N`、`probe extract <url>`
+│   ├── probes/guard.py  # 登入預算安全帶：patch Playwright，在網路層數「帶手機號碼送往財政部的非 GET 請求」，每事件 >3 次直接 abort（Claude 改 worktree 程式也繞不過）；guard 永遠最後註冊=最先比對；browser 關閉前自動存頁面（遮罩手機/email）到 .autofix-probe/。測 tests/test_autofix_probe_guard.py（含真 Chromium 攔截）
 ├── persona.md           # AI 角色設定（**本機私人檔,.gitignore 不入版控**）。gemini.py 找不到就退回 `persona.example.md`,全新 clone 也能跑。判斷基準是**四桶（投資/固定/生活/爽）桶位**而非金額大小;摘要沒帶桶位資訊時**預設沒超支、禁止說教**（舊版只看金額→每筆稍大的都被念）。寫法與踩過的坑見 persona.example.md
 ├── resource/            # Discord 頻道歡迎 banner 圖（手動放入，由 _setup_discord 一次性上傳；已 .gitignore 不入版本控制）
 ├── food/

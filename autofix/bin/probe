@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Claude 唯一能碰外部網站的路。一次性容器、掛 worktree 為 /app、跑主目錄的 probe（唯讀）。
+# 不接 compose 網路 → 連不到正式 DB。
+set -euo pipefail
+AF="$(cd "$(dirname "$0")/.." && pwd)"; REPO="$(dirname "$AF")"
+WT="$(pwd)"
+case "$(basename "$WT")" in linebot-autofix-*) ;; *) echo "只能在 autofix worktree 裡執行" >&2; exit 2;; esac
+id="${WT##*linebot-autofix-}"
+kind="${1:-}"; shift || true
+common=(--rm -v "$WT":/app -v "$AF":/probes-root/autofix:ro -w /app
+        -e DATABASE_URL=postgresql://none:none@127.0.0.1:1/none -e PYTHONPATH=/probes-root)
+case "$kind" in
+  einvoice)
+    docker run "${common[@]}" -v "$AF/state":/state -e AUTOFIX_INCIDENT="$id" \
+      --env-file <(grep -E '^(EINVOICE_(PHONE|PASSWORD)_[0-9]|GEMINI_API_KEY|MODEL_NAME|GEMINI_FALLBACK_MODELS)=' "$REPO/.env") \
+      money-bot python /probes-root/autofix/probes/einvoice_probe.py "$@" ;;
+  extract)
+    docker run "${common[@]}" money-bot python /probes-root/autofix/probes/extract_probe.py "$@" ;;
+  *) echo "用法：probe einvoice --carrier N [--days D] | probe extract <url>" >&2; exit 2 ;;
+esac
