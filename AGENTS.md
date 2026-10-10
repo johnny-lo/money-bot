@@ -435,6 +435,27 @@
 - **教訓**：① 全螢幕 modal/bottom-sheet 用 `position: fixed` 而非 `absolute`+靠祖先當錨；
   ② 隱藏靠**自己 `overflow: hidden` 裁**，別假設「推到視窗外＝看不到」（手機可見區會變）。
 
+### 坑：ECharts 的 series `click` 在手機上等於「點不到」
+- **現象**：折線圖每一天都可點的設計，實測手指怎麼戳都沒反應；金額小的月份那根長條更是完全按不到。
+- **根因**：`chart.on('click', ...)` 只在**命中圖元本身**時觸發——折線是那顆直徑幾 px 的 symbol，
+  長條是那根高度可能只有兩三 px 的矩形。滑鼠勉強戳得中，手指不可能。
+- **解法**：改綁整張畫布，再把像素換算回「第幾格」：
+  ```js
+  chart.getZr().on('click', ev => {
+      const pt = [ev.offsetX, ev.offsetY];
+      if (!chart.containPixel('grid', pt)) return;          // 點在圖例/軸外不算
+      const idx = Math.round(chart.convertFromPixel({ seriesIndex: 0 }, pt)[0]);
+      const label = chart.getOption().xAxis[0].data[idx];
+      if (label === undefined) return;                       // 換算落在資料範圍外
+      ...
+  });
+  ```
+  點那一欄的**任何高度**都算，觸控目標從幾 px 變成整欄。圓餅切片夠大，維持 series click 即可。
+- **測試陷阱**：Playwright 的 `mouse.click(絕對座標)` **不會自動捲動**，圖表在視窗外就等於點空氣
+  （測起來跟「事件沒綁上」一模一樣）。用 `locator.click(position={...})`，它會先捲進視窗。
+  這次就是先誤判成「handler 沒綁」，查了一圈才發現是測試沒捲。
+- **教訓**：圖表上的「可點」要自己確認觸控目標有多大；驗證工具的行為差異會偽裝成功能 bug。
+
 ### 坑：ngrok 免費版攔截頁污染
 - **根因**：ngrok 免費版對瀏覽器導覽回攔截頁；`<img>` 帶不了 header。
 - **解法**：所有 API/fetch 帶 `ngrok-skip-browser-warning: true`；圖片靠 SW 攔截後重發帶 header

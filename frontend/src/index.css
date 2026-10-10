@@ -267,6 +267,8 @@ body {
   display: flex; align-items: center; justify-content: center; gap: 14px;
   padding: 10px 14px; position: sticky; top: 0; background: #f5f5f5; z-index: 5;
 }
+/* 報表鈕絕對定位到右上（sticky 本身就是 positioned，撐得住定位脈絡）——
+   擠進同一列會把「上月/月份/下月」推離置中。 */
 .spend-month { font-weight: 700; font-size: 1.05rem; min-width: 120px; text-align: center; }
 .spend-summary {
   display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
@@ -278,14 +280,49 @@ body {
 .val.income { color: #27ae60; }
 .val.expense { color: #e74c3c; }
 .spend-cats { margin: 0 14px 12px; padding: 12px; background: #fff; border-radius: 14px; }
-.cat-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 0.88rem; }
+/* 分類長條本身就是篩選器（點一條＝只看那個分類，再點一次取消）。
+   從 div 改成 button 是為了拿到鍵盤焦點與點擊語意，樣式得自己把按鈕的預設外觀清掉。 */
+.cat-row {
+  display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 0.88rem;
+  width: 100%; border: none; background: none; padding: 2px 4px;
+  border-radius: 8px; text-align: left; font: inherit; color: inherit;
+}
+.cat-row.active { background: #fdf0e4; }
+.cat-row.active .cat-name { font-weight: 700; color: var(--brand); }
 .cat-name { flex: 0 0 4.6em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cat-bar { flex: 1; height: 8px; background: #f0f0f0; border-radius: 4px; overflow: hidden; }
 .cat-fill { height: 100%; background: var(--brand); border-radius: 4px; }
 .cat-amt { flex: 0 0 5.2em; text-align: right; color: #555; }
 .ledger { margin: 0 14px; }
+/* 日期標頭也是篩選器（點一天＝只看那天）。同樣要清掉按鈕預設外觀。 */
 .ledger-day {
-  font-size: 0.8rem; color: #999; margin: 12px 4px 4px; font-weight: 600;
+  font-size: 0.8rem; color: #999; margin: 12px 0 4px; font-weight: 600;
+  border: none; background: none; padding: 2px 4px; border-radius: 8px;
+  font-family: inherit;
+}
+.ledger-day.active { background: #fdf0e4; color: var(--brand); }
+
+/* 右上角通往完整報表頁（圖表在那邊）。走 /api/report-token 換短效 token 再開新分頁。 */
+.report-link {
+  position: absolute; right: 14px;
+  border: none; background: #fff; border-radius: 10px;
+  padding: 6px 10px; font-size: 0.82rem; color: #555;
+}
+
+/* 篩選摘要列：有條件才出現（React 端條件渲染）。 */
+.filter-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin: 0 14px 12px; padding: 8px 10px;
+  background: #fdf0e4; border-radius: 12px; font-size: 0.8rem;
+}
+.filter-chip {
+  border: none; background: var(--brand); color: #fff;
+  border-radius: 12px; padding: 3px 10px; font-size: 0.78rem;
+}
+.filter-stats { color: #777; }
+.filter-clear {
+  margin-left: auto; border: none; background: none;
+  color: #999; font-size: 0.78rem; text-decoration: underline;
 }
 .ledger-row {
   display: flex; align-items: center; gap: 8px; width: 100%;

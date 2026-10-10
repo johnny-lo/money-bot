@@ -103,6 +103,24 @@
             outline: none;
         }
         .ledger-filter select:focus { background: #e3e7fb; }
+        /* 篩選摘要列：只有條件存在時才出現（.show）。
+           預設 display:none 而不是靠 JS 塞 style，避免載入瞬間閃一下空列。 */
+        .filter-bar {
+            display: none; align-items: center; gap: 8px; flex-wrap: wrap;
+            background: #eef1fd; border-radius: 8px;
+            padding: 8px 10px; margin-bottom: 10px; font-size: 0.82rem;
+        }
+        .filter-bar.show { display: flex; }
+        .filter-label { color: #4a6cf7; font-weight: 600; }
+        .filter-chip {
+            background: #4a6cf7; color: #fff; border: none; border-radius: 12px;
+            padding: 3px 10px; font-size: 0.78rem; cursor: pointer; margin-right: 4px;
+        }
+        .filter-stats { color: #555; }
+        .filter-clear {
+            margin-left: auto; background: none; border: none; color: #888;
+            font-size: 0.8rem; cursor: pointer; text-decoration: underline;
+        }
         .ledger-table {
             width: 100%;
             border-collapse: collapse;
@@ -238,6 +256,12 @@
                 </select>
             </div>
         </h2>
+        <div class="filter-bar" id="filterBar">
+            <span class="filter-label">篩選中</span>
+            <span id="filterChips"></span>
+            <span class="filter-stats" id="filterStats"></span>
+            <button class="filter-clear" onclick="clearConds()">清除</button>
+        </div>
         <table class="ledger-table">
             <thead>
                 <tr>
@@ -332,6 +356,7 @@ function updateUI() {
 
 function toggleAll() {
     isAllMode = !isAllMode;
+    dropDateConds();
     updateUI();
     loadAll();
 }
@@ -341,6 +366,7 @@ function changeMonth(delta) {
     currentMonth += delta;
     if (currentMonth > 12) { currentMonth = 1; currentYear++; }
     if (currentMonth < 1) { currentMonth = 12; currentYear--; }
+    dropDateConds();
     updateUI();
     loadMonthly();
     loadCategory();
@@ -460,24 +486,88 @@ async function loadSummary() {
 }
 
 let ledgerData = [];
-let ledgerFilter = 'all';
-let ledgerCategoryFilter = 'all';
 
-function setLedgerFilter(type) {
-    ledgerFilter = type;
+// 篩選條件 { type?, category?, day?, month? }：一個物件，不是三個各管各的變數。
+// 圖表點擊、上面那排鈕、分類下拉全部寫進這裡 —— 兩個真相來源遲早會打架
+// （「我明明選了飲食，怎麼點了日期又跑出別的分類」）。
+// 疊加/取消的語意住在共用純函式 LF（/report/ledger_filter.js，與 PWA 同一份檔）。
+let conds = {};
+
+function setCond(key, value) {
+    conds = LF.toggleCond(conds, key, value);
+    syncFilterControls();
+    renderLedger();
+}
+
+function clearConds() {
+    conds = {};
+    syncFilterControls();
+    renderLedger();
+}
+
+// 換月/切換全部月份時，日期類條件必須跟著丟掉 —— 留著「9/15」跳到 10 月
+// 會篩出空白，而使用者只會覺得「壞了」。分類與收支類型是跨月通用的，留著。
+function dropDateConds() {
+    conds = LF.toggleCond(LF.toggleCond(conds, 'day', ''), 'month', '');
+    syncFilterControls();
+}
+
+// 把 conds 回寫到那排鈕與下拉選單，讓控制項跟條件永遠一致
+// （圖表點擊也會改 conds，控制項不同步的話畫面會自相矛盾）。
+function syncFilterControls() {
+    const label = conds.type === 'expense' ? '支出' : conds.type === 'income' ? '收入' : '全部';
     document.querySelectorAll('.ledger-filter button').forEach(btn => {
         if (btn.classList.contains('btn-add')) return;
-        btn.classList.toggle('active', btn.textContent === (
-            type === 'all' ? '全部' : type === 'expense' ? '支出' : '收入'
-        ));
+        btn.classList.toggle('active', btn.textContent === label);
     });
-    renderLedger();
+    const sel = document.getElementById('categoryFilter');
+    const want = conds.category || 'all';
+    sel.value = [...sel.options].some(o => o.value === want) ? want : 'all';
+}
+
+function setLedgerFilter(type) {
+    setCond('type', type === 'all' ? '' : type);
 }
 
 function setCategoryFilter(cat) {
-    ledgerCategoryFilter = cat;
-    renderLedger();
+    setCond('category', cat === 'all' ? '' : cat);
 }
+
+// 圖表點擊 → 條件。點哪裡對應哪一維，跟 PWA 那邊同一套語意。
+function bindChartClicks() {
+    pieChart.on('click', p => setCond('category', p.name));
+    // 折線圖不綁 series click：那只有「正好戳中那顆小圓點」才算，手指在手機上戳不中。
+    // 改成整張畫布收 click，再把像素換算回 x 軸的第幾格 → 點那一欄的任何高度都算。
+    lineChart.getZr().on('click', ev => {
+        const pt = [ev.offsetX, ev.offsetY];
+        if (!lineChart.containPixel('grid', pt)) return;   // 點在圖例/座標軸外就不算
+        const idx = Math.round(lineChart.convertFromPixel({ seriesIndex: 0 }, pt)[0]);
+        const label = lineChart.getOption().xAxis[0].data[idx];
+        if (label === undefined) return;
+        // 單月模式的 x 軸是「15日」，全部月份模式是「2026/09」
+        if (isAllMode) setCond('month', String(label).replace('/', '-'));
+        else setCond('day', `${currentYear}-${pad2(currentMonth)}-${pad2(parseInt(label))}`);
+    });
+    // 長條圖同理：金額小的月份那根只有幾像素高，綁 series click 等於那些月點不到。
+    barChart.getZr().on('click', ev => {
+        const pt = [ev.offsetX, ev.offsetY];
+        if (!barChart.containPixel('grid', pt)) return;
+        const idx = Math.round(barChart.convertFromPixel({ seriesIndex: 0 }, pt)[0]);
+        const label = barChart.getOption().xAxis[0].data[idx];
+        if (label === undefined) return;
+        const [y, m] = String(label).split('/').map(Number);
+        if (isAllMode) { setCond('month', `${y}-${pad2(m)}`); return; }
+        // 單月模式下流水帳只有當月資料，加一道別的月份的條件只會篩出空白。
+        // 長條圖是「近 6 個月對比」，點它的自然語意是**跳到那個月**。
+        if (y === currentYear && m === currentMonth) return;
+        currentYear = y; currentMonth = m;
+        dropDateConds();
+        updateUI();
+        loadAll();
+    });
+}
+
+const pad2 = n => String(n).padStart(2, '0');
 
 // HTML 跳脫：品名/分類來自發票爬蟲等外部資料，插進 innerHTML 前必過這層（防 stored XSS）
 function esc(s) {
@@ -492,21 +582,40 @@ function refreshCategoryOptions() {
     const current = sel.value;
     sel.innerHTML = '<option value="all">全部分類</option>' +
         cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
-    sel.value = cats.includes(current) || current === 'all' ? current : 'all';
-    ledgerCategoryFilter = sel.value;
+    // 選單重建後把 conds 回寫回去；當月沒有這個分類就等於這道條件落空 → 清掉它，
+    // 不要留一個選不到的值在那裡篩出空白。
+    if (conds.category && !cats.includes(conds.category)) {
+        conds = LF.toggleCond(conds, 'category', '');
+    }
+    syncFilterControls();
+}
+
+// 摘要列：條件 chip（可單獨叉掉）＋ 篩選後的筆數與金額。
+// 三格頭刻意維持整月總額不動 —— 篩選後的數字只出現在這裡，
+// 否則會分不清自己看的是整月還是篩選後。
+function renderFilterBar(filtered) {
+    const bar = document.getElementById('filterBar');
+    if (!LF.hasCond(conds)) { bar.classList.remove('show'); return; }
+    bar.classList.add('show');
+    document.getElementById('filterChips').innerHTML = LF.chips(conds).map(c =>
+        `<button class="filter-chip" onclick="setCond('${c.key}','')">${esc(c.label)} ✕</button>`
+    ).join('');
+    const s = LF.summarize(filtered);
+    const parts = [`${s.count} 筆`];
+    if (s.expense) parts.push(`支出 $${s.expense.toLocaleString()}`);
+    if (s.income) parts.push(`收入 $${s.income.toLocaleString()}`);
+    document.getElementById('filterStats').textContent = parts.join(' · ');
 }
 
 function renderLedger() {
     const tbody = document.getElementById('ledgerBody');
-    let filtered = ledgerFilter === 'all'
-        ? ledgerData
-        : ledgerData.filter(r => r.type === ledgerFilter);
-    if (ledgerCategoryFilter !== 'all') {
-        filtered = filtered.filter(r => (r.category || '未分類') === ledgerCategoryFilter);
-    }
+    const filtered = LF.applyFilters(ledgerData, conds);
+    renderFilterBar(filtered);
 
     if (filtered.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6" class="ledger-empty">沒有資料</td></tr>';
+        tbody.innerHTML = `<tr><td colspan="6" class="ledger-empty">${
+            LF.hasCond(conds) ? '這些條件下沒有紀錄' : '沒有資料'}</td></tr>`;
+        ledgerRendered = [];
         return;
     }
 
@@ -638,11 +747,25 @@ async function deleteRecord(type, id) {
     }
 }
 
-updateUI();
-loadMonthly();
-loadCategory();
-loadSummary();
-loadLedger();
+// 啟動點。刻意不在這支 classic script 裡直接跑 —— 下面那支 module 會先把共用純函式
+// （LF）掛上來再呼叫它。順序天然保證，不會有「模組還沒到就開始 render」的競態。
+function bootReport() {
+    bindChartClicks();
+    updateUI();
+    loadMonthly();
+    loadCategory();
+    loadSummary();
+    loadLedger();
+}
+</script>
+
+<!-- 流水帳篩選的純函式：與 PWA 共用 frontend/src/ledgerFilter.js 同一份檔
+     （後端 /report/ledger_filter.js 直接吐原始碼，不經 build）。
+     module script 一律 deferred，所以它必定晚於上面那支 classic script 執行。 -->
+<script type="module">
+import * as LF from '/report/ledger_filter.js';
+window.LF = LF;
+window.bootReport();
 </script>
 </body>
 </html>

@@ -109,6 +109,14 @@ export async function getLedger(year, month) {
   return authedFetch(`/api/report/ledger?year=${year}&month=${month}`)
 }
 
+// 換一顆 30 分鐘短效 token，好開完整報表頁（/report）。
+// 為什麼要換而不是直接帶裝置 token：網頁導航送不出 X-Device-Token header，
+// 而把長效裝置 token 塞進網址會留在瀏覽器歷史與分享出去的連結裡。
+// 換來的這顆只能看報表，換不到新裝置授權（見 routes/report.py 與 routes/device.py）。
+export async function getReportToken() {
+  return authedFetch('/api/report-token', { method: 'POST' })
+}
+
 // 新增一筆。payload = {type:'expense'|'income', item, amount, category?}
 export async function createRecord(payload) {
   return authedFetch('/api/record', { method: 'POST', json: payload })

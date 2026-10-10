@@ -1,11 +1,16 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database import get_db
 from models import Transaction, Income
-from auth import validate_report_token, require_token
+from auth import validate_report_token, require_token, generate_report_token
+
+# 流水帳篩選的純函式。PWA 走 vite build 吃 frontend/src/ledgerFilter.js，
+# 報表頁走這個路由拿**同一個檔案**——複製第二份 predicate 的下場是兩份慢慢漂移，
+# 這個 repo 在料理詞彙表上已經記取過這個教訓（見 food/cuisine.py）。
+LEDGER_FILTER_JS = "frontend/src/ledgerFilter.js"
 
 router = APIRouter()
 
@@ -224,6 +229,23 @@ def api_report_ledger(year: int = Query(None, ge=2000, le=2100), month: int = Qu
     # 按時間降序排列
     records.sort(key=lambda x: x["created_at"], reverse=True)
     return {"records": records}
+
+
+@router.post("/api/report-token", dependencies=[Depends(require_token)])
+def api_report_token():
+    """PWA 用裝置 token 換一顆 30 分鐘短效 token，好開 /report 那頁。
+
+    為什麼要換：網頁導航帶不了 X-Device-Token header，而把長效裝置 token 塞進網址
+    會留在瀏覽器歷史與分享出去的連結裡。短效 token 30 分鐘後自己失效，
+    而且 `can_mint_device=False`——它開得了報表，換不到新裝置授權。
+    """
+    return {"token": generate_report_token("pwa", can_mint_device=False)}
+
+
+@router.get("/report/ledger_filter.js")
+def report_ledger_filter_js():
+    """報表頁用的篩選純函式（與 PWA 同一份檔，不經 build，純 ESM）。"""
+    return FileResponse(LEDGER_FILTER_JS, media_type="application/javascript")
 
 
 @router.get("/report", response_class=HTMLResponse)

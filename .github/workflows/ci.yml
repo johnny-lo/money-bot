@@ -100,6 +100,12 @@ jobs:
         run: npm ci
         working-directory: frontend
 
+      # 流水帳篩選的純函式（疊加取交集、toggle、摘要加總）。報表頁與 PWA 共用同一份檔,
+      # 改壞的話兩個頁面同時歪掉,值得擋在 CI。Node 內建 runner,不引入測試框架。
+      - name: 純函式測試（node --test）
+        run: npm test
+        working-directory: frontend
+
       - name: Build（產出 dist/,不入版控,只驗證 build 得起來）
         run: npm run build
         working-directory: frontend

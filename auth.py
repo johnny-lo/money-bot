@@ -26,13 +26,20 @@ def require_token(token: str = Query(None),
     raise HTTPException(status_code=401, detail="無效或過期的連結，請在 LINE Bot 傳送「報表」重新取得連結。")
 
 
-def generate_report_token(user_id: str) -> str:
-    """產生一次性報表 token，有效期 30 分鐘"""
+def generate_report_token(user_id: str, *, can_mint_device: bool = True) -> str:
+    """產生一次性報表 token，有效期 30 分鐘。
+
+    `can_mint_device` 決定這顆 token 能不能再去換長效裝置 token（routes/device.py）。
+    LINE/Discord 發出去的連結是「剛從對話拿到的邀請函」→ True。
+    PWA 拿裝置 token 鑄出來、只為了開報表頁的那顆 → 必須 False：
+    否則 device → short → device 成環，「洩漏的裝置 token 無法自我繁殖」就不成立了。
+    """
     _cleanup_expired()
     token = secrets.token_urlsafe(32)
     _token_store[token] = {
         "user_id": user_id,
         "expires_at": datetime.now() + timedelta(minutes=TOKEN_TTL_MINUTES),
+        "can_mint_device": can_mint_device,
     }
     return token
 
@@ -46,6 +53,17 @@ def validate_report_token(token: str) -> str | None:
         del _token_store[token]
         return None
     return entry["user_id"]
+
+
+def report_token_can_mint_device(token: str) -> bool:
+    """這顆短效 token 能不能換長效裝置 token。無效/過期/沒旗標一律 False。
+
+    預設關閉（`.get(..., False)`）——新的鑄幣路徑忘了標記時，後果應該是「換不到」
+    而不是「默默放行」。
+    """
+    if not token or not validate_report_token(token):
+        return False
+    return bool(_token_store[token].get("can_mint_device", False))
 
 
 def _cleanup_expired():

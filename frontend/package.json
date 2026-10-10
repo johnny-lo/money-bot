@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "NODE_OPTIONS=--experimental-global-webcrypto vite build",
+    "test": "node --test src/",
     "preview": "vite preview"
   },
   "dependencies": {
