@@ -54,6 +54,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── deploy.sh        # 主機：approved/<id>.deploy → 前置檢查（目錄乾淨、可乾淨合併，否則回報 reported 保留按鈕）→ merge --no-ff → import 預檢 → 全套測試 → restart → 等 startup → `python -m autofix.verify <id>`；任一步失敗 revert -m 1 + 重啟。.abandon → 清 worktree/分支。不 push
 │   ├── verify.py        # 上線驗證（正式容器內）：einvoice＝該載具實抓一次；extract＝當初失敗網址過半抽得到；scheduler＝待下次排程確認；drill＝登入落地測試。測 tests/test_autofix_verify.py
 │   ├── drill.py / drill.patch  # 演習：`python -m autofix.drill` 觸發 drill 事件；run.sh 在 worktree 套 drill.patch（把 _login_landing 的「登出」改「登入」）讓 Claude 修
+│   ├── （tests/conftest.py：autouse 關掉 AUTOFIX_ENABLED——測試在正式容器跑時不能寫進正式事件表。測 tests/test_autofix_isolation.py）
 │   └── install.sh       # 主機：mkdir 交接目錄（inbox/approved/outbox/state，gitignore）+ 連結並啟用 scripts/systemd/linebot-autofix-{inbox,deploy}.path
 ├── persona.md           # AI 角色設定（**本機私人檔,.gitignore 不入版控**）。gemini.py 找不到就退回 `persona.example.md`,全新 clone 也能跑。判斷基準是**四桶（投資/固定/生活/爽）桶位**而非金額大小;摘要沒帶桶位資訊時**預設沒超支、禁止說教**（舊版只看金額→每筆稍大的都被念）。寫法與踩過的坑見 persona.example.md
 ├── resource/            # Discord 頻道歡迎 banner 圖（手動放入，由 _setup_discord 一次性上傳；已 .gitignore 不入版本控制）

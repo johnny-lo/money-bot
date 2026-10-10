@@ -425,6 +425,9 @@
 - **任何讓事件卡在 dispatched/deploying 的路徑都會讓那個簽名的感測器永遠失聲**（busy 狀態＝noop）。現有防線：
   先寫 inbox 成功才標 dispatched、先寫核可檔成功才標 deploying、outbox 發卡失敗就結案 inconclusive、run.sh 的 ERR+TERM trap、
   deploy.sh 合併後的 TERM trap（逾時被砍＝自動回滾）。新增狀態轉換時照這個原則：**先做會失敗的副作用，成功才改狀態**。
+- 🔴 **測試會打進正式的事件表**：標準指令 `docker exec money-bot pytest` 在正式容器跑（`AUTOFIX_ENABLED=1`、正式 DB），
+  drill 部署時測試模擬的「yt-dlp 掛了」被記成真事件 #3，累積 3 條網址就會真的叫醒 Claude、`clear` 還可能刪掉真的計數。
+  `tests/conftest.py` 的 autouse fixture 一律關掉 autofix；測 autofix 本身的測試自己 setenv 並換掉 SessionLocal。
 - 非 `fixed` 的事件**保留 worktree**（`/var/tmp/linebot-autofix-<id>`），讓 `claude --resume` 能回原目錄接手；處理完手動
   `git worktree remove`。
 
