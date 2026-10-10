@@ -10,7 +10,8 @@ import asyncio
 
 from database import SessionLocal
 from models import InvoiceSyncState
-from einvoice import _scrape_carrier, _save_invoices, _list_carriers
+from einvoice import _scrape_carrier, _save_invoices, _list_carriers, LoginFailed
+from autofix import sensors
 
 BACKFILL_CAP_DAYS = 60
 BOOTSTRAP_DAYS = 2
@@ -107,6 +108,13 @@ def sync_with_backfill(headless: bool = True, today: date | None = None) -> dict
                 all_added.extend(added)
                 lines.append(f"  載具{label} {masked} {_entry_label(entry)}："
                              f"抓 {len(invs)} 張、新增 {new_inv} 張")
+                sensors.login_ok(label)
+            except LoginFailed as e:
+                sensors.login_failed(label, masked, e)
+                failures.append({"label": label, "masked": masked,
+                                 "month": _entry_label(entry), "error": f"LoginFailed: {e}"})
+                lines.append(f"  載具{label} {masked} {_entry_label(entry)}：❌ LoginFailed: {e}")
+                break   # 同載具其他月份也登不進去，別再燒登入次數（帳號 40 次會鎖）
             except Exception as e:
                 failures.append({"label": label, "masked": masked,
                                  "month": _entry_label(entry), "error": f"{type(e).__name__}: {e}"})

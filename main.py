@@ -202,6 +202,20 @@ def _weekly_pipeline():
 
 
 scheduler = BackgroundScheduler(timezone="Asia/Taipei")
+
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
+from autofix import sensors as autofix_sensors
+
+
+def _autofix_job_listener(event):
+    """排程例外感測器：同一簽名連 3 次 → 自動修復；成功一次就歸零。"""
+    if event.exception is not None:
+        autofix_sensors.job_failed(event.job_id, event.exception, event.traceback or "")
+    else:
+        autofix_sensors.job_ok(event.job_id)
+
+
+scheduler.add_listener(_autofix_job_listener, EVENT_JOB_ERROR | EVENT_JOB_EXECUTED)
 scheduler.add_job(run_daily_recurring, "cron", hour=0, minute=5, id="daily_recurring")
 scheduler.add_job(
     _daily_invoice_with_notify, "cron",

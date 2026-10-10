@@ -42,6 +42,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── autofix/             # 自動修復流水線（spec: docs/superpowers/specs/2026-10-10-autofix-pipeline-design.md）：持續性 bug 到門檻 → 喚醒主機 Claude 修 → Discord 核可 → 部署
 │   ├── policy.py        # 純函式決策：`decide(latest Snapshot, key, now, Policy)`→noop/new/count/dispatch/escalate；門檻 `POLICIES`、修好 7 天內再犯升級人工、`merge_context`。測 tests/test_autofix_policy.py
 │   ├── incidents.py     # DB 外殼：`raise_incident(sensor,signature,title,context,dedupe_key)`（with_for_update 鎖列防重複派發；到門檻原子寫 `autofix/inbox/<id>.json`）、`clear(prefix=)`、`get`、`mark`。**對外函式全吞例外**（感測器不能讓業務失敗）；`AUTOFIX_ENABLED!=1` 全 no-op；交接目錄不存在只印 log 不建立。測 tests/test_autofix_incidents.py
+│   ├── sensors.py       # 三種感測器：`login_failed/login_ok`（invoice_backfill 捕 LoginFailed，台北日期去重，同載具其他月份直接 break 不燒登入次數）、`extract_failed/extract_ok`（food/recipe/video ingest 抽取點，網址去重、簽名 模組:平台）、`job_failed/job_ok`（main.py APScheduler EVENT_JOB_ERROR|EXECUTED 監聽器；簽名 `job|例外|檔案:函式` 刻意不含行號）。測 tests/test_autofix_sensors.py
 ├── persona.md           # AI 角色設定（**本機私人檔,.gitignore 不入版控**）。gemini.py 找不到就退回 `persona.example.md`,全新 clone 也能跑。判斷基準是**四桶（投資/固定/生活/爽）桶位**而非金額大小;摘要沒帶桶位資訊時**預設沒超支、禁止說教**（舊版只看金額→每筆稍大的都被念）。寫法與踩過的坑見 persona.example.md
 ├── resource/            # Discord 頻道歡迎 banner 圖（手動放入，由 _setup_discord 一次性上傳；已 .gitignore 不入版本控制）
 ├── food/
