@@ -11,6 +11,7 @@ from .bridge import set_bot
 from .commands import register_commands
 from . import ingest_handlers
 from . import autofix_ui
+from . import cardrecon_ui
 
 # 非目標頻道圖片提示的防洗版：{channel_id: last_hint_ts}
 _HINT_DEBOUNCE: dict[int, float] = {}
@@ -26,7 +27,8 @@ class MoneyBot(discord.Client):
         register_commands(self)
 
     async def setup_hook(self):
-        self.add_dynamic_items(autofix_ui.AutofixButton)   # 自動修復報告卡按鈕：重啟後仍可按
+        self.add_dynamic_items(autofix_ui.AutofixButton,             # 自動修復報告卡按鈕：重啟後仍可按
+                               cardrecon_ui.RecordButton, cardrecon_ui.IgnoreSelect)  # 刷卡比對清單卡
         await self.tree.sync()
         self._autofix_outbox.start()
 
