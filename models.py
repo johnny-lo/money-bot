@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Date, Float, ForeignKey, JSON, UniqueConstraint, func
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, Date, Float, ForeignKey, JSON, UniqueConstraint, func
 from database import Base
 
 class Transaction(Base):
@@ -187,3 +187,54 @@ class CardCharge(Base):
     batch = Column(String, nullable=True, index=True)
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class MailRule(Base):
+    """信件規則：寄件者（完整地址或 @網域）＋主旨樣式 → 類別。只有 confirmed 會被執行。"""
+    __tablename__ = "mail_rules"
+    __table_args__ = (UniqueConstraint("sender", "subject_pattern", name="uq_mail_rules_sender_pattern"),)
+    id = Column(Integer, primary_key=True)
+    sender = Column(String, nullable=False, index=True)
+    subject_pattern = Column(String, nullable=False)
+    category = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="suggested", index=True)   # suggested/confirmed/rejected
+    suggested_by = Column(String, nullable=False)                              # builtin/ai/user
+    card = Column(String, nullable=True, index=True)
+    created_at = Column(DateTime, default=func.now())
+    confirmed_at = Column(DateTime, nullable=True)
+
+
+class MailMessage(Base):
+    """每封信的分類與已做過的動作（動作冪等的依據）。只存信頭衍生資料，不存內文。"""
+    __tablename__ = "mail_messages"
+    id = Column(Integer, primary_key=True)
+    gm_msgid = Column(String, nullable=False, unique=True)
+    uid = Column(Integer, nullable=False)
+    from_addr = Column(String, nullable=False, index=True)
+    subject_pattern = Column(String, nullable=False)
+    subject = Column(String, nullable=False)
+    sent_date = Column(Date, nullable=True, index=True)
+    category = Column(String, nullable=True, index=True)
+    reason = Column(String, nullable=True)
+    protected = Column(Boolean, nullable=False, default=False)
+    in_inbox = Column(Boolean, nullable=False, default=True)
+    labels_applied = Column(JSON, nullable=False, default=list)
+    trashed_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class MailValuedDomain(Base):
+    """重視的公司網域（寄過求職字眼主旨）；安全網第 2 條。屬個資，只存 DB。"""
+    __tablename__ = "mail_valued_domains"
+    domain = Column(String, primary_key=True)
+    first_seen = Column(DateTime, default=func.now())
+    source_subject_pattern = Column(String, nullable=True)
+
+
+class MailState(Base):
+    """「所有郵件」高水位（單列，id 恆 1）。"""
+    __tablename__ = "mail_state"
+    id = Column(Integer, primary_key=True)
+    uidvalidity = Column(Integer, nullable=True)
+    last_uid = Column(Integer, nullable=True)
+    history_done_at = Column(DateTime, nullable=True)
