@@ -16,6 +16,8 @@ class FakeQuery:
     def filter(self, *a, **k): return self
     def order_by(self, *a, **k): return self
     def all(self): return self.rows
+    def first(self): return self.rows[0] if self.rows else None
+    def distinct(self, *a): return self
 
 
 class FakeSession:
@@ -41,12 +43,12 @@ def test_upsert_已存在的行不重寫_也不蓋狀態():
 
 
 def test_transaction_fields_補記寫入契約():
-    f = repo.transaction_fields(ch(420, region="US", charge_time="21:05"))
-    assert f == {"item": "信用卡消費（US）", "price": 420, "source": "信用卡",
-                 "created_at": datetime(2026, 9, 10, 21, 5), "invoice_no": None, "seller": None,
+    f = repo.transaction_fields(ch(450, region="US", charge_time="22:41"))
+    assert f == {"item": "信用卡消費（US）", "price": 450, "source": "信用卡",
+                 "created_at": datetime(2026, 9, 10, 22, 41), "invoice_no": None, "seller": None,
                  "category": None}
-    f2 = repo.transaction_fields(ch(450, merchant="ACME", region="US"))
-    assert f2["item"] == "ACME" and f2["created_at"] == datetime(2026, 9, 10, 12, 0)
+    f2 = repo.transaction_fields(ch(690, merchant="ACME *STREAMING", region="US"))
+    assert f2["item"] == "ACME *STREAMING" and f2["created_at"] == datetime(2026, 9, 10, 12, 0)
 
 
 def _row(i, amount, status="unmatched", **kw):
@@ -96,3 +98,14 @@ def test_ignore_只動該批的未配對(monkeypatch):
     assert repo.ignore(db, "b", [1, 2]) == 1
     assert [r.status for r in rows] == ["ignored", "recorded", "unmatched"]
     assert db.commits == 1
+
+
+def test_has_source_有無資料():
+    assert repo.has_source(FakeSession([(1,)]), "ctbc_statement") is True
+    assert repo.has_source(FakeSession(), "ctbc_statement") is False
+
+
+def test_max_page_取同日最大頁碼():
+    rows = [("2026-10-18-1",), ("2026-10-18-2",), ("2026-10-18-10",), ("2026-10-11-7",), ("2026-10-18-x",), (None,)]
+    assert repo.max_page(FakeSession(rows), "2026-10-18") == 10
+    assert repo.max_page(FakeSession(), "2026-10-18") == 0

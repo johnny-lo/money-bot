@@ -36,8 +36,11 @@ def parse_sinopac(text: str) -> list[Charge]:
         if amount <= 0:
             continue
         month = int(m[2])
-        out.append(Charge(source="sinopac_daily", card_last4=m[1],
-                          charge_date=date(year - 1 if month > period_month else year, month, int(m[3])),
+        try:
+            charge_date = date(year - 1 if month > period_month else year, month, int(m[3]))
+        except ValueError:
+            continue                                        # 日期不存在：丟這一筆，行號照佔
+        out.append(Charge(source="sinopac_daily", card_last4=m[1], charge_date=charge_date,
                           amount=amount, line_no=line_no, charge_time=f"{int(m[4]):02d}:{m[5]}", region=m[6]))
     return out
 
@@ -65,8 +68,12 @@ def parse_ctbc(text: str) -> list[Charge]:
         line_no += 1
         if amount <= 0:
             continue
-        out.append(Charge(source="ctbc_statement", card_last4=card, charge_date=_roc(*d[:3]),
-                          post_date=_roc(*d[3:6]), amount=amount, line_no=n, region=region,
+        try:
+            charge_date, post_date = _roc(*d[:3]), _roc(*d[3:6])
+        except ValueError:
+            continue                                        # 日期不存在：丟這一筆，行號照佔
+        out.append(Charge(source="ctbc_statement", card_last4=card, charge_date=charge_date,
+                          post_date=post_date, amount=amount, line_no=n, region=region,
                           merchant=merchant or None, pay_method=pay))
     return out
 
