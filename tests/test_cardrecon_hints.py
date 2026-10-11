@@ -82,3 +82,9 @@ def test_arrange_分組順序_空組不出現_組內排序():
     assert out[0][1][0][2].startswith("≈ 帳上 10/03 某店")
     assert [i for i, _, _ in out[3][1]] == [1, 5]
     assert out[3][1][0][2] is None
+
+
+def test_arrange_組內先比日期_id大但日期早的排前面():
+    items = [(1, ch(500, date(2026, 10, 5))), (9, ch(600, date(2026, 10, 2)))]
+    out = hints.arrange(items, [], [c for _, c in items])
+    assert [i for i, _, _ in out[0][1]] == [9, 1]

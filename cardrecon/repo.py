@@ -87,13 +87,15 @@ def load_hints(db, since: date) -> list[TxHint]:
                                         Transaction.price, Transaction.item, Transaction.seller)
                                .filter(Transaction.created_at >= datetime.combine(since, time()))
                                .order_by(Transaction.id).all())]
-    labels: dict[str, str | None] = {}
+    sellers: dict[str, str] = {}
+    items: dict[str, str] = {}
     for tid, inv, _, _, item, seller in rows:
         key = inv or f"id{tid}"
-        if key not in labels:
-            labels[key] = seller or item
-        elif not labels[key] and seller:
-            labels[key] = seller
+        if seller:
+            sellers.setdefault(key, seller)
+        if item:
+            items.setdefault(key, item)
+    labels = {k: sellers.get(k) or items.get(k) for k in items.keys() | sellers.keys()}
     used = used_group_keys(db)
     return [TxHint(g.key, g.tx_date, g.amount, labels.get(g.key))
             for g in matcher.group_transactions([r[:4] for r in rows]) if g.key not in used]

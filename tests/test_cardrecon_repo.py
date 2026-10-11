@@ -115,10 +115,11 @@ def test_load_hints_同發票合併_標籤取賣家否則第一個品名_排除�
     t = datetime(2026, 9, 10, 12, 0)
     rows = [(1, "INV1", t, 80, "豆漿", "某早餐店"), (2, "INV1", t, 20, "蛋餅", "某早餐店"),
             (3, None, t, 300, "手記午餐", None), (4, "INV2", t, 50, "咖啡", None), (5, "INV3", t, 70, "茶", None),
-            (6, "INV3", t, 30, "糖", None)]
+            (6, "INV3", t, 30, "糖", None),
+            (7, "INV4", t, 40, "麵", None), (8, "INV4", t, 60, "飯", "某小館")]
     monkeypatch.setattr(repo, "used_group_keys", lambda db: {"INV2"})
     got = repo.load_hints(FakeSession(rows), D)
-    assert sorted(got, key=lambda h: h.key) == [TxHint("INV1", D, 100, "某早餐店"), TxHint("INV3", D, 100, "茶"),
+    assert sorted(got, key=lambda h: h.key) == [TxHint("INV1", D, 100, "某早餐店"), TxHint("INV3", D, 100, "茶"), TxHint("INV4", D, 100, "某小館"),
                                                 TxHint("id3", D, 300, "手記午餐")]
 
 

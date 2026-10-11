@@ -198,3 +198,14 @@ def test_relist_重列未處理的_不碰gmail也不要secret(monkeypatch):
         (f"{day}-2", "small", [3]), (f"{day}-3", "other", [1])]
     assert fake.rows[2]["batch"] == f"{day}-1" and fake.rows[2]["status"] == "ignored"
     assert res.total == 320
+
+
+def test_relist_同日舊批次全未處理_新批次號不與舊的重複(monkeypatch):
+    day = TODAY.isoformat()
+    fake = FakeRepo(existing=[(ch(date(2026, 10, 1), 300, 0), "unmatched", f"{day}-1"),
+                              (ch(date(2026, 10, 1), 400, 1), "unmatched", f"{day}-2"),
+                              (ch(date(2026, 10, 1), 500, 2), "unmatched", f"{day}-3")])
+    fake.groups = []
+    _wire(monkeypatch, fake, {}, {})
+    res = ingest.relist(TODAY)
+    assert [b for b, _, _ in res.pages] == [f"{day}-4"]

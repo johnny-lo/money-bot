@@ -95,3 +95,11 @@ def test_notify_weekly_零筆但有失敗信件_發警告(monkeypatch):
     monkeypatch.setattr(ui, "post_sync", lambda cid, embeds, make_view=None: sent.append(embeds))
     ui.notify_weekly(WeeklyResult(failed_mails=2))
     assert len(sent) == 1 and "2" in sent[0][0].description
+
+
+def test_page_embed_description不超過4096_線索標籤截短():
+    long = "很長的店名" * 20
+    items = [(i, ch(100 + i), "unmatched", f"≈ 帳上 10/03 {long} $1,000（差 $10）") for i in range(25)]
+    e = ui.page_embed("b-1", items)
+    assert len(e.description) <= 4096
+    assert long not in e.description

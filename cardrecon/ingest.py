@@ -24,23 +24,24 @@ def relist(today: date, db=None) -> WeeklyResult:
     own = db is None
     db = db or SessionLocal()
     try:
+        start = repo.max_page(db, today.isoformat())      # 先讀：unlist 後舊批次號消失，會被重用
         repo.unlist(db)
         res = WeeklyResult()
-        _list(db, today, res)
+        _list(db, today, res, start)
         return res
     finally:
         if own:
             db.close()
 
 
-def _list(db, today: date, res: WeeklyResult) -> None:
+def _list(db, today: date, res: WeeklyResult, start_page: int = 0) -> None:
     """列出還沒進清單卡的未配對刷卡：分組後各組各自分頁，批次號 '<day>-<n>' 跨組連續。"""
     listed = repo.unlisted(db, today - timedelta(days=config.LIST_LAG_DAYS), config.LIST_FROM)
     res.total = sum(c.amount for _, c in listed)
     if not listed:
         return
     txs = repo.load_hints(db, min(c.charge_date for _, c in listed) - timedelta(days=1))
-    n = repo.max_page(db, today.isoformat())
+    n = start_page
     for key, items in hints.arrange(listed, txs, repo.all_charges(db)):
         for p in range(0, len(items), config.PAGE_SIZE):
             chunk = items[p:p + config.PAGE_SIZE]
@@ -88,5 +89,5 @@ def _run(db, today: date) -> WeeklyResult:
         groups = [g for g in repo.load_groups(db, start) if g.key not in used]
         repo.mark_matched(db, matcher.match(pend, groups))
 
-    _list(db, today, res)
+    _list(db, today, res, repo.max_page(db, today.isoformat()))
     return res
