@@ -5,6 +5,7 @@ import urllib.request
 from typing import Callable
 
 from codex_cli import codex_text, codex_image
+from app_secrets import get_secret
 
 # 載入 persona 設定。persona.md 是**本機私人角色**（.gitignore，不入版控），
 # 找不到就退回 repo 附的範本 persona.example.md，讓全新 clone 也能直接跑。
@@ -28,7 +29,7 @@ def _log_usage(model: str, data: dict) -> None:
 
 def gemini_text(prompt: str, model: str | None = None) -> str:
     """透過 HTTP 呼叫 Gemini，傳入純文字 prompt。可指定 model（如週評語用更強模型）。"""
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = get_secret("GEMINI_API_KEY")
     model = model or os.getenv("MODEL_NAME")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
@@ -46,7 +47,7 @@ def gemini_image(prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg",
     schema：要結構化輸出時給 JSON Schema，走 generationConfig 的
     responseMimeType + responseJsonSchema，回覆保證是符合它的 JSON 字串。
     """
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = get_secret("GEMINI_API_KEY")
     model = model or os.getenv("MODEL_NAME")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     b64 = base64.b64encode(image_bytes).decode("utf-8")

@@ -11,6 +11,7 @@ from categorize import run_weekly_categorization
 from recurring import run_daily_recurring
 from einvoice import sync_invoices as run_invoice_sync
 from invoice_backfill import sync_with_backfill
+from app_secrets import get_secret
 from routes.report import router as report_router
 from routes.record import router as record_router
 from routes.food_map import router as food_map_router
@@ -247,7 +248,7 @@ async def startup_event():
     )
 
     # 啟動 Discord Bot（如果有設定 token）
-    discord_token = os.getenv("DISCORD_BOT_TOKEN")
+    discord_token = get_secret("DISCORD_BOT_TOKEN")
     if discord_token:
         # 監管式啟動：暫時性失敗自動重試（見 discordbot/bot.py:run_discord_bot），
         # 不再像舊版無監管 task 一拋例外就永久離線。

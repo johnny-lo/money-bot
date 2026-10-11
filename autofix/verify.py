@@ -29,8 +29,12 @@ def check(incident: dict, *, scrape, extract_one, run_tests) -> tuple[bool, str]
 
 def _scrape(label: int) -> int:
     import einvoice
-    phone = os.environ[f"EINVOICE_PHONE_{label}"]
-    pw = os.environ[f"EINVOICE_PASSWORD_{label}"]
+    from app_secrets import get_secret
+    phone = get_secret(f"EINVOICE_PHONE_{label}")
+    pw = get_secret(f"EINVOICE_PASSWORD_{label}")
+    if not (phone and pw):
+        # 保留舊的 os.environ[...] 語意：缺帳密就失敗，check() 會接住並回報
+        raise KeyError(f"載具{label} 帳密未設定（secrets 檔 einvoice_phone_{label} / einvoice_password_{label}）")
     return len(asyncio.run(einvoice._scrape_carrier(phone, pw, 1)))
 
 

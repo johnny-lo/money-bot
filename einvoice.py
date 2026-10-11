@@ -28,6 +28,7 @@ import captcha_ocr
 from gemini import vision_text
 from database import SessionLocal
 from models import Transaction
+from app_secrets import get_secret
 
 LOGIN_URL = "https://www.einvoice.nat.gov.tw/accounts/login/mw"
 HOME_URL = "https://www.einvoice.nat.gov.tw/"
@@ -617,11 +618,11 @@ def _save_invoices(invoices: list[dict], source: str | None = None) -> tuple[int
 # ─────────────────── 對外 API ───────────────────
 
 def _list_carriers() -> list[tuple[int, str, str]]:
-    """從環境變數蒐集所有載具。回傳 [(編號, 手機, 密碼), ...]"""
+    """從 secrets 蒐集所有載具（空佔位檔＝未設定）。回傳 [(編號, 手機, 密碼), ...]"""
     carriers = []
     for i in range(1, 10):
-        phone = os.getenv(f"EINVOICE_PHONE_{i}")
-        password = os.getenv(f"EINVOICE_PASSWORD_{i}")
+        phone = get_secret(f"EINVOICE_PHONE_{i}")
+        password = get_secret(f"EINVOICE_PASSWORD_{i}")
         if phone and password:
             carriers.append((i, phone, password))
     return carriers

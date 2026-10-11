@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.error
 
 from food.regions import resolve_region
+from app_secrets import get_secret
 
 # Google API 呼叫計數（給 enrich.backfill_all 控預算用；Places API New 按次計費）
 _api_calls = 0
@@ -135,7 +136,7 @@ _FIELD_MASK = (
 
 def search_text(query: str) -> dict | None:
     """用文字查最相關的一家店。回正規化後的 dict，查無回 None。"""
-    key = os.getenv("GOOGLE_PLACES_SERVER_KEY")
+    key = get_secret("GOOGLE_PLACES_SERVER_KEY")
     if not key:
         # 跟「被拒」歸同一類：呼叫端只需要接一種例外，也一樣要看得見
         _log_failure("查店家", None, "GOOGLE_PLACES_SERVER_KEY 未設定")
@@ -198,7 +199,7 @@ _DETAILS_URL = "https://places.googleapis.com/v1/places/{place_id}"
 
 def fetch_reviews(place_id: str) -> list[dict]:
     """抓 Place Details 的 reviews 欄位（最相關約 5 則）。失敗回 []。"""
-    key = os.getenv("GOOGLE_PLACES_SERVER_KEY")
+    key = get_secret("GOOGLE_PLACES_SERVER_KEY")
     if not key or not place_id:
         return []   # 沒 place_id 是正常情境（手動建的店），不算失敗
     try:
@@ -283,7 +284,7 @@ _PHOTO_MEDIA_URL = "https://places.googleapis.com/v1/{name}/media"
 
 def fetch_place_photo(place_id: str, max_px: int = 800) -> tuple[bytes, str] | None:
     """抓該店第一張 Google 照片的 bytes。回 (data, 'jpg') 或 None。"""
-    key = os.getenv("GOOGLE_PLACES_SERVER_KEY")
+    key = get_secret("GOOGLE_PLACES_SERVER_KEY")
     if not key or not place_id:
         return None
     try:
