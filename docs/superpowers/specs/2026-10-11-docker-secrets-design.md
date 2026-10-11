@@ -1,6 +1,6 @@
 # 敏感資料遷移到 Docker secrets 設計
 
-日期：2026-10-11　狀態：設計已口頭核可，待用戶審閱 spec
+日期：2026-10-11　狀態：用戶 2026-10-11 核可
 
 ## 1. 背景與目標
 
@@ -29,7 +29,7 @@ Gmail / PDF 解密功能本身（下一個項目）。
 |---|---|
 | 機制 | Docker Compose `secrets:`（file 型，非 swarm），容器內 `/run/secrets/<小寫名稱>` |
 | 主機存放處 | `${HOME}/.config/money-bot/secrets/`，目錄 700、檔案 600，每個機密一個檔 |
-| 搬遷清單 | 見 §3，11 個；用戶 2026-10-11 確認 |
+| 搬遷清單 | 見 §3，12 個（口頭誤數成 11，2026-10-11 寫計畫時更正）；用戶 2026-10-11 確認 |
 | DB 密碼 | 不換；`DATABASE_URL` 只搬位置 |
 | 讀取優先序 | 檔案優先，環境變數退路（CI / 測試用） |
 
@@ -73,8 +73,8 @@ get_secret(name: str) -> str | None
 
 ### 4.3 `docker-compose.yml`
 
-- 頂層新增 `secrets:`，11 個，`file: ${HOME}/.config/money-bot/secrets/<檔名>`。
-- `app` 服務加 `secrets: [...]` 全部 11 個；刪除 `environment:` 裡對應的 9 行（`GMAIL_*` 與 `NATIONAL_ID` 本來就不在白名單）。
+- 頂層新增 `secrets:`，12 個，`file: ${HOME}/.config/money-bot/secrets/<檔名>`。
+- `app` 服務加 `secrets: [...]` 全部 12 個；刪除 `environment:` 裡對應的 10 行（`GMAIL_APP_PASSWORD` 與 `NATIONAL_ID` 本來就不在白名單）。
 - compose 要求 file 型 secret 的檔案存在，否則整個 stack 起不來 → 選填項目用**空檔**佔位。
 
 ### 4.4 `autofix/bin/probe`
@@ -87,7 +87,7 @@ get_secret(name: str) -> str | None
 
 1. 建 `~/.config/money-bot/secrets/`（700），備份 `.env` 到 `~/.config/money-bot/env.bak.<時間>`（600）。
 2. 對 §3 每個名稱：`.env` 有值 → 寫進檔案（600，無結尾換行）；沒有 → 建空檔。
-3. 把 `.env` 中這 11 行改成 `# NAME → ~/.config/money-bot/secrets/<檔名>`。
+3. 把 `.env` 中這 12 行改成 `# NAME → ~/.config/money-bot/secrets/<檔名>`。
 4. 冪等：已搬過（檔案非空且 `.env` 無該值）就跳過；從不印出任何值。
 5. 用 bash 寫，不依賴主機 python（主機沒有 python；`autofix/bin/probe` 的 python3 是例外，不新增依賴）。
 
@@ -111,7 +111,7 @@ get_secret(name: str) -> str | None
 3. `docker compose up -d`（改了 compose 的服務定義 → 會 Recreated；看到 `Running` 是警訊）。
 4. 輪詢 log 等 `Application startup complete`。
 5. 驗證：
-   - `docker exec money-bot ls /run/secrets` 有 11 個檔；
+   - `docker exec money-bot ls /run/secrets` 有 12 個檔；
    - `docker inspect money-bot --format '{{.Config.Env}}'`、`docker exec money-bot cat /proc/1/environ` 不含任何機密值；
    - LINE：webhook 端點 curl 回非 5xx；Discord：bot 上線；發票：`docker exec` 呼叫一次 `sync_invoices` 或等排程；
      Gemini / Places：各打一次。
