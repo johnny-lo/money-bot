@@ -5,13 +5,14 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage, ImageMessage
 
 from core import process_text_message, handle_image
+from app_secrets import get_secret
 
 # LINE 憑證缺任一個就整個停用，而不是在 import 期炸掉。
 # 舊寫法 `LineBotApi(os.getenv(...))` 在 token 為 None 時會 TypeError（SDK 直接把 token
 # 串進 Authorization header）→ **import 崩潰 = 全站掛**：webhook、Discord Bot、PWA 一起沒。
 # Discord 那邊本來就有 `if discord_token:` 守著，這裡補齊同樣的可選性。
-_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET")
+_ACCESS_TOKEN = get_secret("LINE_CHANNEL_ACCESS_TOKEN")
+_CHANNEL_SECRET = get_secret("LINE_CHANNEL_SECRET")
 LINE_ENABLED = bool(_ACCESS_TOKEN and _CHANNEL_SECRET)
 
 line_bot_api = LineBotApi(_ACCESS_TOKEN) if LINE_ENABLED else None
