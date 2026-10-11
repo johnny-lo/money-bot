@@ -1,0 +1,120 @@
+from datetime import date
+
+from cardrecon import ingest
+from cardrecon.types import Charge, RawMail, Receipt, TxGroup
+
+TODAY = date(2026, 10, 18)
+
+
+def ch(d, amount, n=0, src="sinopac_daily"):
+    return Charge(source=src, card_last4="1234", charge_date=d, amount=amount, line_no=n)
+
+
+class FakeRepo:
+    """記憶體版 repo：只實作 ingest 用到的函式。"""
+    def __init__(self, existing=()):
+        self.rows = {}           # id -> dict(charge, status, batch, key)
+        for c, status, batch in existing:
+            self._add(c, status, batch)
+    def _add(self, c, status="unmatched", batch=None):
+        i = len(self.rows) + 1
+        self.rows[i] = dict(c=c, status=status, batch=batch, key=None, msg=None)
+        return i
+    def has_any(self, db): return bool(self.rows)
+    def upsert_charges(self, db, mid, charges):
+        new = 0
+        for c in charges:
+            if any(r["msg"] == mid and r["c"].line_no == c.line_no for r in self.rows.values()):
+                continue
+            self.rows[self._add(c)]["msg"] = mid
+            new += 1
+        return new
+    def pending(self, db, until):
+        return [(i, r["c"]) for i, r in self.rows.items() if r["status"] == "unmatched" and r["c"].charge_date <= until]
+    def unlisted(self, db, until, since):
+        return [(i, c) for i, c in self.pending(db, until) if self.rows[i]["batch"] is None and c.charge_date >= since]
+    def set_merchant(self, db, m): self.merchants = m
+    def used_group_keys(self, db): return set()
+    def load_groups(self, db, since): return self.groups
+    def mark_matched(self, db, m):
+        for i, k in m.items():
+            self.rows[i].update(status="matched", key=k)
+    def assign_batch(self, db, ids, batch):
+        for i in ids:
+            self.rows[i]["batch"] = batch
+
+
+def _wire(monkeypatch, fake, mails, texts):
+    monkeypatch.setattr(ingest, "repo", fake)
+    monkeypatch.setattr(ingest, "get_secret", lambda k: "A123456789")
+    monkeypatch.setattr(ingest.gmail, "fetch", lambda sender, kw, since=None: mails.get(sender, []))
+    monkeypatch.setattr(ingest.pdf, "extract_text", lambda data, pw: texts.get(data))
+
+
+def mail(mid, pdf=b"x", text=""):
+    return RawMail(message_id=mid, sender="s", subject="", received=None, pdf=pdf, text=text)
+
+
+def test_整條流程_配對_分頁_解密失敗與解析零筆計數(monkeypatch):
+    fake = FakeRepo()
+    fake.groups = [TxGroup("INV", date(2026, 10, 1), 500)]
+    mails = {"spendservice@sinopac.com": [mail("<a>", b"A"), mail("<b>", b"BAD"), mail("<c>", None)],
+             "ebill@estats.ctbcbank.com": [mail("<d>", b"EMPTY")]}
+    texts = {b"A": "a", b"EMPTY": "e"}
+    _wire(monkeypatch, fake, mails, texts)
+    charges = [ch(date(2026, 10, 1), 500, 0)] + [ch(date(2026, 10, 2), 10 + i, i + 1) for i in range(26)] \
+        + [ch(date(2026, 10, 17), 99, 30), ch(date(2026, 2, 21), 77, 31)]
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: charges if t == "a" else [],
+                                                   "ctbc_statement": lambda t: []})
+    res = ingest.run_weekly(TODAY)
+    assert (res.failed_mails, res.unparsed_mails) == (1, 2)         # BAD 解不開；<c> 沒附件、<d> 解析 0 筆
+    assert [b for b, _ in res.pages] == ["2026-10-18-1", "2026-10-18-2"]
+    assert [len(items) for _, items in res.pages] == [25, 1]        # 500 配到；10/17 太新；2/21 早於 LIST_FROM
+    assert res.total == sum(10 + i for i in range(26))
+    assert fake.rows[1]["status"] == "matched"
+
+
+def test_已列過的_下週不再列(monkeypatch):
+    fake = FakeRepo(existing=[(ch(date(2026, 10, 1), 300), "unmatched", "2026-10-11-1")])
+    fake.groups = []
+    _wire(monkeypatch, fake, {}, {})
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: []})
+    assert ingest.run_weekly(TODAY).pages == []
+
+
+def test_第一次抓全部_之後回看60天(monkeypatch):
+    seen = []
+    fake = FakeRepo()
+    fake.groups = []
+    _wire(monkeypatch, fake, {}, {})
+    monkeypatch.setattr(ingest.gmail, "fetch", lambda s, k, since=None: seen.append(since) or [])
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: []})
+    ingest.run_weekly(TODAY)
+    assert set(seen) == {None}
+    fake._add(ch(date(2026, 10, 1), 1))
+    seen.clear()
+    ingest.run_weekly(TODAY)
+    assert set(seen) == {date(2026, 8, 19)}
+
+
+def test_收據補店名(monkeypatch):
+    fake = FakeRepo()
+    fake.groups = []
+    ap = "cs@autopass.xyz"
+    _wire(monkeypatch, fake, {ap: [mail("<r>", None, "收據")]}, {})
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: []})
+    monkeypatch.setattr(ingest.parse, "parse_autopass", lambda t: Receipt(date(2026, 10, 1), 110, "停車費"))
+    fake._add(ch(date(2026, 10, 1), 110))
+    ingest.run_weekly(TODAY)
+    assert fake.merchants == {1: "停車費"}
+
+
+def test_缺身分證_丟RuntimeError(monkeypatch):
+    _wire(monkeypatch, FakeRepo(), {}, {})
+    monkeypatch.setattr(ingest, "get_secret", lambda k: None)
+    try:
+        ingest.run_weekly(TODAY)
+    except RuntimeError as e:
+        assert "national_id" in str(e)
+    else:
+        raise AssertionError
