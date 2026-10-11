@@ -44,13 +44,13 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── invoice_backfill.py  # 發票智能補拓：`build_month_plan(gap_start,today)`(純函式,缺口拆逐月查詢計畫,政府站同月限制)、`get/set_last_covered`(invoice_sync_state 高水位 repo)、`sync_with_backfill(today=None)`(算缺口→`_scrape_one` 複用 einvoice `_scrape_carrier`/`_save_invoices`→去重存→全成功才推進高水位;失敗回 failures、不推進)。BACKFILL_CAP_DAYS=60、bootstrap=today-1。測 tests/test_invoice_backfill.py(純 plan + monkeypatch 編排)
 ├── cardrecon/           # 刷卡比對（spec: docs/superpowers/specs/2026-10-11-card-reconcile-design.md）：Gmail 信用卡消費 → 比對 transactions → 週日清單卡整批補記
 │   ├── types.py         # 資料契約：Charge / Receipt / TxGroup / RawMail / WeeklyResult / RecordResult
-│   ├── config.py        # LIST_FROM=2026-02-22、LOOKBACK_DAYS=60、LIST_LAG_DAYS=3、PAGE_SIZE=25、CARD_SOURCES（永豐 spendservice、中信 ebill；**刻意不含 DAWHO mma@ 繳卡費**）、RECEIPT_SOURCES（Autopass）
+│   ├── config.py        # LIST_FROM=2026-04-21（開始用載具記帳）、LOOKBACK_DAYS=60、LIST_LAG_DAYS=3、PAGE_SIZE=25、CARD_SOURCES（永豐 spendservice、中信 ebill；**刻意不含 DAWHO mma@ 繳卡費**）、RECEIPT_SOURCES（Autopass）
 │   ├── gmail.py         # IMAP **唯讀**：select readonly=True、BODY.PEEK[]；中文主旨走 literal；`imap_date` 不用 strftime（%b 隨語系）。守衛測試掃原始碼禁 store/expunge/copy/move/append
 │   ├── pdf.py           # pypdf 解密（身分證大寫）→ 文字；解不開/壞檔回 None 不丟例外
 │   ├── parse.py         # 純函式：`parse_sinopac`（年份取「期間」，刷卡月>期間月＝去年）、`parse_ctbc`（先還原 /UNICxxxx 字形名；同一行帶英文店名 / 兩行無店名兩種版型）、`parse_autopass`；金額 ≤0 丟掉但仍佔 line_no；不存在的日期跳過該行
 │   ├── hints.py         # 純函式：清單的判斷線索與分組——`near_miss`（±1 天、金額差 ≤ max(10, 10%)、金額不同才算）、`repeat_months`（同卡同金額出現幾個月）、`classify`（near > subscription(≥3 個月) > overseas > small(≤100) > other）、`hint_text`、`arrange`（依 GROUPS 順序分組、組內 (日期, id) 排序）
 │   ├── match.py         # 純函式：`match`（同額、tx_date−charge_date 依序 0,+1,−1,+2,+3，一對一）、`enrich`（收據補店名）、`group_transactions`（同 invoice_no 加總含折扣；手記帳 key=id<id>）
-│   ├── repo.py          # card_charges 唯一存取層：`upsert_charges`（同信同行已存在就跳過，不蓋 status）、`unlisted`（batch IS NULL 才列）、`max_page`（同日重跑接續頁碼）、`has_source`、`record`（先重比→其餘寫 transactions source=信用卡，一次 commit、失敗 rollback、冪等）、`ignore`、`load_hints`（帳上群組＋標籤：群組內第一個非空賣方，否則第一個品名）、`all_charges`、`unlist`（只清 unmatched 的 batch）、`batch_view`（重算線索，回多數群組）
+│   ├── repo.py          # card_charges 唯一存取層：`upsert_charges`（同信同行已存在就跳過，不蓋 status）、`unlisted`（batch IS NULL 才列）、`max_page`（同日重跑接續頁碼）、`has_source`、`record`（先重比→其餘寫 transactions source=信用卡，一次 commit、失敗 rollback、冪等）、`ignore`、`load_hints`（只取手記帳 invoice_no IS NULL；標籤＝賣方優先，否則品名；排除已佔用）、`all_charges`、`unlist`（只清 unmatched 的 batch）、`batch_view`（重算線索，回多數群組）
 │   └── ingest.py        # `run_weekly(today)`：逐來源判斷首跑（沒資料抓全部，否則回看 60 天）→ 解密解析 upsert → 收據補店名 → 比對 → 依 hints.arrange 分組、各組分頁指派 batch `<today>-<頁>`（頁碼跨組連續、接續當天 max_page）。`relist(today)`：先讀 max_page 再 unlist、照新分組重列（不連 Gmail；舊卡的批次號不會被重用）
 ├── autofix/             # 自動修復流水線（spec: docs/superpowers/specs/2026-10-10-autofix-pipeline-design.md）：持續性 bug 到門檻 → 喚醒主機 Claude 修 → Discord 核可 → 部署
 │   ├── policy.py        # 純函式決策：`decide(latest Snapshot, key, now, Policy)`→noop/new/count/dispatch/escalate；門檻 `POLICIES`、修好 7 天內再犯升級人工、`merge_context`。測 tests/test_autofix_policy.py
