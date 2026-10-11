@@ -2,7 +2,7 @@ from datetime import date, datetime
 from types import SimpleNamespace
 
 from cardrecon import repo
-from cardrecon.types import Charge, TxGroup
+from cardrecon.types import Charge, TxGroup, TxHint
 
 D = date(2026, 9, 10)
 
@@ -109,3 +109,42 @@ def test_max_page_取同日最大頁碼():
     rows = [("2026-10-18-1",), ("2026-10-18-2",), ("2026-10-18-10",), ("2026-10-11-7",), ("2026-10-18-x",), (None,)]
     assert repo.max_page(FakeSession(rows), "2026-10-18") == 10
     assert repo.max_page(FakeSession(), "2026-10-18") == 0
+
+
+def test_load_hints_同發票合併_標籤取賣家否則第一個品名_排除已佔用(monkeypatch):
+    t = datetime(2026, 9, 10, 12, 0)
+    rows = [(1, "INV1", t, 80, "豆漿", "某早餐店"), (2, "INV1", t, 20, "蛋餅", "某早餐店"),
+            (3, None, t, 300, "手記午餐", None), (4, "INV2", t, 50, "咖啡", None), (5, "INV3", t, 70, "茶", None),
+            (6, "INV3", t, 30, "糖", None)]
+    monkeypatch.setattr(repo, "used_group_keys", lambda db: {"INV2"})
+    got = repo.load_hints(FakeSession(rows), D)
+    assert sorted(got, key=lambda h: h.key) == [TxHint("INV1", D, 100, "某早餐店"), TxHint("INV3", D, 100, "茶"),
+                                                TxHint("id3", D, 300, "手記午餐")]
+
+
+def test_all_charges轉成Charge():
+    got = repo.all_charges(FakeSession([_row(1, 100), _row(2, 250)]))
+    assert [c.amount for c in got] == [100, 250] and all(isinstance(c, Charge) for c in got)
+
+
+def test_unlist_只清未配對且有批次的_其餘不動_一次commit():
+    rows = [_row(1, 100), _row(2, 200, status="ignored"), _row(3, 300, status="recorded"),
+            _row(4, 400, status="matched"), _row(5, 500, batch=None), _row(6, 600)]
+    db = FakeSession(rows)
+    assert repo.unlist(db) == 2
+    assert [r.batch for r in rows] == [None, "2026-09-20-1", "2026-09-20-1", "2026-09-20-1", None, None]
+    assert [r.status for r in rows] == ["unmatched", "ignored", "recorded", "matched", "unmatched", "unmatched"]
+    assert db.commits == 1
+
+
+def test_batch_view_重算線索_保留各列狀態_回傳多數組別(monkeypatch):
+    rows = [_row(1, 1000, region="TW"), _row(2, 1000, status="ignored", region="TW", card_last4="5678"),
+            _row(3, 60, region="TW")]
+    monkeypatch.setattr(repo, "_batch_rows", lambda db, b: rows)
+    monkeypatch.setattr(repo, "load_hints", lambda db, since: [TxHint("t", D, 1040, "某店")])
+    monkeypatch.setattr(repo, "all_charges", lambda db: [repo._to_charge(r) for r in rows])
+    gk, items = repo.batch_view(FakeSession(), "b")
+    assert gk == "near"
+    assert {(i, s) for i, _, s, _ in items} == {(1, "unmatched"), (2, "ignored"), (3, "unmatched")}
+    by = {i: h for i, _, _, h in items}
+    assert by[1].startswith("≈ 帳上 09/10 某店") and by[3] is None

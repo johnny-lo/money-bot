@@ -28,7 +28,8 @@ class MoneyBot(discord.Client):
 
     async def setup_hook(self):
         self.add_dynamic_items(autofix_ui.AutofixButton,             # 自動修復報告卡按鈕：重啟後仍可按
-                               cardrecon_ui.RecordButton, cardrecon_ui.IgnoreSelect)  # 刷卡比對清單卡
+                               cardrecon_ui.RecordButton, cardrecon_ui.IgnoreSelect,
+                               cardrecon_ui.IgnoreAllButton)  # 刷卡比對清單卡
         await self.tree.sync()
         self._autofix_outbox.start()
 

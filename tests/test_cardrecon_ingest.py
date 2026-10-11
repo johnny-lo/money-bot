@@ -1,7 +1,7 @@
 from datetime import date
 
 from cardrecon import ingest
-from cardrecon.types import Charge, RawMail, Receipt, TxGroup
+from cardrecon.types import Charge, RawMail, Receipt, TxGroup, TxHint
 
 TODAY = date(2026, 10, 18)
 
@@ -43,6 +43,16 @@ class FakeRepo:
     def mark_matched(self, db, m):
         for i, k in m.items():
             self.rows[i].update(status="matched", key=k)
+    hint_txs = ()
+    def load_hints(self, db, since): return list(self.hint_txs)
+    def all_charges(self, db): return [r["c"] for r in self.rows.values()]
+    def unlist(self, db):
+        n = 0
+        for r in self.rows.values():
+            if r["status"] == "unmatched" and r["batch"] is not None:
+                r["batch"] = None
+                n += 1
+        return n
     def assign_batch(self, db, ids, batch):
         for i in ids:
             self.rows[i]["batch"] = batch
@@ -72,8 +82,9 @@ def test_整條流程_配對_分頁_解密失敗與解析零筆計數(monkeypatc
                                                    "ctbc_statement": lambda t: []})
     res = ingest.run_weekly(TODAY)
     assert (res.failed_mails, res.unparsed_mails) == (1, 2)         # BAD 解不開；<c> 沒附件、<d> 解析 0 筆
-    assert [b for b, _ in res.pages] == ["2026-10-18-1", "2026-10-18-2"]
-    assert [len(items) for _, items in res.pages] == [25, 1]        # 500 配到；10/17 太新；2/21 早於 LIST_FROM
+    assert [b for b, _, _ in res.pages] == ["2026-10-18-1", "2026-10-18-2"]
+    assert [g for _, g, _ in res.pages] == ["small", "small"]     # 10~35 元皆為小額
+    assert [len(items) for _, _, items in res.pages] == [25, 1]        # 500 配到；10/17 太新；2/21 早於 LIST_FROM
     assert res.total == sum(10 + i for i in range(26))
     assert fake.rows[1]["status"] == "matched"
 
@@ -129,7 +140,7 @@ def test_同日再跑_批次接續編號(monkeypatch):
     monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [ch(date(2026, 10, 2), 7, 5)],
                                                    "ctbc_statement": lambda t: []})
     res = ingest.run_weekly(TODAY)
-    assert [b for b, _ in res.pages] == [f"{day}-3"]
+    assert [b for b, _, _ in res.pages] == [f"{day}-3"]
 
 
 def test_收據補店名(monkeypatch):
@@ -153,3 +164,37 @@ def test_缺身分證_丟RuntimeError(monkeypatch):
         assert "national_id" in str(e)
     else:
         raise AssertionError
+
+
+def test_分組各自分頁_批次號跨組連續(monkeypatch):
+    fake = FakeRepo()
+    fake.groups = []
+    fake.hint_txs = [TxHint("t1", date(2026, 10, 2), 1040, "某店")]
+    _wire(monkeypatch, fake, {"spendservice@sinopac.com": [mail("<a>", b"A")]}, {b"A": "a"})
+    monkeypatch.setattr(ingest.config, "PAGE_SIZE", 2)
+    charges = [ch(date(2026, 10, 2), 1000, 0), ch(date(2026, 10, 2), 50, 1), ch(date(2026, 10, 2), 60, 2),
+               ch(date(2026, 10, 2), 70, 3), ch(date(2026, 10, 2), 500, 4)]
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: charges, "ctbc_statement": lambda t: []})
+    res = ingest.run_weekly(TODAY)
+    assert [(b, g, [i for i, _, _ in items]) for b, g, items in res.pages] == [
+        ("2026-10-18-1", "near", [1]), ("2026-10-18-2", "small", [2, 3]),
+        ("2026-10-18-3", "small", [4]), ("2026-10-18-4", "other", [5])]
+    assert res.pages[0][2][0][2].startswith("≈ 帳上 10/02 某店")
+    assert res.total == sum(c.amount for c in charges)
+
+
+def test_relist_重列未處理的_不碰gmail也不要secret(monkeypatch):
+    day = TODAY.isoformat()
+    fake = FakeRepo(existing=[(ch(date(2026, 10, 1), 300, 0), "unmatched", f"{day}-1"),
+                              (ch(date(2026, 10, 1), 400, 1), "ignored", f"{day}-1"),
+                              (ch(date(2026, 10, 1), 20, 2), "unmatched", f"{day}-1")])
+    fake.groups = []
+    _wire(monkeypatch, fake, {}, {})
+    def boom(*a, **k): raise AssertionError("relist 不該碰 Gmail／secret")
+    monkeypatch.setattr(ingest.gmail, "fetch", boom)
+    monkeypatch.setattr(ingest, "get_secret", boom)
+    res = ingest.relist(TODAY)
+    assert [(b, g, [i for i, _, _ in items]) for b, g, items in res.pages] == [
+        (f"{day}-2", "small", [3]), (f"{day}-3", "other", [1])]
+    assert fake.rows[2]["batch"] == f"{day}-1" and fake.rows[2]["status"] == "ignored"
+    assert res.total == 320

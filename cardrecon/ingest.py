@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from app_secrets import get_secret
 from database import SessionLocal
 
-from . import config, gmail, parse, pdf, repo
+from . import config, gmail, hints, parse, pdf, repo
 from . import match as matcher
 from .types import WeeklyResult
 
@@ -17,6 +17,37 @@ def run_weekly(today: date, db=None) -> WeeklyResult:
     finally:
         if own:
             db.close()
+
+
+def relist(today: date, db=None) -> WeeklyResult:
+    """把已列出、還沒處理的未配對刷卡收回，照新分組重列。不連 Gmail。"""
+    own = db is None
+    db = db or SessionLocal()
+    try:
+        repo.unlist(db)
+        res = WeeklyResult()
+        _list(db, today, res)
+        return res
+    finally:
+        if own:
+            db.close()
+
+
+def _list(db, today: date, res: WeeklyResult) -> None:
+    """列出還沒進清單卡的未配對刷卡：分組後各組各自分頁，批次號 '<day>-<n>' 跨組連續。"""
+    listed = repo.unlisted(db, today - timedelta(days=config.LIST_LAG_DAYS), config.LIST_FROM)
+    res.total = sum(c.amount for _, c in listed)
+    if not listed:
+        return
+    txs = repo.load_hints(db, min(c.charge_date for _, c in listed) - timedelta(days=1))
+    n = repo.max_page(db, today.isoformat())
+    for key, items in hints.arrange(listed, txs, repo.all_charges(db)):
+        for p in range(0, len(items), config.PAGE_SIZE):
+            chunk = items[p:p + config.PAGE_SIZE]
+            n += 1
+            batch = f"{today.isoformat()}-{n}"
+            repo.assign_batch(db, [i for i, _, _ in chunk], batch)
+            res.pages.append((batch, key, chunk))
 
 
 def _run(db, today: date) -> WeeklyResult:
@@ -57,12 +88,5 @@ def _run(db, today: date) -> WeeklyResult:
         groups = [g for g in repo.load_groups(db, start) if g.key not in used]
         repo.mark_matched(db, matcher.match(pend, groups))
 
-    listed = repo.unlisted(db, today - timedelta(days=config.LIST_LAG_DAYS), config.LIST_FROM)
-    first_page = repo.max_page(db, today.isoformat()) + 1
-    for p in range(0, len(listed), config.PAGE_SIZE):
-        chunk = listed[p:p + config.PAGE_SIZE]
-        batch = f"{today.isoformat()}-{first_page + p // config.PAGE_SIZE}"
-        repo.assign_batch(db, [i for i, _ in chunk], batch)
-        res.pages.append((batch, chunk))
-    res.total = sum(c.amount for _, c in listed)
+    _list(db, today, res)
     return res
