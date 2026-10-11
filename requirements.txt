@@ -4,7 +4,7 @@ uvicorn
 line-bot-sdk==2.4.3
 python-dotenv
 psycopg2-binary
-sqlalchemy
+sqlalchemy<2.1  # 2.1 起 postgresql:// 預設驅動改 psycopg 3，image 只有 psycopg2 → import 期連線就炸
 apscheduler
 discord.py
 aiohttp
