@@ -106,14 +106,16 @@
 
 **Discord Bot 韌性**：Discord 是長連線 websocket（自己外連 gateway），啟動走監管迴圈 `run_discord_bot`——暫時性失敗（開機 DNS 未 ready、連線閃斷、gateway 重連耗盡）以指數退避（5s→cap 5 分）自動重試，直到接上；只有 `LoginFailure`（token 無效）才停手。取代舊版無監管的一次性 task（一拋例外就永久離線）。健康訊號 `🐉 Discord Bot 已上線` 與重試訊息都 `flush=True`，`docker logs` 即時可見。
 
-## 環境變數 (.env)
+## 環境變數 (.env) 與機密 (secrets)
+
+設定分兩類：**一般設定**放 `.env`（下表）；**12 個機密**（`LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN`、`DISCORD_BOT_TOKEN`、`GEMINI_API_KEY`、`GOOGLE_PLACES_SERVER_KEY`、`DATABASE_URL`、`EINVOICE_PHONE_1/2`、`EINVOICE_PASSWORD_1/2`、`GMAIL_APP_PASSWORD`、`NATIONAL_ID`）放 repo 外的 `~/.config/money-bot/secrets/<小寫名>`（目錄 700、檔案 600），由 compose `secrets:` 掛進容器 `/run/secrets/`，程式經 `app_secrets.get_secret()` 讀，不會出現在容器環境變數。選填的機密沒值也要有空檔（搬遷腳本會建）。下表標 🔐 的就是機密。
 
 | 變數 | 說明 |
 |------|------|
-| `LINE_CHANNEL_SECRET` | LINE Bot Channel Secret（選填；與 ACCESS_TOKEN 缺任一則 LINE webhook 停用，不影響 Discord / PWA）|
-| `LINE_CHANNEL_ACCESS_TOKEN` | LINE Bot Channel Access Token（選填，同上）|
-| `DATABASE_URL` | PostgreSQL 連線字串 |
-| `GEMINI_API_KEY` | Google Gemini API Key |
+| 🔐 `LINE_CHANNEL_SECRET` | LINE Bot Channel Secret（選填；與 ACCESS_TOKEN 缺任一則 LINE webhook 停用，不影響 Discord / PWA）|
+| 🔐 `LINE_CHANNEL_ACCESS_TOKEN` | LINE Bot Channel Access Token（選填，同上）|
+| 🔐 `DATABASE_URL` | PostgreSQL 連線字串 |
+| 🔐 `GEMINI_API_KEY` | Google Gemini API Key |
 | `MODEL_NAME` | Gemini 主模型（影像辨識：拍照記帳 / CAPTCHA / 錢鼠阿財即時評論） |
 | `GEMINI_FALLBACK_MODELS` | 選填。影像辨識備援模型，逗號分隔，主模型失敗**或拒答**時依序往下試 |
 | `CAPTCHA_SAMPLE_DIR` | 選填。驗證碼樣本目錄，預設 `data/captcha`（已 gitignore） |
@@ -123,7 +125,7 @@
 | `MONTHLY_INCOME` | 四桶水位的收入基準（選填但**建議設**）。優先序：本月實收 → 上月實收 → 此值；都沒有則角色拿不到水位，走保守模式 |
 | `BUCKET_RATIOS` | 四桶比例 `投資:固定:生活:爽`（選填，預設等分；建議 `2:4:2:2`）|
 | `SHARED_SPLIT` | 共同分攤支出在「我的桶位」裡算幾成（選填，預設 `0.5`）。DB 存全額，只有算桶位時折 |
-| `DISCORD_BOT_TOKEN` | Discord Bot Token（選填，未設定則跳過） |
+| 🔐 `DISCORD_BOT_TOKEN` | Discord Bot Token（選填，未設定則跳過） |
 | `DISCORD_INVOICE_CHANNEL_ID` | 發票通知頻道 ID（選填） |
 | `DISCORD_REPORT_CHANNEL_ID` | 週報 / 月結通知頻道 ID（選填） |
 | `DISCORD_RECORD_CHANNEL_ID` | 記帳主頻道 ID（選填，預留） |
@@ -132,21 +134,22 @@
 | `FOOD_INGEST_CHANNEL_ID` | 美食輸入頻道 ID（美食地圖；丟截圖/文字自動記店） |
 | `RECIPE_INGEST_CHANNEL_ID` | `#🍳-食譜` 頻道 ID；未設則食譜分支不啟用（不影響美食/記帳） |
 | `HISTORY_VIDEO_INGEST_CHANNEL_ID` | `#📜-歷史教學` 頻道 ID；未設則影片分支不啟用（不影響其他模組） |
-| `GOOGLE_PLACES_SERVER_KEY` | 後端 Google Places API (New) 金鑰（美食店名正規化 / 雷點摘要） |
+| 🔐 `GOOGLE_PLACES_SERVER_KEY` | 後端 Google Places API (New) 金鑰（美食店名正規化 / 雷點摘要） |
 | `GOOGLE_MAPS_BROWSER_KEY` | 前端 Google Maps JavaScript API 金鑰（美食地圖網頁；限 ngrok referrer + 只開 Maps JS API） |
 | `GOOGLE_MAPS_MAP_ID` | Google Maps Map ID（AdvancedMarker 必需；未申請填 `DEMO_MAP_ID`，會有浮水印） |
-| `EINVOICE_PHONE_1` | 第一組載具：財政部電子發票會員手機號碼 |
-| `EINVOICE_PASSWORD_1` | 第一組載具：驗證碼（密碼） |
-| `EINVOICE_PHONE_2` | 第二組載具（選填） |
-| `EINVOICE_PASSWORD_2` | 第二組載具密碼（選填） |
+| 🔐 `EINVOICE_PHONE_1` | 第一組載具：財政部電子發票會員手機號碼 |
+| 🔐 `EINVOICE_PASSWORD_1` | 第一組載具：驗證碼（密碼） |
+| 🔐 `EINVOICE_PHONE_2` | 第二組載具（選填） |
+| 🔐 `EINVOICE_PASSWORD_2` | 第二組載具密碼（選填） |
 | `HEALTHCHECK_DISCORD_WEBHOOK` | 對外健康檢查的告警 webhook（選填，沒設就只寫 log）。**主機上的 `scripts/healthcheck.sh` 讀，不是容器讀** → 刻意不寫進 `docker-compose.yml` |
 | `HEALTHCHECK_FAIL_THRESHOLD` / `HEALTHCHECK_RESOLVER` / `HEALTHCHECK_FUNNEL_PORT` | 健康檢查微調（選填，預設 `2` / `1.1.1.1` / `8000`）|
 
 ## 快速啟動
 
 ```bash
-# 1. 設定環境變數
-cp .env.example .env  # 填入各項 API Key
+# 1. 設定環境變數：先在 .env 填好（含機密），再把機密搬進 secrets 檔
+cp .env.example .env
+bash scripts/migrate_secrets.sh   # 機密 → ~/.config/money-bot/secrets/，.env 備份在其上一層 env.bak.*
 
 # 2. 啟動所有服務
 docker compose up -d --build

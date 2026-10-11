@@ -321,6 +321,14 @@
 - **驗收**：`docker exec money-bot printenv VAR`，看到值才算數。程式端讀 `os.getenv` 一律要能吃 None。
 - **教訓**：「改了 `.env` 就 `docker compose up -d`」這句只在**變數已經在白名單裡**時成立。
   `Running` 而不是 `Recreated` 就是警訊——那代表 compose 認為什麼都沒變。
+- 機密（清單見 `app_secrets.py` 用法與 compose `secrets:`）不走這條，見下一條。
+
+### 🔴 坑：新增機密是「三個地方」的事，少一個就靜默失效或整個起不來
+- **規則**：機密不放 `.env`、不進 `environment:`。新增一個機密要：① `~/.config/money-bot/secrets/<小寫名>`（600，選填也要建空檔）② `docker-compose.yml` 頂層 `secrets:` 與 app 服務 `secrets:` 兩處 ③ 程式用 `app_secrets.get_secret("NAME")`，並把名稱加進 `tests/test_secrets_guard.py` 的 `SECRET_NAMES` 與 `scripts/migrate_secrets.sh` 的 `NAMES`。
+- **為什麼**：環境變數會被 codex / Playwright 子程序繼承、`docker inspect` 看得到明文；`.env` 在 live-mount 的 `/app` 下，容器裡誰都讀得到。
+- **compose 的脾氣**：file 型 secret 檔案不存在 → 整個 stack 起不來（不是只有那個功能失效）。
+- **殘餘風險**：codex 的唯讀沙箱只擋寫不擋讀，它仍讀得到 `/run/secrets`；要徹底隔離得讓 codex 換 UID 跑（未做）。主機或容器 root 被拿下時 secrets 照樣可讀。
+- **驗收**：`docker exec money-bot ls /run/secrets`；`docker exec money-bot cat /proc/1/environ | tr '\0' '\n' | grep -c -E 'TOKEN|KEY|PASSWORD|DATABASE_URL'` 應為 0。
 
 ### 🔴 坑：AI 模型 alias 是單點故障，而且「失敗」不一定是例外
 - **怎麼發生的**：`MODEL_NAME=gemini-flash-latest`，Google 端一忙整串回 `503 high demand`。
