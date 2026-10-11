@@ -238,6 +238,35 @@ scheduler.add_job(
 scheduler.add_job(_weekly_pipeline, "cron", day_of_week="sun", hour=21, minute=0, id="weekly_pipeline")
 
 
+def _mail_daily():
+    """每日 22:30 信件整理：同步→分類→（歷史完成後）執行→報告；有新建議卡就發確認卡。"""
+    try:
+        from zoneinfo import ZoneInfo
+        from database import SessionLocal
+        from mailrules import repo as mail_repo
+        from mailrules.run import run_daily
+        from discordbot.mailrules_ui import notify_daily, notify_cards
+        rep = run_daily(datetime.now(ZoneInfo("Asia/Taipei")).date())
+        notify_daily(rep)
+        db = SessionLocal()
+        try:
+            cards = mail_repo.pending_cards(db)
+        finally:
+            db.close()
+        if cards:
+            notify_cards(cards)
+    except Exception as e:
+        print(f"⚠️ 每日信件整理失敗：{e}")
+        try:
+            from discordbot.mailrules_ui import notify_failure as mail_notify_failure
+            mail_notify_failure(str(e))
+        except Exception:
+            pass
+
+
+scheduler.add_job(_mail_daily, "cron", hour=22, minute=30, id="mail_daily")
+
+
 def _startup_catchup():
     """開機後背景補拓一次（機器關了又開時盡快追上）；開機只在有新發票或失敗才發卡。"""
     result = sync_with_backfill()
@@ -256,6 +285,7 @@ async def startup_event():
         "每日 00:05 固定收支 / "
         "週一~週六 21:00 發票補拓+Discord 通知 / "
         "週日 21:00 補拓→刷卡比對→分類→週報（每月第一個週日多推上月月結）/ "
+        "每日 22:30 信件整理 / "
         "開機後 3 分鐘背景發票補拓"
     )
 
