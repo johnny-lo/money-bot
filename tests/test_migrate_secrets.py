@@ -117,6 +117,17 @@ def test_empty_value_followed_by_inline_comment_is_empty(tmp_path):
     assert (dest / "gemini_api_key").read_text() == "gk"
 
 
+def test_value_starting_with_hash_is_value(tmp_path):
+    """`KEY=#abc`：= 後面緊貼的 # 是值的一部分（不是註解），要照常搬走並註解掉那行。"""
+    r, env, dest = _run(tmp_path, "NATIONAL_ID=#abc\n")
+    assert r.returncode == 0, r.stderr
+    assert (dest / "national_id").read_text() == "#abc"
+    text = env.read_text()
+    assert "NATIONAL_ID=#abc" not in text
+    assert "# NATIONAL_ID →" in text
+    assert "#abc" not in r.stdout + r.stderr
+
+
 def test_duplicate_key_uses_last_occurrence(tmp_path):
     """docker compose 的 dotenv 重複 key 取最後一筆；搬的值要跟它一致，兩行都要處理掉。"""
     r, env, dest = _run(tmp_path, "GEMINI_API_KEY=first-v\nGEMINI_API_KEY=last-v\n")

@@ -29,11 +29,14 @@ env_value() {
   [ -n "$line" ] || return 0
   v=${line#*=}
   v=${v%$'\r'}
+  # `KEY=   # 註解`：= 後至少一個空白再接 #，值是空的（在去空白前判斷；`KEY=#abc` 的 # 是值）
+  case "$v" in
+    [[:space:]]*) [[ "$v" =~ ^[[:space:]]+# ]] && { printf ''; return 0; } ;;
+  esac
   v="${v#"${v%%[![:space:]]*}"}"
   case "$v" in
     \"*) v=${v#\"}; v=${v%%\"*} ;;
     \'*) v=${v#\'}; v=${v%%\'*} ;;
-    \#*) v= ;;   # `KEY=   # 註解`：值是空的
     *) v=$(printf '%s' "$v" | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//') ;;
   esac
   printf '%s' "$v"
