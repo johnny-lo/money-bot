@@ -274,7 +274,11 @@ async def _login_attempt(page, phone: str, password: str, attempt: int) -> tuple
         if err and ("密碼" in err or "帳號" in err) and "驗證碼" not in err:
             return False, f"第{attempt}次：帳密錯誤：{err}"
         return None, f"第{attempt}次：留在登入頁：{err or '(無錯誤元素)'}"
-    landing, body = await _wait_landing(page, url)
+    if "/portal/btc/" in url:
+        landing, waited = await _wait_landing(page, url)
+        body = waited or body   # 輪詢全讀失敗就保留先前讀到的 body
+    else:
+        landing = _login_landing(url, body)   # 非 SPA 頁沿用已讀的 body，不重讀
     if landing == "elsewhere":
         print(f"   ↪️ 已登入但落在 {url}，改走發票查詢頁")
         try:
