@@ -160,6 +160,28 @@ def _login_landing(url: str, body: str) -> str:
     return "unknown"
 
 
+async def _wait_landing(page, url: str, tries: int = 20, interval_ms: int = 1000) -> tuple[str, str]:
+    """讀 body 判斷落地頁，回 (landing, body)。
+
+    /portal/btc/ 的 SPA 登入後內容是慢慢畫出來的（踩過：已登入卻因 body 還空白判成 unknown
+    → 重試 → 第二次已登入等不到登入頁逾時）→ 輪詢到不是 unknown 或次數用完。其他網址只讀一次。
+    """
+    polling = "/portal/btc/" in url
+    body = ""
+    landing = "unknown"
+    for i in range(tries if polling else 1):
+        if i:
+            await page.wait_for_timeout(interval_ms)
+        try:
+            body = await page.locator("body").inner_text()
+        except Exception:
+            continue
+        landing = _login_landing(url, body)
+        if landing != "unknown":
+            break
+    return landing, body
+
+
 async def _goto_search_page(page) -> str:
     """從手機條碼專區任一頁點「發票查詢及捐贈」，回傳到站後的 body。
 
@@ -252,7 +274,11 @@ async def _login_attempt(page, phone: str, password: str, attempt: int) -> tuple
         if err and ("密碼" in err or "帳號" in err) and "驗證碼" not in err:
             return False, f"第{attempt}次：帳密錯誤：{err}"
         return None, f"第{attempt}次：留在登入頁：{err or '(無錯誤元素)'}"
-    landing = _login_landing(url, body)
+    if "/portal/btc/" in url:
+        landing, waited = await _wait_landing(page, url)
+        body = waited or body   # 輪詢全讀失敗就保留先前讀到的 body
+    else:
+        landing = _login_landing(url, body)   # 非 SPA 頁沿用已讀的 body，不重讀
     if landing == "elsewhere":
         print(f"   ↪️ 已登入但落在 {url}，改走發票查詢頁")
         try:
@@ -267,7 +293,8 @@ async def _login_attempt(page, phone: str, password: str, attempt: int) -> tuple
         # 這是「哪天財政部改字型」的保險：有標好的樣本才重訓得起來。
         captcha_ocr.save_sample(captcha_img, captcha)
         return True, "登入成功"
-    print(f"   ❓ 未知狀態 URL={url}，重試")
+    snippet = re.sub(r"\d", "*", " ".join(body.split()))[:120]
+    print(f"   ❓ 未知狀態 URL={url} body={snippet!r}，重試")
     return None, f"第{attempt}次：未知狀態 URL={url}"
 
 
