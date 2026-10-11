@@ -18,6 +18,14 @@ class Charge:
 
 
 @dataclass(frozen=True)
+class TxHint:
+    key: str                         # 同 TxGroup.key
+    tx_date: date
+    amount: int
+    label: str | None                # 賣家，沒有就取第一個品名
+
+
+@dataclass(frozen=True)
 class Receipt:
     paid_date: date
     amount: int
@@ -43,7 +51,7 @@ class RawMail:
 
 @dataclass
 class WeeklyResult:
-    pages: list = field(default_factory=list)   # list[tuple[str, list[tuple[int, Charge]]]]（batch, 該頁項目）
+    pages: list = field(default_factory=list)   # list[tuple[str, str, list[tuple[int, Charge, str | None]]]]（batch, 組別 key, 該頁項目 (id, Charge, 線索)）
     total: int = 0
     failed_mails: int = 0                       # 解密失敗
     unparsed_mails: int = 0                     # 沒附件或解析 0 筆

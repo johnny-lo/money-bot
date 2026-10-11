@@ -4,8 +4,8 @@ from datetime import date, datetime, time, timedelta
 
 from models import CardCharge, Transaction
 
-from . import match as matcher
-from .types import Charge, RecordResult, TxGroup
+from . import hints, match as matcher
+from .types import Charge, RecordResult, TxGroup, TxHint
 
 
 def _to_charge(r) -> Charge:
@@ -81,6 +81,41 @@ def load_groups(db, since: date) -> list[TxGroup]:
     return matcher.group_transactions([tuple(r) for r in rows])
 
 
+def load_hints(db, since: date) -> list[TxHint]:
+    """帳目群組（同 load_groups 的分法）附上標籤，供找近似紀錄；已被配走的群組不列。"""
+    rows = [tuple(r) for r in (db.query(Transaction.id, Transaction.invoice_no, Transaction.created_at,
+                                        Transaction.price, Transaction.item, Transaction.seller)
+                               .filter(Transaction.created_at >= datetime.combine(since, time()))
+                               .order_by(Transaction.id).all())]
+    sellers: dict[str, str] = {}
+    items: dict[str, str] = {}
+    for tid, inv, _, _, item, seller in rows:
+        key = inv or f"id{tid}"
+        if seller:
+            sellers.setdefault(key, seller)
+        if item:
+            items.setdefault(key, item)
+    labels = {k: sellers.get(k) or items.get(k) for k in items.keys() | sellers.keys()}
+    used = used_group_keys(db)
+    return [TxHint(g.key, g.tx_date, g.amount, labels.get(g.key))
+            for g in matcher.group_transactions([r[:4] for r in rows]) if g.key not in used]
+
+
+def all_charges(db) -> list[Charge]:
+    return [_to_charge(r) for r in db.query(CardCharge).all()]
+
+
+def unlist(db) -> int:
+    """把已列進清單卡、但還沒處理的（unmatched）放回未列狀態，供重新分組再列。"""
+    n = 0
+    for r in db.query(CardCharge).filter(CardCharge.status == "unmatched", CardCharge.batch.isnot(None)).all():
+        if r.status == "unmatched" and r.batch is not None:
+            r.batch = None
+            n += 1
+    db.commit()
+    return n
+
+
 def assign_batch(db, ids: list[int], batch: str) -> None:
     for r in _by_ids(db, ids):
         r.batch = batch
@@ -93,6 +128,19 @@ def _batch_rows(db, batch: str):
 
 def batch_items(db, batch: str) -> list[tuple[int, Charge, str]]:
     return [(r.id, _to_charge(r), r.status) for r in _batch_rows(db, batch)]
+
+
+def batch_view(db, batch: str) -> tuple[str, list[tuple[int, Charge, str, str | None]]]:
+    """該批所有列（各保留狀態）重算線索與分組；回 (多數列落在的組別 key, [(id, Charge, status, hint)])。"""
+    rows = _batch_rows(db, batch)
+    if not rows:
+        return hints.GROUPS[-1][0], []
+    status = {r.id: r.status for r in rows}
+    items = [(r.id, _to_charge(r)) for r in rows]
+    txs = load_hints(db, min(c.charge_date for _, c in items) - timedelta(days=1))
+    arranged = hints.arrange(items, txs, all_charges(db))
+    best = max(arranged, key=lambda g: len(g[1]))[0]       # max 取第一個最大 → 平手時 GROUPS 順序在前者
+    return best, [(i, c, status[i], h) for _, grp in arranged for i, c, h in grp]
 
 
 def ignore(db, batch: str, ids: list[int]) -> int:
