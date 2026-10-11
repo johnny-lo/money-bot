@@ -309,6 +309,21 @@
 - **教訓**：`docker restart` 與 `docker compose up` 不等價。前者保留容器，後者重建容器。
   只要 image 跟 requirements 有落差，這個差別就是「正常」與「全站掛」的差別。
 
+### 🔴 坑：重 build image 會把所有「沒鎖版本」的套件一起升級（SQLAlchemy 2.1 差點全站掛）
+- **怎麼發生的**：2026-10-11 刷卡比對要用 pypdf → 改 `requirements.txt` → `docker compose build`。
+  pip 那層重跑，**所有沒鎖版本的套件一起升級**：SQLAlchemy 2.0.52 → 2.1.4。2.1 起 `postgresql://` 的
+  預設驅動改成 psycopg 3，image 裡只有 psycopg2 → `database.py` 在 **import 期** `create_engine` 就炸
+  （`No module named 'psycopg'`）→ LINE / Discord / 排程全部起不來。
+- **為什麼差點沒抓到**：正式容器跑的是舊 image，`docker exec` 測試全綠；worktree 的檢查有一段時間用
+  「舊 image + 臨時疊一層 pip install pypdf」也全綠。直到完整 build 完、用**新 image** 跑 `scripts/check_tests.sh` 才炸。
+- **解法**：`requirements.txt` 鎖 `sqlalchemy<2.1`。
+- **鐵律**：改了 `requirements.txt` → build 完、`compose up` **之前**，先用新 image 跑 `scripts/check_tests.sh`
+  （它用的就是 `money-bot` image），並比對新舊套件版本，看到大版本或 minor 跳動的核心套件就停下來查：
+  ```bash
+  diff <(docker exec money-bot pip freeze | sort) <(docker run --rm --entrypoint pip money-bot freeze | sort)
+  ```
+- **教訓**：「我只加了一個套件」不等於「image 只多一個套件」。沒鎖的依賴是延遲引爆的變更。
+
 ### 🔴 坑：新環境變數寫進 `.env` 卻進不了容器（compose 是白名單）
 - **怎麼發生的**：2026-08-30 加 `GEMINI_FALLBACK_MODELS`，寫進 `.env`、跑 `docker compose up -d`，
   compose 回 `Container money-bot Running`（**沒有 Recreated**），容器裡 `printenv` 完全沒這個變數。
@@ -555,6 +570,28 @@
   新模組照食譜那段加一個 `if chan and ch_id == chan: await handle_xxx(message); return`。
 - **Discord CDN 圖片網址會過期（~24h）** → 要 bot 收圖請**下載 bytes**，別存連結。
 
+### 坑：排程 thread 裡不能建 `discord.ui.View`
+- View 建立時要拿 bot 的 event loop；APScheduler 是同步 thread → 要附按鈕的卡用
+  `bridge.post_sync(chan, embeds, make_view=lambda: ...)`，**傳工廠函式**，在 bot loop 的 coroutine 裡才建。
+- 迴圈裡傳 lambda 記得用預設參數綁值（`lambda b=batch: page_view(b, ...)`），不然全部拿到最後一圈的值。
+- `DynamicItem` 的 template 會在**建構時**拿 custom_id 去比對：template 寫太窄（`[\d-]+`）連測試用的 `b-1` 都建不起來。
+
+### 坑：銀行 PDF 與信件的幾個陷阱（刷卡比對 cardrecon/）
+- **中信月帳單**：pypdf 抽出來是 `/UNIC0038` 這種**字形名**，不是文字——名字就是 Unicode 碼位，`chr(0x0038)` 還原。
+  中文字型完全沒對照表 → 中文店名抽不出來，只有英文店名留得住。
+- **永豐每日消費通知**：沒有店名；年份要從「期間：115/10/08」取，一月的信可能有十二月的刷卡（年份要減 1）。
+- **DAWHO「信用卡交易」是繳卡費**，不是消費 → 永遠不抓，抓了會跟刷卡重複算。
+- **退款/繳款是負數**：解析時丟掉，但仍佔 line_no（line_no 跟 message_id 是唯一鍵，重解析要穩定）。
+- 兩家 PDF 密碼都是**身分證字號（英文大寫）**，存在 `national_id` secret。
+
+### 🔴 坑：repo 是公開的，測試樣本／spec 範例別抄真實個資
+- **怎麼發生的**：刷卡比對的計畫把實測拿到的刷卡紀錄（卡末四碼、訂閱金額、停車收據 UUID）直接寫成測試樣本，
+  審查才發現。`johnny-lo/money-bot` 是 **PUBLIC**。
+- **處置**：當時還沒推送 → 換合成值，再用臨時 clone 跑 `git filter-branch --tree-filter <替換腳本> -- origin/master..master`
+  只改寫**未推送**的那段；驗「最終 tree 跟改寫前相同」與「`git log -p origin/master..master` 殘留 0」後才
+  `git update-ref` 換掉 master（tree 相同 → 工作區不動）。
+- **鐵律**：樣本一律手寫合成值；寫 spec 的「實測事實」也只寫格式與統計，不寫真實金額、卡號、店名組合。推送前 grep 一次。
+
 ## 6. 測試姿態（照著走，別自創）
 - 測試是**純單元**：① model 用 `__table__.columns` introspection（不連 DB）；② 邏輯用 `FakeSession` + monkeypatch。
 - **repo/route/handler glue 沒有單元測試** → 靠 curl / Discord / 直呼 orchestrator 的 smoke 驗。
@@ -644,5 +681,6 @@
 - [ ] **動到對外出口（Funnel / BASE_URL / 網域）→ 從公開路徑驗，不能只 curl localhost**：
       `scripts/healthcheck.sh`（或手動 `dig @1.1.1.1` + `curl --resolve`）。
       本機 curl `*.ts.net` 走 MagicDNS 內網，對這類故障零證據力。
+- [ ] **改了 `requirements.txt`** → 用新 image 跑 `scripts/check_tests.sh` + `pip freeze` 新舊比對，再 `compose up`（見 §2 SQLAlchemy 2.1 那條）。
 - [ ] 手機視覺類改動 → **使用者親眼確認**才算完成。
 - [ ] commit 有更新 `README.md` + `CODEBASE.md`。
