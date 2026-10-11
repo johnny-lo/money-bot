@@ -14,7 +14,7 @@
 | 資料範圍 | 納入加密 PDF；身分證存在 `national_id` secret（已填） |
 | 呈現方式 | 每週推清單＋整批補記，可逐筆忽略 |
 | 第一版來源 | 只做信用卡：永豐每日消費通知、中信月帳單。收據（Autopass）只用來替刷卡補店名；轉帳、繳費不做 |
-| 歷史怎麼處理 | ⏳ 卡片未回，本 spec 先依推薦「只從上線那週開始列，歷史另出一次性報表、不寫入」；若改選，只動〈歷史資料〉一節 |
+| 歷史怎麼處理 | 全部進清單（帳目起始日以來），第一次分多張卡核可 |
 
 ## 實測事實（2026-10-11，唯讀）
 
@@ -115,9 +115,9 @@ class RawMail:
 | id | PK |
 | message_id, line_no | **唯一鍵**（UniqueConstraint）。同一封信重抓不會重複 |
 | source, card_last4, charge_date, charge_time, post_date, amount, region, merchant, pay_method | 來自 Charge |
-| status | `unmatched` / `matched` / `ignored` / `recorded` / `history` |
+| status | `unmatched` / `matched` / `ignored` / `recorded` |
 | matched_key | 配到的 TxGroup.key（matched / recorded 才有） |
-| batch | 列進哪一週的清單卡（週日日期字串 `2026-10-18`）；沒列過為 NULL |
+| batch | 列在哪一張清單卡：`<週日日期>-<頁>`，例 `2026-10-18-1`；沒列過為 NULL |
 | created_at, updated_at | |
 
 `repo.py` 介面：
@@ -145,26 +145,25 @@ class RawMail:
 3. `enrich` 補店名（只針對還沒店名的 unmatched）。
 4. `load_groups(since = 最早一筆 pending 的日期 − 3 天)`，扣掉 `used_group_keys`，`match` → `mark_matched`。
    每週都重比，因為發票可能晚幾天才同步進來。
-5. 本週清單＝`pending(until = today − 3)` 且 `charge_date ≥ LIST_FROM`；`assign_batch(…, batch=today)`。
-   留 3 天緩衝，等發票補拓追上。
-6. 回 `WeeklyResult(items, total, failed_mails, unparsed_mails)`。
+5. 本週清單＝`pending(until = today − 3)` 且 `charge_date ≥ LIST_FROM`，依日期排序後每 25 筆切一頁，
+   `assign_batch(ids, f"{today}-{頁}")`。留 3 天緩衝，等發票補拓追上。
+6. 回 `WeeklyResult(pages: list[(batch, items)], total, failed_mails, unparsed_mails)`。
 
-### 歷史資料（依推薦選項；卡片若改選只動這節）
+### 歷史資料
 
-- `cardrecon/config.py`：`LIST_FROM`＝上線當週的週一（上線時由主線填入實際日期並 commit；在那之前測試用 fake 值）。
-- 第一次跑時，`charge_date < LIST_FROM` 且沒配到的，status 設成 `history`，不進週卡、不能補記。
-- 一次性報表：`docker exec -w /app money-bot python -m cardrecon.report` 把 history 列成 markdown 表
-  （日期、卡、金額、地區、店名），依月份小計。只輸出、不寫 DB；檔案存本機給使用者看。
+- `cardrecon/config.py`：`LIST_FROM = date(2026, 2, 22)`（帳目最早一天；更早的刷卡沒有帳可比，不列）。
+- 第一次跑就把 2/22 以來沒配到的全部列出（實測約 255 筆），照一般流程分頁成多張卡，各自核可。
+- 之後每週只會多出新的幾筆。
 
 ### Discord：清單卡（`discordbot/cardrecon_ui.py`）
 
 - 發在 `DISCORD_INVOICE_CHANNEL_ID`（#🧾-發票通知）。週日一條龍順序改成：
   發票同步 → **刷卡比對** → AI 分類 → 週報 → 月結。
 - 本週 0 筆 → 不發卡（有失敗信件時才發一張警告卡）。
-- Embed：標題「💳 本週疑似漏記 N 筆，共 $X」；每行 `10/03 永豐1234 US $1,500 店名`；
-  超過 4096 字截斷並註明「其餘 M 筆下週再列」（留在 unmatched，不指派 batch）。
+- 每頁一張卡（≤25 筆，剛好是下拉選單上限）。Embed 標題「💳 疑似漏記 第 p/P 頁：N 筆，共 $X」；
+  每行 `10/03 永豐1234 US $1,500 店名`。25 行遠低於 4096 字上限，不用截斷。
 - 元件（DynamicItem，custom_id 自帶 batch，bot 重啟不用記憶體狀態）：
-  - 下拉 `cardrecon:ignore:<batch>`：多選要忽略的項目（最多 25 個）→ `ignore(ids)`，更新卡片。
+  - 下拉 `cardrecon:ignore:<batch>`：多選要忽略的項目→ `ignore(ids)`，更新卡片。
   - 按鈕 `cardrecon:record:<batch>`「全部補記」→ `record(batch)`，按完把卡片改成結果並移除元件。
 - 只有本人能按：沿用 `AUTOFIX_OWNER_USER_ID`；別人按回 ephemeral 提示。
 - `bridge.py` 加 `post_sync(channel_id, embeds, view)`（現有 `post_embeds_sync` 不帶 view）。
@@ -213,7 +212,7 @@ class RawMail:
 
 1. **parse + pdf**（parse.py、pdf.py、測試）
 2. **match**（match.py、測試）
-3. **資料層＋流程**（gmail.py、repo.py、ingest.py、report.py、守衛測試、compose/requirements）
+3. **資料層＋流程**（gmail.py、repo.py、ingest.py、守衛測試、compose/requirements）
 4. **Discord＋排程**（cardrecon_ui.py、bridge.post_sync、main.py 一條龍接線；先對 repo 介面寫，用 fake 測）
 
 1、2 完全獨立；3、4 只依賴上面的 repo 介面簽名。全部 merge 後主線做整合 smoke、文件、上線。
