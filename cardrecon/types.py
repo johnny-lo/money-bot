@@ -1,0 +1,56 @@
+"""cardrecon 各層之間的資料契約（無 I/O）。"""
+from dataclasses import dataclass, field
+from datetime import date
+
+
+@dataclass(frozen=True)
+class Charge:
+    source: str                      # "sinopac_daily" | "ctbc_statement"
+    card_last4: str
+    charge_date: date
+    amount: int                      # 台幣整數，> 0
+    line_no: int                     # 該封信內的序號（0 起）；與 message_id 合為唯一鍵
+    charge_time: str | None = None   # "23:12"（永豐才有）
+    post_date: date | None = None    # 入帳日（中信才有）
+    region: str | None = None
+    merchant: str | None = None
+    pay_method: str | None = None    # 中信行動支付代碼（"A" 等）
+
+
+@dataclass(frozen=True)
+class Receipt:
+    paid_date: date
+    amount: int
+    merchant: str
+
+
+@dataclass(frozen=True)
+class TxGroup:
+    key: str                         # invoice_no，或手記帳 "id<transaction.id>"
+    tx_date: date
+    amount: int
+
+
+@dataclass(frozen=True)
+class RawMail:
+    message_id: str
+    sender: str
+    subject: str
+    received: date | None
+    pdf: bytes | None
+    text: str
+
+
+@dataclass
+class WeeklyResult:
+    pages: list = field(default_factory=list)   # list[tuple[str, list[tuple[int, Charge]]]]（batch, 該頁項目）
+    total: int = 0
+    failed_mails: int = 0                       # 解密失敗
+    unparsed_mails: int = 0                     # 沒附件或解析 0 筆
+
+
+@dataclass(frozen=True)
+class RecordResult:
+    recorded: int        # 這次補記幾筆
+    total: int           # 補記金額合計
+    matched: int         # 補記前重比、發現已有帳而改成 matched 的筆數

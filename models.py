@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Date, Float, ForeignKey, JSON, func
+from sqlalchemy import Column, Integer, String, DateTime, Date, Float, ForeignKey, JSON, UniqueConstraint, func
 from database import Base
 
 class Transaction(Base):
@@ -163,3 +163,27 @@ class AutofixIncident(Base):
     report_message_id = Column(String(30), nullable=True)         # 報告卡的 Discord message id（結果回覆在它底下）
     reported_at = Column(DateTime, nullable=True)
     closed_at = Column(DateTime, nullable=True)
+
+
+class CardCharge(Base):
+    """刷卡紀錄（cardrecon/）。一封信的一行 = 一筆；status 決定會不會進週日清單。"""
+    __tablename__ = "card_charges"
+    __table_args__ = (UniqueConstraint("message_id", "line_no", name="uq_card_charges_msg_line"),)
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(String, nullable=False)
+    line_no = Column(Integer, nullable=False)
+    source = Column(String, nullable=False, index=True)
+    card_last4 = Column(String, nullable=False)
+    charge_date = Column(Date, nullable=False, index=True)
+    charge_time = Column(String, nullable=True)
+    post_date = Column(Date, nullable=True)
+    amount = Column(Integer, nullable=False)
+    region = Column(String, nullable=True)
+    merchant = Column(String, nullable=True)
+    pay_method = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="unmatched", index=True)  # unmatched/matched/ignored/recorded
+    matched_key = Column(String, nullable=True)
+    batch = Column(String, nullable=True, index=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

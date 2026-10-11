@@ -13,3 +13,5 @@ pytest
 yt-dlp
 httpx
 ddddocr
+pypdf
+cryptography
