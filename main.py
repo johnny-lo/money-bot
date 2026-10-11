@@ -178,12 +178,24 @@ def _daily_invoice_with_notify():
 
 
 def _weekly_pipeline():
-    """週日 21:00：發票同步 → AI 分類 → 週報 →（每月第一個週日多推上月月結）。"""
+    """週日 21:00：發票同步 → 刷卡比對 → AI 分類 → 週報 →（每月第一個週日多推上月月結）。"""
     try:
         result = sync_with_backfill()
         _notify_invoice_result(result)
     except Exception as e:
         print(f"⚠️ 週日發票同步失敗：{e}")
+    try:
+        from zoneinfo import ZoneInfo
+        from cardrecon.ingest import run_weekly
+        from discordbot.cardrecon_ui import notify_weekly
+        notify_weekly(run_weekly(datetime.now(ZoneInfo("Asia/Taipei")).date()))
+    except Exception as e:
+        print(f"⚠️ 週日刷卡比對失敗：{e}")
+        try:
+            from discordbot.cardrecon_ui import notify_failure
+            notify_failure(str(e))
+        except Exception:
+            pass
     try:
         run_weekly_categorization()
     except Exception as e:

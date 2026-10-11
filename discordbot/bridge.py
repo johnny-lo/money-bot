@@ -34,3 +34,27 @@ def post_embeds_sync(channel_id: int, embeds: list[discord.Embed]) -> None:
             print(f"⚠️ Discord 通知失敗 (channel {channel_id})：{e}")
 
     asyncio.run_coroutine_threadsafe(_send(), loop)
+
+
+def post_sync(channel_id: int, embeds: list[discord.Embed], make_view=None) -> None:
+    """同 post_embeds_sync，但可附元件。make_view 在 bot loop 內才呼叫（View 不能在排程 thread 建）。"""
+    bot = _bot_instance
+    if not bot or not channel_id:
+        return
+    loop = bot.loop
+    if not loop or loop.is_closed():
+        print("⚠️ Discord bot 還沒 ready，跳過通知")
+        return
+
+    async def _send():
+        try:
+            ch = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+            kw = {"embeds": embeds}
+            view = make_view() if make_view else None
+            if view is not None:
+                kw["view"] = view
+            await ch.send(**kw)
+        except Exception as e:
+            print(f"⚠️ Discord 通知失敗 (channel {channel_id})：{e}")
+
+    asyncio.run_coroutine_threadsafe(_send(), loop)
