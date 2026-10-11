@@ -23,10 +23,13 @@ def _run(db, today: date) -> WeeklyResult:
     nid = get_secret("NATIONAL_ID")
     if not nid:
         raise RuntimeError("national_id secret 是空的，解不開銀行 PDF")
-    since = today - timedelta(days=config.LOOKBACK_DAYS) if repo.has_any(db) else None
+    lookback = today - timedelta(days=config.LOOKBACK_DAYS)
     res = WeeklyResult()
 
+    full_fetch = False
     for source, (sender, kw) in config.CARD_SOURCES.items():
+        since = lookback if repo.has_source(db, source) else None     # 逐來源判斷首跑
+        full_fetch = full_fetch or since is None
         for mail in gmail.fetch(sender, kw, since):
             if mail.pdf is None:
                 res.unparsed_mails += 1
@@ -41,8 +44,9 @@ def _run(db, today: date) -> WeeklyResult:
                 continue
             repo.upsert_charges(db, mail.message_id, charges)
 
+    receipt_since = None if full_fetch else lookback
     receipts = [r for sender, kw in config.RECEIPT_SOURCES
-                for m in gmail.fetch(sender, kw, since) if (r := parse.parse_autopass(m.text))]
+                for m in gmail.fetch(sender, kw, receipt_since) if (r := parse.parse_autopass(m.text))]
     if receipts:
         repo.set_merchant(db, matcher.enrich(repo.pending(db, today), receipts))
 
@@ -54,9 +58,10 @@ def _run(db, today: date) -> WeeklyResult:
         repo.mark_matched(db, matcher.match(pend, groups))
 
     listed = repo.unlisted(db, today - timedelta(days=config.LIST_LAG_DAYS), config.LIST_FROM)
+    first_page = repo.max_page(db, today.isoformat()) + 1
     for p in range(0, len(listed), config.PAGE_SIZE):
         chunk = listed[p:p + config.PAGE_SIZE]
-        batch = f"{today.isoformat()}-{p // config.PAGE_SIZE + 1}"
+        batch = f"{today.isoformat()}-{first_page + p // config.PAGE_SIZE}"
         repo.assign_batch(db, [i for i, _ in chunk], batch)
         res.pages.append((batch, chunk))
     res.total = sum(c.amount for _, c in listed)

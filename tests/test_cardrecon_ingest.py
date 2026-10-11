@@ -20,7 +20,11 @@ class FakeRepo:
         i = len(self.rows) + 1
         self.rows[i] = dict(c=c, status=status, batch=batch, key=None, msg=None)
         return i
-    def has_any(self, db): return bool(self.rows)
+    def has_source(self, db, source): return any(r["c"].source == source for r in self.rows.values())
+    def max_page(self, db, day):
+        pages = [int(r["batch"].rsplit("-", 1)[1]) for r in self.rows.values()
+                 if r["batch"] and r["batch"].rsplit("-", 1)[0] == day]
+        return max(pages, default=0)
     def upsert_charges(self, db, mid, charges):
         new = 0
         for c in charges:
@@ -82,19 +86,50 @@ def test_已列過的_下週不再列(monkeypatch):
     assert ingest.run_weekly(TODAY).pages == []
 
 
+def _seen_by_sender(monkeypatch, fake):
+    seen = {}
+    _wire(monkeypatch, fake, {}, {})
+    monkeypatch.setattr(ingest.gmail, "fetch", lambda s, k, since=None: seen.setdefault(s, []).append(since) or [])
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: []})
+    return seen
+
+
 def test_第一次抓全部_之後回看60天(monkeypatch):
-    seen = []
     fake = FakeRepo()
     fake.groups = []
-    _wire(monkeypatch, fake, {}, {})
-    monkeypatch.setattr(ingest.gmail, "fetch", lambda s, k, since=None: seen.append(since) or [])
-    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: []})
+    seen = _seen_by_sender(monkeypatch, fake)
     ingest.run_weekly(TODAY)
-    assert set(seen) == {None}
-    fake._add(ch(date(2026, 10, 1), 1))
+    assert {s for v in seen.values() for s in v} == {None}
+    fake._add(ch(date(2026, 10, 1), 1, src="sinopac_daily"))
+    fake._add(ch(date(2026, 10, 1), 1, src="ctbc_statement"))
     seen.clear()
     ingest.run_weekly(TODAY)
-    assert set(seen) == {date(2026, 8, 19)}
+    assert {s for v in seen.values() for s in v} == {date(2026, 8, 19)}
+
+
+def test_部分首跑_沒存過的來源仍抓全部(monkeypatch):
+    fake = FakeRepo()
+    fake.groups = []
+    fake._add(ch(date(2026, 10, 1), 1, src="sinopac_daily"))
+    seen = _seen_by_sender(monkeypatch, fake)
+    ingest.run_weekly(TODAY)
+    (sinopac, _), (ctbc, _) = ingest.config.CARD_SOURCES.values()
+    assert seen[sinopac] == [date(2026, 8, 19)]
+    assert seen[ctbc][0] is None
+    receipt_since = [v for k, v in seen.items() if k not in (sinopac, ctbc)]
+    assert receipt_since and all(s is None for v in receipt_since for s in v)
+
+
+def test_同日再跑_批次接續編號(monkeypatch):
+    day = TODAY.isoformat()
+    fake = FakeRepo(existing=[(ch(date(2026, 10, 1), 1, 0), "unmatched", f"{day}-1"),
+                              (ch(date(2026, 10, 1), 2, 1), "unmatched", f"{day}-2")])
+    fake.groups = []
+    _wire(monkeypatch, fake, {"spendservice@sinopac.com": [mail("<n>", b"A")]}, {b"A": "a"})
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [ch(date(2026, 10, 2), 7, 5)],
+                                                   "ctbc_statement": lambda t: []})
+    res = ingest.run_weekly(TODAY)
+    assert [b for b, _ in res.pages] == [f"{day}-3"]
 
 
 def test_收據補店名(monkeypatch):

@@ -20,8 +20,8 @@ def test_can_act(uid, owner, expect):
 
 
 def test_每行格式與狀態標記():
-    assert ui.line(ch(1500)) == "10/03 永豐1234 US $1,500"
-    assert ui.line(ch(450, "ACME", "ctbc_statement", "5678")) == "10/03 中信5678 US $450 ACME"
+    assert ui.line(ch(2345)) == "10/03 永豐1234 US $2,345"
+    assert ui.line(ch(690, "ACME *STREAMING", "ctbc_statement", "5678")) == "10/03 中信5678 US $690 ACME *STREAMING"
     assert ui.line(ch(5), "ignored").startswith("~~") and "已忽略" in ui.line(ch(5), "ignored")
     assert "已有帳" in ui.line(ch(5), "matched") and "已補記" in ui.line(ch(5), "recorded")
 

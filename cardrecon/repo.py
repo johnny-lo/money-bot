@@ -14,8 +14,18 @@ def _to_charge(r) -> Charge:
                   merchant=r.merchant, pay_method=r.pay_method)
 
 
-def has_any(db) -> bool:
-    return db.query(CardCharge.id).first() is not None
+def has_source(db, source: str) -> bool:
+    return db.query(CardCharge.id).filter(CardCharge.source == source).first() is not None
+
+
+def max_page(db, day: str) -> int:
+    """當天已用過的最大頁碼（批次名 '<day>-<n>'），沒有回 0。"""
+    prefix, best = f"{day}-", 0
+    for (b,) in db.query(CardCharge.batch).filter(CardCharge.batch.like(f"{prefix}%")).distinct().all():
+        tail = (b or "")[len(prefix):]
+        if b and b.startswith(prefix) and tail.isdigit():
+            best = max(best, int(tail))
+    return best
 
 
 def upsert_charges(db, message_id: str, charges: list[Charge]) -> int:
