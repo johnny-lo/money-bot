@@ -411,6 +411,19 @@
 - **教訓**：判斷狀態的關鍵字，測試要包含**長得很像、意思相反**的反例；只測正例跟空字串，
   擋不住這種一字之差的錯。
 
+### 坑：登入其實成功，卻因為「SPA 還沒畫完就讀 body」被當未知狀態（多燒一次登入）
+- **怎麼發生的**：2026-10-12 載具2 第 3 次登入落在查詢頁 `btc502w/search`，但網址穩定後只等 1 秒就讀 body，
+  當下連頁首「登出」都還沒畫出來 → `_login_landing` 回 unknown → 重試；第 4 次因為已在登入狀態，
+  `_enter_login_flow` 等不到 `**/accounts/login/**` 而逾時（證據：autofix 事件 #4 的 attempts）。
+- **解法**：`_wait_landing` 依條件輪詢（`/portal/btc/` 下最多 20 秒）到判斷不再是 unknown；
+  仍是 unknown 就把遮罩過的 body 開頭寫進 log，下次不用再靠推論。
+- **教訓**：判斷 SPA 頁面「是什麼」之前，先等它畫完；固定 sleep 會在慢的日子出錯。`_goto_search_page` 早就這樣做了，登入落地那段漏了。
+
+### 🔴 坑：Discord 按鈕的 custom_id 帶著業務 id，那個 id 永遠不能重用
+- 刷卡清單卡的按鈕 custom_id 是 `cardrecon:record:<batch>`，bot 重啟後靠它找回要補記的列。
+  `relist` 第一版先清空 batch 再算「當天最大頁碼」→ 編號從 1 重來 → 舊卡按鈕會作用到使用者沒看過的刷卡（可能重複記帳）。審查擋下。
+- **規則**：會被舊訊息引用的 id（批次號、事件號）只能遞增，不能因為「現在沒人用」就回收。
+
 ### 坑：開機補拓從來沒跑過——naive `datetime.now()` 遇上 Asia/Taipei 排程器
 - **根因**：`run_date=datetime.now() + 3 分鐘` 是容器的 UTC naive 時間，
   `BackgroundScheduler(timezone="Asia/Taipei")` 把它當台北時間 → 排在 8 小時前 →
