@@ -16,27 +16,17 @@ services:
       - "127.0.0.1:8000:8000"
     environment:
       - BASE_URL=${BASE_URL:?請在 .env 設定 BASE_URL（對外網址）}
-      - LINE_CHANNEL_SECRET=${LINE_CHANNEL_SECRET}
-      - LINE_CHANNEL_ACCESS_TOKEN=${LINE_CHANNEL_ACCESS_TOKEN}
-      - DATABASE_URL=${DATABASE_URL}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
-      - GOOGLE_PLACES_SERVER_KEY=${GOOGLE_PLACES_SERVER_KEY}
       - GOOGLE_MAPS_BROWSER_KEY=${GOOGLE_MAPS_BROWSER_KEY:-}
       - GOOGLE_MAPS_MAP_ID=${GOOGLE_MAPS_MAP_ID:-DEMO_MAP_ID}
       - MODEL_NAME=${MODEL_NAME}
       - GEMINI_FALLBACK_MODELS=${GEMINI_FALLBACK_MODELS:-}
       - CODEX_MODEL=${CODEX_MODEL:-}
       - MONTHLY_BUDGET=${MONTHLY_BUDGET:-0}
-      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - DISCORD_RECORD_CHANNEL_ID=${DISCORD_RECORD_CHANNEL_ID}
       - DISCORD_REPORT_CHANNEL_ID=${DISCORD_REPORT_CHANNEL_ID}
       - DISCORD_INVOICE_CHANNEL_ID=${DISCORD_INVOICE_CHANNEL_ID}
       - FOOD_INGEST_CHANNEL_ID=${FOOD_INGEST_CHANNEL_ID}
       - RECIPE_INGEST_CHANNEL_ID=${RECIPE_INGEST_CHANNEL_ID:-}
-      - EINVOICE_PHONE_1=${EINVOICE_PHONE_1}
-      - EINVOICE_PASSWORD_1=${EINVOICE_PASSWORD_1}
-      - EINVOICE_PHONE_2=${EINVOICE_PHONE_2}
-      - EINVOICE_PASSWORD_2=${EINVOICE_PASSWORD_2}
       # 自動修復（autofix/）：AUTOFIX_ENABLED=1 才啟用感測器；報告頻道與唯一能按部署的人
       - AUTOFIX_ENABLED=${AUTOFIX_ENABLED:-}
       - AUTOFIX_CHANNEL_ID=${AUTOFIX_CHANNEL_ID:-}
@@ -47,6 +37,22 @@ services:
       - .:/app
       # 掛入主機的 codex 登入憑證（ChatGPT 訂閱）；rw 讓 token 自動刷新可寫回
       - ${HOME}/.codex:/root/.codex
+    # 機密不走 environment:（會被 codex/Playwright 子程序繼承、docker inspect 看得到）。
+    # 主機檔在 repo 外：~/.config/money-bot/secrets/（scripts/migrate_secrets.sh 產生）；
+    # 程式經 app_secrets.get_secret() 讀 /run/secrets/<小寫名>。選填的沒值也要有空檔，否則 compose 起不來。
+    secrets:
+      - line_channel_secret
+      - line_channel_access_token
+      - discord_bot_token
+      - gemini_api_key
+      - google_places_server_key
+      - database_url
+      - einvoice_phone_1
+      - einvoice_password_1
+      - einvoice_phone_2
+      - einvoice_password_2
+      - gmail_app_password
+      - national_id
 
   # 2. PostgreSQL 資料庫
   db:
@@ -55,7 +61,7 @@ services:
     restart: always
     environment:
       # 預設值=現行設定（postgres 只在首次初始化 volume 時套用密碼；之後改這裡不會改到既有 DB，
-      # 真要換密碼：ALTER USER + 同步改 .env 的 DATABASE_URL）
+      # 真要換密碼：ALTER USER + 同步改 ~/.config/money-bot/secrets/database_url）
       - POSTGRES_USER=${POSTGRES_USER:-user}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
       - POSTGRES_DB=${POSTGRES_DB:-money_db}
@@ -64,3 +70,29 @@ services:
 
 volumes:
   postgres_data:
+
+secrets:
+  line_channel_secret:
+    file: ${HOME}/.config/money-bot/secrets/line_channel_secret
+  line_channel_access_token:
+    file: ${HOME}/.config/money-bot/secrets/line_channel_access_token
+  discord_bot_token:
+    file: ${HOME}/.config/money-bot/secrets/discord_bot_token
+  gemini_api_key:
+    file: ${HOME}/.config/money-bot/secrets/gemini_api_key
+  google_places_server_key:
+    file: ${HOME}/.config/money-bot/secrets/google_places_server_key
+  database_url:
+    file: ${HOME}/.config/money-bot/secrets/database_url
+  einvoice_phone_1:
+    file: ${HOME}/.config/money-bot/secrets/einvoice_phone_1
+  einvoice_password_1:
+    file: ${HOME}/.config/money-bot/secrets/einvoice_password_1
+  einvoice_phone_2:
+    file: ${HOME}/.config/money-bot/secrets/einvoice_phone_2
+  einvoice_password_2:
+    file: ${HOME}/.config/money-bot/secrets/einvoice_password_2
+  gmail_app_password:
+    file: ${HOME}/.config/money-bot/secrets/gmail_app_password
+  national_id:
+    file: ${HOME}/.config/money-bot/secrets/national_id

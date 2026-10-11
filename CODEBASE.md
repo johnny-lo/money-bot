@@ -50,7 +50,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── claude-settings.template.json  # claude -p 權限白名單（__AF__ 由 run.sh 代換）：只准讀/編輯 worktree、git 唯讀+commit、bin/test、bin/probe、Skill；禁 docker/.env/push/merge/上網/AskUserQuestion
 │   ├── run.sh           # 主機：取最舊 inbox → git worktree `/var/tmp/linebot-autofix-<id>`（放家目錄外才能 deny Read //home/**；drill 先套 drill.patch）→ timeout 45m claude -p → report.py finalize → outbox。AUTOFIX_DRY_RUN=1 用 testing/fake-claude.sh
 │   ├── bin/test         # 一次性容器跑 worktree 的 import 預檢＋全套測試；附拋棄式 Postgres（--internal 網路，不能對外；main.py import 時就 create_all）
-│   ├── bin/probe        # Claude 唯一能碰外部網站的路：一次性容器（不接 compose 網路→連不到正式 DB）跑**主目錄唯讀**的 probes/*.py；`probe einvoice --carrier N`、`probe extract <url>`
+│   ├── bin/probe        # Claude 唯一能碰外部網站的路：一次性容器（不接 compose 網路→連不到正式 DB）跑**主目錄唯讀**的 probes/*.py；`probe einvoice --carrier N`（帳密從 `~/.config/money-bot/secrets/einvoice_{phone,password}_N` 讀，缺或空 exit 2，只帶該載具一組進一次性容器）、`probe extract <url>`
 │   ├── probes/guard.py  # 登入預算安全帶：patch Playwright，在網路層數「帶手機號碼送往財政部的非 GET 請求」，每事件 >3 次直接 abort（Claude 改 worktree 程式也繞不過）；guard 永遠最後註冊=最先比對；browser 關閉前自動存頁面（遮罩手機/email）到 .autofix-probe/。測 tests/test_autofix_probe_guard.py（含真 Chromium 攔截）
 │   ├── deploy.sh        # 主機：approved/<id>.deploy → 前置檢查（目錄乾淨、可乾淨合併，否則回報 reported 保留按鈕）→ merge --no-ff → import 預檢 → 全套測試 → restart → 等 startup → `python -m autofix.verify <id>`；任一步失敗 revert -m 1 + 重啟。.abandon → 清 worktree/分支。不 push
 │   ├── verify.py        # 上線驗證（正式容器內）：einvoice＝該載具實抓一次；extract＝當初失敗網址過半抽得到；scheduler＝待下次排程確認；drill＝登入落地測試。測 tests/test_autofix_verify.py
@@ -94,7 +94,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── persona.example.md   # persona.md 的**寫法教學**（怎麼寫判斷規則、為什麼不能給口頭禪清單、資料不足時的預設行為）
 ├── requirements.txt     # Python 依賴
 ├── Dockerfile           # python:3.11-slim，pip install → uvicorn 啟動
-├── docker-compose.yml   # **兩個**服務：app(127.0.0.1:8000)、db(PostgreSQL，僅 docker network；帳密可由 .env POSTGRES_* 覆蓋)。**對外出口是主機上的 Tailscale Funnel**（`tailscale funnel --bg 8000`），不是容器——原本的 ngrok service 已移除，因為免費版攔截頁會讓瀏覽器抓 sw.js 時拿到 HTML、SW 註冊靜默失敗（詳見 AGENTS.md）
+├── docker-compose.yml   # **兩個**服務：app(127.0.0.1:8000)、db(PostgreSQL，僅 docker network；帳密可由 .env POSTGRES_* 覆蓋)。12 個機密走頂層 `secrets:`（file: `${HOME}/.config/money-bot/secrets/<小寫名>`）掛進 app 的 `/run/secrets/`，不在 `environment:`。**對外出口是主機上的 Tailscale Funnel**（`tailscale funnel --bg 8000`），不是容器——原本的 ngrok service 已移除，因為免費版攔截頁會讓瀏覽器抓 sw.js 時拿到 HTML、SW 註冊靜默失敗（詳見 AGENTS.md）
 ├── routes/
 │   ├── __init__.py
 │   ├── report.py        # 報表 API：/api/report/monthly|category|summary|ledger + /report 頁面（year/month Query ge/le 驗證,違規回 422）+ **POST /api/report-token**(PWA 用裝置 token 換 30 分鐘短效 token 開報表頁,`can_mint_device=False`) + **GET /report/ledger_filter.js**(直接吐 `frontend/src/ledgerFilter.js` 原始碼,不經 build——報表頁與 PWA 共用同一份篩選純函式,複製第二份的下場是兩邊語意漂移)
@@ -107,6 +107,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── frontend/            # 手機版 PWA（React+Vite+vite-plugin-pwa）：**四 tab 全實裝**——美食(Food/Nearby/FoodList/FoodMap/PlaceSheet/geo.js/cuisine.js；**預設「附近」模式**：定位→範圍滑桿(1/3/5/10/30km,車程標註是手工校準常數表**不是公式**——長程走國道,km×3 會把 30km 算成 90 分而那一檔就沒人按)→料理磚塊帶家數→點磚塊才列店。定位失敗**自動退回清單**+banner,絕不卡首屏。附近模式整排隱藏第二列篩選(範圍由滑桿決定、料理由磚塊決定,再擺一套只會打架)。三態切換 附近/清單/地圖 用**分段控制**(目前模式高亮)——原本是顯示「下一個模式」圖示的循環鈕,使用者看不出自己在哪個模式,又因為地區篩選只在清單/地圖渲染,導致「行政區不見了」被回報兩次;附近模式另加一行指路文字。右下角有 build 時間戳(vite define __BUILD_ID__),用來一眼判斷手機拿到的是不是新版。清單/地圖模式才有地區 select + 12 大類 chips。**地區是單一分組選單(optgroup 依縣市)不是兩個級聯 select**——級聯版的行政區被兩道預設關著的關卡擋住(要 view!=='nearby' 且已選特定縣市才渲染),使用者根本找不到;合併後一次點擊就到,且「換縣市忘了重置行政區」那類 bug 結構性消失(一個控制項＝一個真相來源)。geo.js 是無 React 純函式(haversineKm 缺座標回 Infinity 不回 0,否則沒座標的店會出現在每個範圍),可用 `node --input-type=module` 直接跑驗,不必為三個函式引入 JS 測試框架)、消費(Spend 吃 /api/report/ledger 整月前端算+RecordSheet CRUD;**點分類長條/日期標頭＝篩選**,三格頭與分類占比刻意吃整月不跟著篩——篩選後的數字只放摘要列,而且分類長條自己就是篩選器,被自己篩到剩一條就點不回去;右上 📊 報表鈕先 `window.open('')` 同步開空分頁再填網址,等 await 回來才開會被當非使用者手勢擋掉)、食譜(Recipe.jsx 拉霸隨機抽=前端 random+減速動畫,清單/改名/刪除)、歷史(Videos.jsx 主題書架 chips **依影片數排序並顯示數量**（21 書架/33 影片,不排序的話有東西的會被埋在只有一支的後面）+標籤/關鍵字搜尋,useMemo 衍生過濾,點卡片 sheet 改主題/加刪標籤/開連結/刪除)。**更新機制三層**(手機主畫面 App 沒有重整鈕、iOS 是暫停非終止 → 瀏覽器的 SW 更新檢查永遠不觸發): ①main.jsx 在 visibilitychange/focus/30min 主動 `registration.update()` ②update.js 直接 fetch index.html 比對 bundle 檔名(不依賴 SW 自我回報)→ 落後跳更新條 ③forceUpdate() 清快取+unregister+reload(**保留 media\*照片**);右下角 build 時間戳供一眼判版。manifest+SW(injectManifest 自製 src/sw.js:precache+API NetworkFirst+media CacheFirst-v2 帶 ngrok 跳過 header——img 標籤帶不了 header,SW 重發才繞得過攔截頁)、icons 在 public/。build:`cd frontend && npm run build`(script 內含 NODE_OPTIONS webcrypto flag,Node 18 需要)→ dist/ 由 main.py 掛 /m/（目錄不存在自動跳過;.webmanifest MIME 已註冊）。node_modules/dist/.env(VITE_* 金鑰) 不入版控。
 │                        # **`src/ledgerFilter.js`＝流水帳篩選純函式**(applyFilters/toggleCond/summarize/chips/hasCond,無 React 無 DOM)：PWA 走 vite build import,報表頁走 `/report/ledger_filter.js` 載同一份原始碼。測試 `src/ledgerFilter.test.mjs` 用 Node 內建 runner(`cd frontend && npm test`,16 個),CI frontend job 會跑
 ├── scripts/             # **跑在主機上**的維運腳本（不是容器內——對外出口 Tailscale Funnel 就在主機上）
+│   ├── migrate_secrets.sh  # `[--env FILE] [--dest DIR]`：把 .env 的 12 個機密搬成 ~/.config/money-bot/secrets/<小寫名>（目錄 700、檔案 600、備份 env.bak.*）；冪等、不 source .env、不印值；secrets 檔與 .env 值不同＝衝突，保留兩邊並警告。測 tests/test_migrate_secrets.py
 │   ├── healthcheck.sh   # 對外健康檢查 + 自動修復 Funnel + Discord webhook 通知。**一定從公開路徑打**：`dig +short @1.1.1.1 <host> A` 拿入口 IP（**不寫死，每次重查**）→ `curl --resolve <host>:443:<ip>` 強制走它。用系統解析會走 MagicDNS 解到 100.x 內網＝沒走 Funnel＝驗了等於沒驗（2026-08-29 就是這樣誤判整站對外中斷）。**連續 2 次**失敗才動作 → `tailscale funnel --https=443 off` + `--bg 8000` → 等 6s 重驗 → 通知；修好也通知；修不好就 latch **停手**（不無限重試踢服務）；自己好了通知並解閂。**核心判斷 `classify()`：TLS 握手成功（curl `%{time_appconnect}`>0）＝入口正常＝app 問題 → 只通知不碰 Funnel；沒握到手＝入口沒註冊（`no peer certificate available`，事故簽名）→ 才修**。純函式 `env_value`/`host_of`/`classify`/`decide` + 修復路徑（假 tailscale 驗指令順序）全由內建 `--self-test` 覆蓋（31 項，不出網不碰真 funnel）。另有 `--status`/`--reset`/`--help`。狀態檔在 `$XDG_STATE_HOME/linebot-healthcheck/state`，flock 防重入
 │   └── systemd/         # systemd **user** timer 範本（免 sudo）：linebot-healthcheck.{service,timer}，開機後 2 分鐘 + 每 5 分鐘。**不自動安裝**，安裝步驟見 README
 ├── media/               # 使用者/Google 店家照片（.gitignore 只留 .gitkeep）；main.py 掛 /media/
@@ -254,6 +255,8 @@ LINE/Discord 訊息
 - **DB 查詢輔助** `_query_period(start, end)` 一次撈完一段期間需要的所有彙總（總額/分類/Top N/每日金額），週報跟月報共用
 
 ## Environment Variables
+
+**兩類**：一般設定在 `.env`（下面清單，進 compose `environment:` 白名單）；機密在 `~/.config/money-bot/secrets/`（`scripts/migrate_secrets.sh` 從 `.env` 搬）。
 
 12 個機密（清單見 `app_secrets.py` 與 docker-compose.yml `secrets:`）一律經 `app_secrets.get_secret()` 讀，`tests/test_secrets_guard.py` 擋 `os.getenv`。
 
