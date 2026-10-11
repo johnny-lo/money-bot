@@ -24,13 +24,16 @@ done
 # 引號內照抄；未加引號時「空白+#」之後是註解，緊貼的 # 是值的一部分（密碼可能含 #）。
 env_value() {
   local key="$1" file="$2" line v
-  line=$(grep -m1 -E "^[[:space:]]*${key}=" "$file") || return 0
+  # 重複的 key：docker compose 的 dotenv 取最後一筆，這裡照辦
+  line=$(grep -E "^[[:space:]]*${key}=" "$file" | tail -n1) || return 0
+  [ -n "$line" ] || return 0
   v=${line#*=}
   v=${v%$'\r'}
   v="${v#"${v%%[![:space:]]*}"}"
   case "$v" in
     \"*) v=${v#\"}; v=${v%%\"*} ;;
     \'*) v=${v#\'}; v=${v%%\'*} ;;
+    \#*) v= ;;   # `KEY=   # 註解`：值是空的
     *) v=$(printf '%s' "$v" | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//') ;;
   esac
   printf '%s' "$v"
@@ -39,7 +42,8 @@ env_value() {
 umask 077
 mkdir -p "$DEST"
 chmod 700 "$DEST"
-bak="$(dirname "$DEST")/env.bak.$(date +%Y%m%d-%H%M%S)"
+# mktemp 保證檔名唯一（同一秒跑兩次也不會蓋掉搬遷前的備份）
+bak="$(mktemp "$(dirname "$DEST")/env.bak.$(date +%Y%m%d-%H%M%S).XXXXXX")"
 cp "$ENV_FILE" "$bak"
 chmod 600 "$bak"
 

@@ -106,3 +106,42 @@ def test_probe_reads_credentials_from_secrets_files():
     assert ".config/money-bot/secrets" in text
     assert "einvoice_phone_" in text and "einvoice_password_" in text
     assert '/.env"' not in text
+
+
+def test_empty_value_followed_by_inline_comment_is_empty(tmp_path):
+    """`KEY=   # note`：值是空的、# 之後都是註解；不能把 `# note` 當成值，也不能把那行註解掉。"""
+    r, env, dest = _run(tmp_path, "GOOGLE_PLACES_SERVER_KEY=   # note\nGEMINI_API_KEY=gk\n")
+    assert r.returncode == 0, r.stderr
+    assert (dest / "google_places_server_key").read_text() == ""
+    assert "GOOGLE_PLACES_SERVER_KEY=   # note" in env.read_text()   # 空值不動那行
+    assert (dest / "gemini_api_key").read_text() == "gk"
+
+
+def test_duplicate_key_uses_last_occurrence(tmp_path):
+    """docker compose 的 dotenv 重複 key 取最後一筆；搬的值要跟它一致，兩行都要處理掉。"""
+    r, env, dest = _run(tmp_path, "GEMINI_API_KEY=first-v\nGEMINI_API_KEY=last-v\n")
+    assert r.returncode == 0, r.stderr
+    assert (dest / "gemini_api_key").read_text() == "last-v"
+    text = env.read_text()
+    assert "first-v" not in text and "last-v" not in text and "GEMINI_API_KEY=" not in text
+
+
+def test_backup_never_overwritten_in_same_second(tmp_path):
+    """同一秒跑兩次：第二次不能蓋掉第一次的備份（那份才是搬遷前原樣）。"""
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    fake_date = fakebin / "date"
+    fake_date.write_text("#!/bin/sh\necho 20260101-000000\n")
+    fake_date.chmod(0o755)
+    import os
+    env_vars = {**os.environ, "PATH": f"{fakebin}:{os.environ['PATH']}"}
+    envf = tmp_path / ".env"
+    envf.write_text("GEMINI_API_KEY=gk-orig\n", encoding="utf-8")
+    dest = tmp_path / "cfg" / "secrets"
+    for _ in range(2):
+        r = subprocess.run(["bash", str(SCRIPT), "--env", str(envf), "--dest", str(dest)],
+                           capture_output=True, text=True, env=env_vars)
+        assert r.returncode == 0, r.stderr
+    baks = list((tmp_path / "cfg").glob("env.bak.*"))
+    assert len(baks) == 2
+    assert any("GEMINI_API_KEY=gk-orig" in b.read_text() for b in baks)
