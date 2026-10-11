@@ -31,6 +31,7 @@ services:
       - AUTOFIX_ENABLED=${AUTOFIX_ENABLED:-}
       - AUTOFIX_CHANNEL_ID=${AUTOFIX_CHANNEL_ID:-}
       - AUTOFIX_OWNER_USER_ID=${AUTOFIX_OWNER_USER_ID:-}
+      - GMAIL_ADDRESS=${GMAIL_ADDRESS}
     depends_on:
       - db
     volumes:
