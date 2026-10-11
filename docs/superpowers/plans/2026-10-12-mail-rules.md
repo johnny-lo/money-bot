@@ -494,7 +494,7 @@ def test_樣式_去回覆前綴_遮數字與姓名():
 def test_求職字眼_任何規則都蓋不掉():
     v = C.classify(h(subject="【某公司】面談通知"), "x", [rule("news@shop.example")], set(), set())
     assert v == Verdict("keep_inbox", "主旨有求職字眼", True)
-    assert C.has_job_keyword("TSMC Application Status Update")
+    assert C.has_job_keyword("ACME Application Status Update")
 
 
 def test_重視公司_主旨不明顯也留收件匣():
