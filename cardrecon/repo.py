@@ -82,15 +82,16 @@ def load_groups(db, since: date) -> list[TxGroup]:
 
 
 def load_hints(db, since: date) -> list[TxHint]:
-    """帳目群組（同 load_groups 的分法）附上標籤，供找近似紀錄；已被配走的群組不列。"""
+    """手記帳附上標籤，供找近似紀錄；載具發票與已被配走的紀錄不列。"""
     rows = [tuple(r) for r in (db.query(Transaction.id, Transaction.invoice_no, Transaction.created_at,
                                         Transaction.price, Transaction.item, Transaction.seller)
-                               .filter(Transaction.created_at >= datetime.combine(since, time()))
+                               .filter(Transaction.created_at >= datetime.combine(since, time()),
+                                       Transaction.invoice_no.is_(None))
                                .order_by(Transaction.id).all())]
     sellers: dict[str, str] = {}
     items: dict[str, str] = {}
-    for tid, inv, _, _, item, seller in rows:
-        key = inv or f"id{tid}"
+    for tid, _, _, _, item, seller in rows:     # 只有手記帳（invoice_no 為 NULL），key 一律 id<id>
+        key = f"id{tid}"
         if seller:
             sellers.setdefault(key, seller)
         if item:

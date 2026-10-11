@@ -24,6 +24,6 @@ def test_charge_欄位都能直接塞進_model():
 
 
 def test_config():
-    assert config.LIST_FROM == date(2026, 2, 22)
+    assert config.LIST_FROM == date(2026, 4, 21)
     assert config.PAGE_SIZE == 25 and config.LIST_LAG_DAYS == 3 and config.LOOKBACK_DAYS == 60
     assert "mma@sinopac.com" not in {s for s, _ in config.CARD_SOURCES.values()}

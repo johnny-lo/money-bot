@@ -20,6 +20,14 @@ class FakeQuery:
     def distinct(self, *a): return self
 
 
+class HintQuery(FakeQuery):
+    """只模擬 load_hints 需要的 invoice_no IS NULL SQL 篩選。"""
+    def filter(self, *criteria, **kwargs):
+        if any(str(c).endswith("transactions.invoice_no IS NULL") for c in criteria):
+            self.rows = [r for r in self.rows if r[1] is None]
+        return self
+
+
 class FakeSession:
     def __init__(self, rows=()):
         self.rows, self.added, self.commits, self._next = list(rows), [], 0, 900
@@ -31,6 +39,10 @@ class FakeSession:
                 o.id = self._next; self._next += 1
     def commit(self): self.commits += 1
     def rollback(self): pass
+
+
+class HintSession(FakeSession):
+    def query(self, *a, **k): return HintQuery(self.rows)
 
 
 def test_upsert_已存在的行不重寫_也不蓋狀態():
@@ -111,16 +123,23 @@ def test_max_page_取同日最大頁碼():
     assert repo.max_page(FakeSession(), "2026-10-18") == 0
 
 
-def test_load_hints_同發票合併_標籤取賣家否則第一個品名_排除已佔用(monkeypatch):
+def test_load_hints_只回手記帳且排除已佔用(monkeypatch):
     t = datetime(2026, 9, 10, 12, 0)
-    rows = [(1, "INV1", t, 80, "豆漿", "某早餐店"), (2, "INV1", t, 20, "蛋餅", "某早餐店"),
-            (3, None, t, 300, "手記午餐", None), (4, "INV2", t, 50, "咖啡", None), (5, "INV3", t, 70, "茶", None),
-            (6, "INV3", t, 30, "糖", None),
-            (7, "INV4", t, 40, "麵", None), (8, "INV4", t, 60, "飯", "某小館")]
-    monkeypatch.setattr(repo, "used_group_keys", lambda db: {"INV2"})
-    got = repo.load_hints(FakeSession(rows), D)
-    assert sorted(got, key=lambda h: h.key) == [TxHint("INV1", D, 100, "某早餐店"), TxHint("INV3", D, 100, "茶"), TxHint("INV4", D, 100, "某小館"),
-                                                TxHint("id3", D, 300, "手記午餐")]
+    rows = [(1, "INV1", t, 101, "載具發票近似金額", "發票店家"),
+            (2, None, t, 102, "手記近似金額", None),
+            (3, None, t, 103, "已配走手記帳", None)]
+    monkeypatch.setattr(repo, "used_group_keys", lambda db: {"id3"})
+    got = repo.load_hints(HintSession(rows), D)
+    assert got == [TxHint("id2", D, 102, "手記近似金額")]
+
+
+def test_load_hints_手記帳標籤取賣家優先於品名_排除已佔用(monkeypatch):
+    t = datetime(2026, 9, 10, 12, 0)
+    rows = [(1, None, t, 80, "手記豆漿", "某早餐店"), (2, None, t, 300, "手記午餐", None),
+            (3, None, t, 50, "手記咖啡", None)]
+    monkeypatch.setattr(repo, "used_group_keys", lambda db: {"id3"})
+    got = repo.load_hints(HintSession(rows), D)
+    assert sorted(got, key=lambda h: h.key) == [TxHint("id1", D, 80, "某早餐店"), TxHint("id2", D, 300, "手記午餐")]
 
 
 def test_all_charges轉成Charge():
