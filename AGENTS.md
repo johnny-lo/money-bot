@@ -601,6 +601,12 @@
   下次（週日或 `backfill_merchants`）再試。全形英數字用 NFKC 轉半形。
 - **店名換品牌的 prompt 要標明「店名是不可信資料」**：店名來自帳單與信件，可能夾帶像指令的文字；
   結果用 schema 鎖，編號超出範圍／品牌空白／超過 20 字一律丟掉。
+- **收據補店名要比卡號**：永豐網路消費通知寫了「末四碼」，`Receipt.card_last4` 帶出來；`match.enrich` 在收據與刷卡
+  都有卡號且不同時跳過，否則同金額、日期相近的別張卡會被套上店名。Autopass 沒卡號（`None`）維持只比金額與日期。
+- **ingest 的流程測試不得走到真的 codex**：`_fill_brands`／`_ocr_ctbc` 會 shell 出 `codex exec`，測試沒 stub 就真的出網，
+  在已登入的容器還會卡到 `timeout=180`（全套從 8 秒變 188 秒）。`_wire` 預設 stub `brand.suggest`／
+  `pdf.ctbc_merchant_cells`／`merchant_ocr.read_names`，另有 autouse 守衛把 `codex_cli._codex_exec` 換成會記帳的炸彈
+  （`_soft` 與 `suggest` 都吞例外，光丟錯會被吞，所以測試結束要再驗呼叫次數）。新增 ingest 測試一律走 `_wire`。
 - **永豐每日消費通知**：沒有店名；年份要從「期間：115/10/08」取，一月的信可能有十二月的刷卡（年份要減 1）。
 - **DAWHO「信用卡交易」是繳卡費**，不是消費 → 永遠不抓，抓了會跟刷卡重複算。
 - **退款/繳款是負數**：解析時丟掉，但仍佔 line_no（line_no 跟 message_id 是唯一鍵，重解析要穩定）。

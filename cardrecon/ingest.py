@@ -54,8 +54,9 @@ def _ocr_ctbc(db, mail: RawMail, charges: list, nid: str) -> int:
     todo = [c for c in charges if c.line_no in missing]
     if not todo:
         return 0
-    cells = pdf.ctbc_merchant_cells(mail.pdf, nid)
-    if not cells:
+    want = {(c.charge_date, c.post_date, c.amount, c.card_last4) for c in todo}
+    cells = [(key, bm) for key, bm in pdf.ctbc_merchant_cells(mail.pdf, nid) if key in want]
+    if not cells:                                            # 缺店名的列沒有對到格：不花一次讀圖
         return 0
     names = merchant_ocr.read_names([bm for _, bm in cells])
     got = merchant_ocr.assign_by_key(todo, [(key, n) for (key, _), n in zip(cells, names)])

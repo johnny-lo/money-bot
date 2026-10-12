@@ -3,7 +3,7 @@ import struct
 import zlib
 from datetime import date
 
-from cardrecon import brand, merchant_ocr, parse, pdf, repo
+from cardrecon import brand, match, merchant_ocr, parse, pdf, repo
 from cardrecon.types import Bitmap, Charge, Receipt
 
 D1, D2 = date(2026, 9, 8), date(2026, 9, 9)
@@ -60,9 +60,26 @@ def test_讀名_行數對不上整批放棄_全形轉半形_分批(monkeypatch):
 
 def test_永豐網路消費通知():
     t = "您永豐信用卡/簽帳金融卡末四碼 1111 於 2026-08-08 19:19 消費台幣10,540，商店名稱:SHOP.EXAMPLE，實際商店名稱請以帳單為準"
-    assert parse.parse_sinopac_online(t) == Receipt(paid_date=date(2026, 8, 8), amount=10540, merchant="SHOP.EXAMPLE")
+    assert parse.parse_sinopac_online(t) == Receipt(paid_date=date(2026, 8, 8), amount=10540, merchant="SHOP.EXAMPLE",
+                                                    card_last4="1111")
     assert parse.parse_sinopac_online("無關的信") is None
     assert set(parse.RECEIPT_PARSERS) == {"autopass", "sinopac_online"}
+
+
+def test_永豐網路消費通知_沒寫末四碼_卡號是None():
+    t = "您永豐信用卡於 2026-08-08 19:19 消費台幣540，商店名稱:SHOP.EXAMPLE，實際商店名稱請以帳單為準"
+    assert parse.parse_sinopac_online(t).card_last4 is None
+
+
+def test_enrich_收據與刷卡都有卡號且不同就跳過_同額同日別張卡不配():
+    r = Receipt(paid_date=D1, amount=3000, merchant="某某店", card_last4="2222")
+    assert match.enrich([(1, C(0, card="1111"))], [r]) == {}
+    assert match.enrich([(1, C(0, card="1111")), (2, C(1, card="2222"))], [r]) == {2: "某某店"}
+
+
+def test_enrich_收據沒卡號_維持只比金額與日期():
+    r = Receipt(paid_date=D1, amount=3000, merchant="停車費")
+    assert match.enrich([(1, C(0, card="1111"))], [r]) == {1: "停車費"}
 
 
 def test_品牌建議_丟棄不合法_一批失敗不擋(monkeypatch):

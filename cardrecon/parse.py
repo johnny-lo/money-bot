@@ -91,10 +91,12 @@ def parse_autopass(text: str) -> Receipt | None:
 
 
 _SP_ONLINE = re.compile(r"於 (\d{4})-(\d\d)-(\d\d) \d\d:\d\d 消費台幣([\d,]+)，商店名稱:(.+?)，")
+_SP_CARD = re.compile(r"末四碼\s*(\d{4})")
 
 
 def parse_sinopac_online(text: str) -> Receipt | None:
-    """永豐網路消費通知（CardAuthService@sinopac.com）：內文寫了商店名稱，當收據用來補店名。"""
+    """永豐網路消費通知（CardAuthService@sinopac.com）：內文寫了商店名稱，當收據用來補店名。
+    「末四碼 NNNN」一併帶出，enrich 才不會把店名套到同金額、日期相近的別張卡。"""
     m = _SP_ONLINE.search(text)
     if not m:
         return None
@@ -102,7 +104,8 @@ def parse_sinopac_online(text: str) -> Receipt | None:
         paid = date(int(m[1]), int(m[2]), int(m[3]))
     except ValueError:
         return None
-    return Receipt(paid_date=paid, amount=_amount(m[4]), merchant=m[5].strip())
+    card = _SP_CARD.search(text)
+    return Receipt(paid_date=paid, amount=_amount(m[4]), merchant=m[5].strip(), card_last4=card[1] if card else None)
 
 
 RECEIPT_PARSERS = {"autopass": parse_autopass, "sinopac_online": parse_sinopac_online}

@@ -30,6 +30,7 @@ class Receipt:
     paid_date: date
     amount: int
     merchant: str
+    card_last4: str | None = None    # 收據寫了卡號才有（永豐網路消費通知）；Autopass 沒有
 
 
 @dataclass(frozen=True)

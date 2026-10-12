@@ -1,14 +1,31 @@
 from dataclasses import replace
 from datetime import date
 
+import pytest
+
+import codex_cli
 from cardrecon import ingest
 from cardrecon.types import Bitmap, Charge, RawMail, Receipt, TxGroup, TxHint
 
 TODAY = date(2026, 10, 18)
 
 
-def ch(d, amount, n=0, src="sinopac_daily"):
-    return Charge(source=src, card_last4="1234", charge_date=d, amount=amount, line_no=n)
+def ch(d, amount, n=0, src="sinopac_daily", card="1234"):
+    return Charge(source=src, card_last4=card, charge_date=d, amount=amount, line_no=n)
+
+
+@pytest.fixture(autouse=True)
+def codex_calls(monkeypatch):
+    """ingest 的流程測試一律不得真的 shell 出 codex：會出網，在已登入的容器還會卡到 180 秒逾時。
+    _soft／brand.suggest 都會吞例外，光丟 AssertionError 會被吞掉 → 一併記帳，測試結束再驗一次。"""
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(a[:1])
+        raise AssertionError("測試不得呼叫真的 codex")
+    monkeypatch.setattr(codex_cli, "_codex_exec", boom)
+    yield calls
+    assert calls == [], f"測試走到了真的 codex：{len(calls)} 次"
 
 
 class FakeRepo:
@@ -85,6 +102,10 @@ def _wire(monkeypatch, fake, mails, texts):
     monkeypatch.setattr(ingest, "get_secret", lambda k: "A123456789")
     monkeypatch.setattr(ingest.gmail, "fetch", lambda sender, kw, since=None: mails.get(sender, []))
     monkeypatch.setattr(ingest.pdf, "extract_text", lambda data, pw: texts.get(data))
+    # 讀圖與品牌是 codex：預設全擋成空結果，要驗它們的測試自己再覆蓋
+    monkeypatch.setattr(ingest.pdf, "ctbc_merchant_cells", lambda data, pw: [])
+    monkeypatch.setattr(ingest.merchant_ocr, "read_names", lambda bms: [None] * len(bms))
+    monkeypatch.setattr(ingest.brand, "suggest", lambda raws: {})
 
 
 def mail(mid, pdf=b"x", text=""):
@@ -234,18 +255,12 @@ def test_relist_同日舊批次全未處理_新批次號不與舊的重複(monke
     assert [b for b, _, _ in res.pages] == [f"{day}-4"]
 
 
-def _no_codex(monkeypatch):
-    monkeypatch.setattr(ingest.brand, "suggest", lambda raws: {})
-    monkeypatch.setattr(ingest.pdf, "ctbc_merchant_cells", lambda data, pw: [])
-
-
 def test_永豐網路消費通知_補店名(monkeypatch):
     fake = FakeRepo()
     fake.groups = []
     sp = "CardAuthService@sinopac.com"
     note = "您永豐信用卡末四碼 1234 於 2026-10-01 19:19 消費台幣10,540，商店名稱:SHOP.EXAMPLE，實際商店名稱請以帳單為準"
     _wire(monkeypatch, fake, {sp: [mail("<n>", None, note)]}, {})
-    _no_codex(monkeypatch)
     monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: []})
     fake._add(ch(date(2026, 10, 1), 10540))
     ingest.run_weekly(TODAY)
@@ -315,3 +330,63 @@ def test_backfill_merchants_回計數(monkeypatch):
     monkeypatch.setattr(ingest.brand, "suggest", lambda raws: {"某某店": "某某"})
     assert ingest.backfill_merchants(TODAY) == {"ocr": 1, "receipts": 1, "brands": 1}
     assert ingest.backfill_merchants(TODAY) == {"ocr": 0, "receipts": 0, "brands": 0}      # 冪等：已補的不再動
+
+
+def test_守衛_有店名的流程不走到真的codex(monkeypatch, codex_calls):
+    """有店名的刷卡會讓 _fill_brands 去問品牌；_wire 的預設 stub 要擋在 codex 之前。"""
+    fake = FakeRepo()
+    fake.groups = []
+    fake._add(replace(ch(date(2026, 10, 1), 700), merchant="某某店"))
+    _wire(monkeypatch, fake, {}, {})
+    res = ingest.relist(TODAY)
+    assert [len(items) for _, _, items in res.pages] == [1]
+    assert codex_calls == []
+
+
+def _ctbc_two_rows(monkeypatch, fake, cells_for):
+    """兩列中信刷卡：第 0 列缺店名、第 1 列已有店名。cells_for(k0, k1, bm) 決定圖片格有哪些鍵。"""
+    _wire(monkeypatch, fake, {"ebill@estats.ctbcbank.com": [mail("<c>", b"C")]}, {b"C": "c"})
+    d1, d2 = date(2026, 10, 1), date(2026, 10, 2)
+    charges = [replace(ch(d1, 3000, 0, "ctbc_statement"), post_date=d2, card_last4="1111"),
+               replace(ch(d1, 50, 1, "ctbc_statement"), post_date=d2, card_last4="1111", merchant="SHOP.EXAMPLE")]
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: charges})
+    bm = Bitmap(width=8, height=1, data=b"\x00", one_is_black=True)
+    cells = cells_for((d1, d2, 3000, "1111"), (d1, d2, 50, "1111"), bm)
+    monkeypatch.setattr(ingest.pdf, "ctbc_merchant_cells", lambda data, pw: cells)
+    sent = []
+
+    def read(bms):
+        sent.append(len(bms))
+        return ["某某店"] * len(bms)
+    monkeypatch.setattr(ingest.merchant_ocr, "read_names", read)
+    return sent
+
+
+def test_讀圖只送缺店名那列的格_已有店名的格不讀(monkeypatch):
+    fake = FakeRepo()
+    fake.groups = []
+    sent = _ctbc_two_rows(monkeypatch, fake, lambda k0, k1, bm: [(k0, bm), (k1, bm)])
+    ingest.run_weekly(TODAY)
+    assert sent == [1]
+    assert [r["c"].merchant for r in fake.rows.values()] == ["某某店", "SHOP.EXAMPLE"]
+
+
+def test_讀圖_篩完沒有要補的格就不呼叫read_names(monkeypatch):
+    fake = FakeRepo()
+    fake.groups = []
+    sent = _ctbc_two_rows(monkeypatch, fake, lambda k0, k1, bm: [(k1, bm)])      # 缺店名那列沒有對到的格
+    ingest.run_weekly(TODAY)
+    assert sent == []
+    assert [r["c"].merchant for r in fake.rows.values()] == [None, "SHOP.EXAMPLE"]
+
+
+def test_永豐網路消費通知_卡號不同不補店名(monkeypatch):
+    fake = FakeRepo()
+    fake.groups = []
+    sp = "CardAuthService@sinopac.com"
+    note = "您永豐信用卡末四碼 9999 於 2026-10-01 19:19 消費台幣10,540，商店名稱:SHOP.EXAMPLE，實際商店名稱請以帳單為準"
+    _wire(monkeypatch, fake, {sp: [mail("<n>", None, note)]}, {})
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: []})
+    fake._add(ch(date(2026, 10, 1), 10540, card="1234"))            # 同金額同一天，但是別張卡
+    ingest.run_weekly(TODAY)
+    assert fake.rows[1]["c"].merchant is None

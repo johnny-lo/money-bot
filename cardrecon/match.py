@@ -23,6 +23,11 @@ def match(charges: list[tuple[int, Charge]], groups: list[TxGroup]) -> dict[int,
     return out
 
 
+def _same_card(r: Receipt, c: Charge) -> bool:
+    """收據與刷卡都有卡號且不同才算別張卡；任一邊沒卡號（Autopass）就不擋。"""
+    return not (r.card_last4 and c.card_last4 and r.card_last4 != c.card_last4)
+
+
 def enrich(charges: list[tuple[int, Charge]], receipts: list[Receipt]) -> dict[int, str]:
     used, out = set(), {}
     for cid, c in sorted(charges, key=lambda x: (x[1].charge_date, x[0])):
@@ -30,7 +35,8 @@ def enrich(charges: list[tuple[int, Charge]], receipts: list[Receipt]) -> dict[i
             continue
         for off in _RECEIPT_OFFSETS:
             idx = next((i for i, r in enumerate(receipts)
-                        if i not in used and r.amount == c.amount and (r.paid_date - c.charge_date).days == off), None)
+                        if i not in used and r.amount == c.amount and (r.paid_date - c.charge_date).days == off
+                        and _same_card(r, c)), None)
             if idx is not None:
                 out[cid] = receipts[idx].merchant
                 used.add(idx)
