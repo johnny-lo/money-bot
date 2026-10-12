@@ -19,6 +19,7 @@ from routes.device import router as device_router
 from routes.recipes import router as recipes_router
 from routes.videos import router as videos_router
 from routes.health import router as health_router
+from routes.mail import router as mail_router
 from line_handler import register_line_routes
 from discordbot import (
     run_discord_bot,
@@ -124,6 +125,7 @@ app.include_router(food_map_router)
 app.include_router(device_router)
 app.include_router(recipes_router)
 app.include_router(videos_router)
+app.include_router(mail_router)
 app.include_router(health_router)   # /healthz：免 token，給主機上的 healthcheck.sh 從公開路徑打
 register_line_routes(app)
 

@@ -162,3 +162,17 @@ def test_每日報告列出安全網留下的信_並截在_4096():
     assert "person0@mail.example" in e.description and "請回覆面試時間" in e.description
     assert "未知樣式：2" in e.description and len(e.description) <= 4096
     assert "還有" in e.description
+
+
+def test_名單總覽與分層卡():
+    ov = [{"key": "job", "title": "🛡 求職字眼", "count": 0}, {"key": "login", "title": "登入／驗證碼", "count": 3}]
+    assert "求職字眼" in ui.overview_embed(ov).description and "3" in ui.overview_embed(ov).description
+    assert "還沒同步過" in ui.overview_embed([dict(o, count=0) for o in ov]).description
+    row = {"date": "2026-10-12", "sender": "n@bank.example", "subject": "登入通知" * 50, "where": "收件匣", "next": "10/12 丟"}
+    e = ui.layer_embed({"key": "login", "title": "登入／驗證碼", "kind": "messages", "total": 300, "rows": [row] * 25}, 1, 12)
+    assert "300" in e.title and len(e.description) <= 4096 and "1/12" in e.footer.text
+
+
+def test_信件名單指令選項放得下():
+    from mailrules.views import LAYERS
+    assert len(LAYERS) <= 25 and all(len(t) <= 100 for _, t in LAYERS)

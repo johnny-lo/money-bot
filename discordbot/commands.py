@@ -1,7 +1,8 @@
-"""28 個 slash commands 的註冊（記帳/查詢/固定收支/美食/食譜/測試報表）。
+"""slash commands 的註冊（記帳/查詢/固定收支/美食/食譜/信件名單/測試報表）。
 
 慢 commands（/記帳、/收入、/分類、/抓發票…）必 defer 避免 3 秒超時。
 """
+import asyncio
 import os
 
 import discord
@@ -28,8 +29,11 @@ from .embeds import (
     build_items_embed,
 )
 from .reports import notify_weekly_summary, notify_monthly_summary
+from . import mailrules_ui
+from mailrules import views as mail_views
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
+_MAIL_PAGE = 25    # /信件名單 每頁筆數（一行約 100 字，25 行塞得進 embed 4096）
 
 
 def register_commands(bot) -> None:
@@ -282,3 +286,31 @@ def register_commands(bot) -> None:
             await ix.followup.send("✅ 已觸發上月月報，請看 #📊-報表查詢", ephemeral=True)
         except Exception as ex:
             await ix.followup.send(f"⚠️ 失敗：{ex}", ephemeral=True)
+
+    @tree.command(name="信件名單", description="看信件整理每一層的名單（不選層＝各層總覽）")
+    @app_commands.describe(層="要看哪一層（不選＝總覽）", 頁="第幾頁（每頁 25 筆）", 搜尋="寄件者／主旨關鍵字")
+    @app_commands.choices(層=[app_commands.Choice(name=t, value=k) for k, t in mail_views.LAYERS])
+    async def cmd_mail_lists(ix: discord.Interaction, 層: app_commands.Choice[str] | None = None,
+                             頁: int = 1, 搜尋: str = ""):
+        why = mailrules_ui._guard_fail(ix)      # 名單是本人信件的寄件者與主旨，跟確認鈕一樣只給卡主看
+        if why:
+            await ix.response.send_message(f"⛔ {why}", ephemeral=True)
+            return
+        await ix.response.defer(ephemeral=True)
+        today = mailrules_ui._today()
+        try:
+            if 層 is None:
+                layers = await asyncio.to_thread(mail_views.overview, None, today)
+                await ix.followup.send(embed=mailrules_ui.overview_embed(layers), ephemeral=True)
+                return
+            page = max(1, 頁)
+            data = await asyncio.to_thread(mail_views.layer, None, 層.value, today, 搜尋, (page - 1) * _MAIL_PAGE,
+                                           _MAIL_PAGE)
+        except Exception as ex:
+            await ix.followup.send(embed=error_embed(f"讀取信件名單失敗：{ex}"), ephemeral=True)
+            return
+        pages = max(1, -(-data["total"] // _MAIL_PAGE))
+        if page > pages:
+            await ix.followup.send(embed=error_embed(f"只有 {pages} 頁"), ephemeral=True)
+            return
+        await ix.followup.send(embed=mailrules_ui.layer_embed(data, page, pages), ephemeral=True)

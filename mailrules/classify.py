@@ -5,7 +5,15 @@ from . import config
 from .patterns import _domain_in, addr_domain, has_job_keyword, is_human, subject_pattern
 from .types import MailHeader, Rule, Verdict
 
-__all__ = ["has_job_keyword", "is_human", "learn_valued_domains", "match_rule", "classify", "builtin_suggest"]
+__all__ = ["has_job_keyword", "is_human", "learn_valued_domains", "match_rule", "classify", "builtin_suggest",
+           "REASON_JOB", "REASON_VALUED", "REASON_HUMAN", "REASON_SELF", "REASON_UNKNOWN"]
+
+# Verdict.reason 的固定字串：mail_messages.reason 存的就是這些，名單檢視（views）依它分層，改字串等於改歷史資料
+REASON_JOB = "主旨有求職字眼"
+REASON_VALUED = "重視的公司"
+REASON_HUMAN = "像真人寄的"
+REASON_SELF = "寄給自己"
+REASON_UNKNOWN = "未知"
 
 
 def learn_valued_domains(headers: list[MailHeader], self_addrs: set[str], company_domains: set[str]) -> dict[str, str]:
@@ -53,19 +61,19 @@ def match_rule(h: MailHeader, pattern: str, rules: list[Rule]) -> Rule | None:
 
 def classify(h: MailHeader, pattern: str, rules: list[Rule], valued: set[str], self_addrs: set[str]) -> Verdict:
     if has_job_keyword(h.subject):
-        return Verdict("keep_inbox", "主旨有求職字眼", True)
+        return Verdict("keep_inbox", REASON_JOB, True)
     r = match_rule(h, pattern, rules)
     if _domain_in(addr_domain(h.from_addr), valued):
         if r and r.sender.lower() == h.from_addr.lower():
             return Verdict(r.category, f"規則 #{r.id}", False)
-        return Verdict("keep_inbox", "重視的公司", True)
+        return Verdict("keep_inbox", REASON_VALUED, True)
     if h.from_addr in self_addrs:
-        return Verdict(r.category if r else "self", "寄給自己", False)
+        return Verdict(r.category if r else "self", REASON_SELF, False)
     if r:
         return Verdict(r.category, f"規則 #{r.id}", False)
     if is_human(h):
-        return Verdict("keep_inbox", "像真人寄的", True)
-    return Verdict(None, "未知", False)
+        return Verdict("keep_inbox", REASON_HUMAN, True)
+    return Verdict(None, REASON_UNKNOWN, False)
 
 
 def _rx(p: str) -> re.Pattern:

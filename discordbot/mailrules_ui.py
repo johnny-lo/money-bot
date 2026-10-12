@@ -100,6 +100,44 @@ def history_embed(plan: dict) -> discord.Embed:
     return e
 
 
+def overview_embed(layers: list[dict]) -> discord.Embed:
+    if not any(x["count"] for x in layers):
+        desc = "還沒同步過信件"
+    else:
+        desc = "\n".join(f"{x['title']}　{x['count']}" for x in layers)
+    e = discord.Embed(title="📬 信件名單總覽", description=desc[:4096], color=COLOR)
+    e.set_footer(text="用 /信件名單 層:… 看某一層的名單")
+    return e
+
+
+def _one_line(s: str | None, n: int) -> str:
+    s = " ".join((s or "").split())
+    return s if len(s) <= n else s[:n - 1] + "…"
+
+
+def _layer_line(kind: str, r: dict) -> str:
+    if kind == "messages":
+        d = r["date"][5:].replace("-", "/") if r.get("date") else "--/--"
+        return (f"{d}｜{_one_line(r['sender'], 40)}｜{_one_line(r['subject'], 40)}"
+                f"｜{r['where']}｜{r['next'] or '—'}")
+    if kind == "domains":
+        return f"{r['domain']}｜加入 {r['since'] or '--'}｜{r['count']} 封"
+    if kind == "rules":
+        return (f"{_one_line(r['sender'], 40)}｜{_one_line(r['pattern'], 40)}"
+                f"｜→ {r['category']}｜{r['status']}")
+    return f"{_one_line(r['sender'], 40)}｜{_one_line(r['pattern'], 40)}｜{r['count']} 封"
+
+
+def layer_embed(data: dict, page: int, pages: int) -> discord.Embed:
+    lines = [_layer_line(data["kind"], r) for r in data["rows"]] or ["這一層目前沒有符合的項目"]
+    desc = "\n".join(lines)
+    if len(desc) > 4096:      # 每行已截長，正常到不了；保險：整行丟掉，不留半行
+        desc = desc[:4096].rsplit("\n", 1)[0]
+    e = discord.Embed(title=f"📬 {data['title']}（共 {data['total']} 筆）", description=desc, color=COLOR)
+    e.set_footer(text=f"第 {page}/{pages} 頁 · 完整名單在手機 PWA 📬 分頁")
+    return e
+
+
 def _guard_fail(interaction):
     return can_act(interaction.user.id, _owner_id())
 
