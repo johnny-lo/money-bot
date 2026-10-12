@@ -956,9 +956,254 @@ def test_建議卡_view_含拒絕下拉與確認鈕():
 
 ---
 
+### Task 6: 名單檢視——views、Discord `/信件名單`、API（從整合分支開工）
+
+本人 2026-10-13 要求：每一層的名單都要有斜線指令和 PWA 可以看（spec〈名單檢視〉）。這個 task 做後端與 Discord；PWA 是 Task 7。
+只讀三張表，不碰 Task 2 的 `repo.py`／`gmail_rw.py`，可以和 Task 2 同時做。
+
+**Files:**
+- Modify: `mailrules/classify.py`（理由常數）、`mailrules/plan.py`（`next_step`）
+- Create: `mailrules/views.py`、`routes/mail.py`
+- Modify: `main.py`（`app.include_router`）、`discordbot/commands.py`（`/信件名單`）、`discordbot/mailrules_ui.py`（`overview_embed`、`layer_embed`）、`README.md`（指令表）、`CODEBASE.md`（views、API、指令）
+- Test: `tests/test_mailrules_views.py`（新）、`tests/test_mailrules_ui.py`（加兩個測試）
+
+**Interfaces:**
+- Consumes：`config.CATEGORIES / LABELS / RETENTION`、`types.MessageState`、models `MailMessage / MailRule / MailValuedDomain`、`auth.require_token`。
+- Produces：
+  - `classify.REASON_JOB = "主旨有求職字眼"`、`REASON_VALUED = "重視的公司"`、`REASON_HUMAN = "像真人寄的"`、`REASON_SELF = "寄給自己"`、`REASON_UNKNOWN = "未知"`；`classify()` 改用這些常數（字串值不變，既有測試照過）。
+  - `plan.next_step(category: str | None, sent_date: date | None, st: MessageState) -> tuple[str, date] | None`（只算每日模式）：沒丟、類別在 `RETENTION`、有日期時——在收件匣且 `archive_after_days` 不是 None、且（沒有 trash 天數或 archive 比 trash 早）→ `("archive", sent + archive 天)`；否則有 `trash_after_days` → `("trash", sent + trash 天)`；其餘 None。
+  - `views.LAYERS: list[tuple[str, str]]`＝`[("job","🛡 求職字眼"), ("valued","🛡 重視的公司"), ("human","🛡 真人來信"), ("self","寄給自己"), ("rules","你的規則"), ("unknown","未知")]`＋`config.CATEGORIES` 裡除了 `keep_inbox`、`self` 的 12 類（名稱用中文）＋`[("trash","🗑 30 天內丟的")]`，共 19 個。
+  - 純函式 `views.build_layer(key, msgs, rules, domains, today, q="", offset=0, limit=200) -> dict`：
+    - 輸入都是 dict 列。`msgs`：`from_addr, subject, subject_pattern, sent_date, category, reason, in_inbox, labels_applied, trashed_at`；`rules`：`sender, subject_pattern, category, status, suggested_by`；`domains`：`domain, first_seen, source_subject_pattern`。
+    - 回傳 `{"key", "title", "kind", "total", "rows"}`，`kind` ∈ `messages | rules | domains | groups`；未知 key → `KeyError`。
+    - **messages 列**：`{"date": "YYYY-MM-DD"|None, "sender", "subject", "where", "next"}`，新到舊。
+      - `where`：有 `trashed_at`→「垃圾桶」、`in_inbox`→「收件匣」、有 `labels_applied`→「資料夾」、其餘「已移出」。
+      - `next`：`next_step` 的結果寫成「日期 丟」或「日期 移出」。日期和今天同一年寫 `MM/DD`，否則寫 `YYYY/MM/DD`。垃圾桶層改成「日期 前救得回」（`trashed_at` + 30 天）。沒有下一步就是 None。
+    - **各層條件**（「沒丟」＝`trashed_at` 是 None）：
+      - `job` / `human`：`reason` 等於 `REASON_JOB` / `REASON_HUMAN`，且沒丟。
+      - `self`：`category == "self"`，且沒丟。
+      - 類別層：`category == key`、沒丟、`reason` 不是三個 🛡 常數。
+      - `trash`：`trashed_at` 在今天往前 30 天內。
+      - `unknown`：`category is None` 且沒丟。kind groups，依 `(from_addr, subject_pattern)` 分組，列 `{"sender", "pattern", "count", "last": "YYYY-MM-DD"|None}`，封數多的在前。
+      - `valued`：kind domains，列 `{"domain", "since": "YYYY-MM-DD", "pattern", "count"}`。count＝寄件網域等於該網域或是它的子網域、`reason == REASON_VALUED` 的信數。
+      - `rules`：kind rules，列 `{"sender", "pattern", "category": 中文, "status": "已確認|待確認|已拒絕", "by": "內建|AI|你"}`。排序：待確認 → 已確認 → 已拒絕，同狀態依 `config.CATEGORIES` 順序。
+    - **`q` 搜尋**：不分大小寫子字串比對。messages 比 sender／subject，domains 比 domain，rules 和 groups 比 sender／pattern。先過濾、算 `total`，再切 `[offset : offset + limit]`。
+  - `views.overview_from(msgs, rules, domains, today) -> list[dict]`：照 `LAYERS` 順序回 `{"key", "title", "count"}`，count＝該層 `total`。
+  - `views.load(db) -> (msgs, rules, domains)`：三張表各讀一次轉成 dict 列。約一萬列，整包讀進來再交給純函式就好。
+  - `views.overview(db, today)`、`views.layer(db, key, today, q="", offset=0, limit=200)`：`load` 加上純函式的薄包裝，`db` 給 None 就自己開 `SessionLocal()` 並關掉。
+  - `routes/mail.py`（兩個都 `dependencies=[Depends(require_token)]`，今天用台北日期）：
+    - `GET /api/mail/overview` → `{"layers": [...]}`
+    - `GET /api/mail/layers/{key}?q=&offset=0&limit=200` → layer dict；`limit` 限 1–500，未知 key → 404。
+  - `mailrules_ui.overview_embed(layers) -> Embed`：一層一行「名稱　N」，0 筆也列。全部 0 時描述是「還沒同步過信件」。
+  - `mailrules_ui.layer_embed(data, page, pages) -> Embed`：
+    - 標題「📬 {title}（共 N 筆）」，一行一筆，description ≤4096。
+    - 各 kind 的行格式——messages：`MM/DD｜寄件者｜主旨｜在哪｜下一步`；domains：`網域｜加入 YYYY-MM-DD｜N 封`；rules：`寄件者｜樣式｜→ 類別｜狀態`；groups：`寄件者｜樣式｜N 封`。
+    - footer「第 p/P 頁 · 完整名單在手機 PWA 📬 分頁」。
+  - `/信件名單`（`discordbot/commands.py`）：
+    - 選項：`@app_commands.choices(層=[app_commands.Choice(name=t, value=k) for k, t in LAYERS])`。
+    - 參數：`層: app_commands.Choice[str] | None = None`、`頁: int = 1`、`搜尋: str = ""`。
+    - 流程：`await ix.response.defer(ephemeral=True)`，用 `asyncio.to_thread` 呼叫 views。不選層 → `overview_embed`；選層 → 每頁 25 筆 `layer_embed`。
+
+- [ ] **Step 1: 寫失敗測試** `tests/test_mailrules_views.py`
+
+```python
+from datetime import date, datetime
+
+import pytest
+
+from mailrules import views
+from mailrules.classify import REASON_HUMAN, REASON_JOB, REASON_VALUED
+from mailrules.plan import next_step
+from mailrules.types import MessageState
+
+T = date(2026, 10, 13)
+
+
+def M(sender="a@shop.example", subject="s", d=date(2026, 10, 1), cat=None, reason="x", inbox=True,
+      labels=(), trashed=None, pattern=None):
+    return {"from_addr": sender, "subject": subject, "subject_pattern": pattern or subject, "sent_date": d,
+            "category": cat, "reason": reason, "in_inbox": inbox, "labels_applied": list(labels),
+            "trashed_at": trashed}
+
+
+def test_共19層_順序固定_下拉放得下():
+    keys = [k for k, _ in views.LAYERS]
+    assert len(keys) == 19 and keys[:6] == ["job", "valued", "human", "self", "rules", "unknown"]
+    assert keys[-1] == "trash" and "keep_inbox" not in keys
+
+
+def test_下一步_公司通知在收件匣先移出_已移出就等丟():
+    d = date(2026, 10, 1)
+    assert next_step("company", d, MessageState(in_inbox=True)) == ("archive", d)
+    assert next_step("company", d, MessageState(in_inbox=False)) == ("trash", date(2026, 10, 31))
+    assert next_step("security", d, MessageState(in_inbox=True)) == ("archive", date(2026, 10, 8))
+    assert next_step("tax", d, MessageState(in_inbox=False)) is None
+    assert next_step(None, d, MessageState(in_inbox=True)) is None
+    assert next_step("card", d, MessageState(in_inbox=False, trashed=True)) is None
+
+
+def test_保護層依理由分_類別層不含保護的信_跨年寫年份():
+    msgs = [M(subject="面試通知", cat="keep_inbox", reason=REASON_JOB),
+            M(subject="帳單", cat="bill", reason="規則 #1", inbox=False, labels=["整理/帳單"]),
+            M(subject="hi", cat="keep_inbox", reason=REASON_HUMAN)]
+    job = views.build_layer("job", msgs, [], [], T)
+    assert job["kind"] == "messages" and [r["subject"] for r in job["rows"]] == ["面試通知"]
+    bill = views.build_layer("bill", msgs, [], [], T)["rows"][0]
+    assert bill["where"] == "資料夾" and bill["next"] == "2028/09/30 丟"
+    assert views.build_layer("company", [M(cat="company", reason="規則 #2")], [], [], T)["rows"][0]["next"] == "10/01 移出"
+
+
+def test_重視公司層列網域與封數():
+    msgs = [M(sender="hr@corp.example", reason=REASON_VALUED, cat="keep_inbox"),
+            M(sender="x@mail.corp.example", reason=REASON_VALUED, cat="keep_inbox")]
+    doms = [{"domain": "corp.example", "first_seen": datetime(2026, 5, 1), "source_subject_pattern": "面試邀請"}]
+    out = views.build_layer("valued", msgs, [], doms, T)
+    assert out["kind"] == "domains"
+    assert out["rows"] == [{"domain": "corp.example", "since": "2026-05-01", "pattern": "面試邀請", "count": 2}]
+
+
+def test_未知依寄件者加樣式分組_多的在前():
+    msgs = [M(sender="a@x.example", pattern="週報 #"), M(sender="a@x.example", pattern="週報 #", d=date(2026, 10, 5)),
+            M(sender="b@y.example", pattern="通知")]
+    out = views.build_layer("unknown", msgs, [], [], T)
+    assert out["kind"] == "groups" and out["total"] == 2
+    assert out["rows"][0] == {"sender": "a@x.example", "pattern": "週報 #", "count": 2, "last": "2026-10-05"}
+
+
+def test_規則層_待確認排前面_中文類別與來源():
+    rules = [{"sender": "@shop.example", "subject_pattern": "*", "category": "promo", "status": "confirmed",
+              "suggested_by": "ai"},
+             {"sender": "n@bank.example", "subject_pattern": "登入通知", "category": "login", "status": "suggested",
+              "suggested_by": "builtin"}]
+    out = views.build_layer("rules", [], rules, [], T)
+    assert [r["status"] for r in out["rows"]] == ["待確認", "已確認"]
+    assert out["rows"][1]["category"] == "推銷／電子報" and out["rows"][1]["by"] == "AI"
+
+
+def test_垃圾桶層只列30天內_附救得回期限():
+    msgs = [M(subject="舊", trashed=datetime(2026, 9, 1), cat="promo"),
+            M(subject="新", trashed=datetime(2026, 10, 10), cat="promo")]
+    out = views.build_layer("trash", msgs, [], [], T)
+    assert [r["subject"] for r in out["rows"]] == ["新"] and out["rows"][0]["next"] == "11/09 前救得回"
+    assert views.build_layer("promo", msgs, [], [], T)["total"] == 0
+
+
+def test_搜尋不分大小寫_分頁():
+    msgs = [M(sender=f"s{i}@x.example", subject=f"訂單 {i}", cat="receipt", d=date(2026, 10, 1 + i % 9))
+            for i in range(30)]
+    out = views.build_layer("receipt", msgs, [], [], T, q="S1", offset=0, limit=5)
+    assert out["total"] == 11 and len(out["rows"]) == 5          # s1、s10–s19
+    assert len(views.build_layer("receipt", msgs, [], [], T, offset=25, limit=10)["rows"]) == 5
+
+
+def test_未知的層_KeyError():
+    with pytest.raises(KeyError):
+        views.build_layer("nope", [], [], [], T)
+
+
+def test_總覽每層一筆():
+    ov = views.overview_from([M(cat="login", reason="規則 #2")], [], [], T)
+    assert len(ov) == 19 and {o["key"]: o["count"] for o in ov}["login"] == 1
+
+
+def test_信件API都要token():
+    from auth import require_token
+    from routes.mail import router
+    paths = {r.path: r for r in router.routes}
+    assert set(paths) == {"/api/mail/overview", "/api/mail/layers/{key}"}
+    for r in paths.values():
+        assert any(d.call is require_token for d in r.dependant.dependencies)
+```
+
+`tests/test_mailrules_ui.py` 加：
+
+```python
+def test_名單總覽與分層卡():
+    ov = [{"key": "job", "title": "🛡 求職字眼", "count": 0}, {"key": "login", "title": "登入／驗證碼", "count": 3}]
+    assert "求職字眼" in ui.overview_embed(ov).description and "3" in ui.overview_embed(ov).description
+    assert "還沒同步過" in ui.overview_embed([dict(o, count=0) for o in ov]).description
+    row = {"date": "2026-10-12", "sender": "n@bank.example", "subject": "登入通知" * 50, "where": "收件匣", "next": "10/12 丟"}
+    e = ui.layer_embed({"key": "login", "title": "登入／驗證碼", "kind": "messages", "total": 300, "rows": [row] * 25}, 1, 12)
+    assert "300" in e.title and len(e.description) <= 4096 and "1/12" in e.footer.text
+
+
+def test_信件名單指令選項放得下():
+    from mailrules.views import LAYERS
+    assert len(LAYERS) <= 25 and all(len(t) <= 100 for _, t in LAYERS)
+```
+
+- [ ] **Step 2–4:** 紅 → 依 Interfaces 實作 → `scripts/check_tests.sh` 全過（含 `import main`）→ README 指令表加 `/信件名單`、CODEBASE 加 views／API／指令 → commit `feat(mailrules): 名單檢視——每層名單的 views、/信件名單 指令、/api/mail API`
+
+---
+
+### Task 7: PWA 📬 信件分頁（從整合分支開工）
+
+**Files:** Create `frontend/src/Mail.jsx`、`frontend/src/mailView.js`（純函式）、`frontend/src/mailView.test.mjs`；Modify `frontend/src/App.jsx`（第五個分頁）、`frontend/src/api.js`、`frontend/src/index.css`、`README.md`、`CODEBASE.md`
+
+**Interfaces:**
+- Consumes：Task 6 的 API（JSON 形狀見 Task 6 Interfaces；開工時後端可能還沒好，前端只依形狀寫）。
+- Produces：
+  - `api.js`：`getMailOverview()` → `authedFetch('/api/mail/overview')`；`getMailLayer(key, { q = '', offset = 0, limit = 200 } = {})` → `authedFetch('/api/mail/layers/' + encodeURIComponent(key) + '?' + URLSearchParams)`。
+  - `mailView.js`：
+    - `groupOverview(layers) -> { shield, rest }`：key 是 `job / valued / human` 的放 `shield`，其餘照原順序放 `rest`。
+    - `allEmpty(layers) -> bool`：每層 count 都是 0。
+    - `rowText(kind, row) -> { main, sub, badge }`，依 kind：
+
+      | kind | main | sub | badge |
+      |---|---|---|---|
+      | messages | subject | `` `${date ?? ''}・${sender}` `` | `next ?? where` |
+      | domains | domain | `` `加入 ${since}・${pattern ?? ''}` `` | `` `${count} 封` `` |
+      | rules | sender | pattern | `` `${category}・${status}` `` |
+      | groups | sender | pattern | `` `${count} 封` `` |
+  - `Mail.jsx`：
+    - 總覽：🛡 一組、其餘一組的小卡格子（名稱＋筆數）。`allEmpty` 時顯示「還沒同步過信件」。
+    - 點小卡 → 列表頁：返回鈕、搜尋框（輸入停 300ms 才重抓，`q` 帶給 API）、一列一筆用 `rowText`、`rows.length < total` 時顯示「載入更多」（offset += 200 再接上去）。
+    - 照現有分頁的「邊做邊講 why」註解風格（本人拿 React 當學習載具）。
+  - `App.jsx`：`TABS` 加 `{ key: 'mail', icon: '📬', label: '信件' }`，`{tab === 'mail' && <Mail />}`。
+
+- [ ] **Step 1: 寫失敗測試** `frontend/src/mailView.test.mjs`
+
+```js
+// 信件分頁純函式的測試（node 內建 test runner：cd frontend && npm test）
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+
+import { allEmpty, groupOverview, rowText } from './mailView.js'
+
+const L = [
+  { key: 'job', title: '🛡 求職字眼', count: 1 }, { key: 'valued', title: '🛡 重視的公司', count: 0 },
+  { key: 'human', title: '🛡 真人來信', count: 2 }, { key: 'login', title: '登入／驗證碼', count: 5 },
+]
+
+test('🛡 三層排在前面一組', () => {
+  const g = groupOverview(L)
+  assert.deepEqual(g.shield.map((x) => x.key), ['job', 'valued', 'human'])
+  assert.deepEqual(g.rest.map((x) => x.key), ['login'])
+})
+
+test('全部 0 筆＝還沒同步過', () => {
+  assert.equal(allEmpty(L), false)
+  assert.equal(allEmpty(L.map((x) => ({ ...x, count: 0 }))), true)
+})
+
+test('各種列的文字', () => {
+  assert.deepEqual(rowText('messages', { date: '2026-10-12', sender: 'a@x', subject: '面試', where: '收件匣', next: null }),
+    { main: '面試', sub: '2026-10-12・a@x', badge: '收件匣' })
+  assert.equal(rowText('messages', { date: null, sender: 'a@x', subject: 's', where: '資料夾', next: '10/20 丟' }).badge, '10/20 丟')
+  assert.equal(rowText('domains', { domain: 'corp.example', since: '2026-05-01', pattern: '面試邀請', count: 2 }).badge, '2 封')
+  assert.equal(rowText('rules', { sender: '@x', pattern: '*', category: '推銷／電子報', status: '已確認', by: 'AI' }).badge,
+    '推銷／電子報・已確認')
+  assert.equal(rowText('groups', { sender: 'a@x', pattern: 'p', count: 3, last: null }).badge, '3 封')
+})
+```
+
+- [ ] **Step 2–4:** 紅 → 實作 → `node --test frontend/src/` 全過。worktree 沒有 `node_modules`，所以只跑純函式測試；`npm run build` 和手機畫面實測留到 Task 5，在主線做（CLAUDE.md：手機 CSS 要本人親眼確認）。→ README（PWA 分頁）、CODEBASE（Mail.jsx、mailView.js）→ commit `feat(pwa): 📬 信件分頁——各層名單總覽、搜尋、載入更多`
+
+---
+
 ### Task 5: 整合、實測、上線（主線）
 
-- [ ] **Step 1:** 依序 merge Task 1→3→2→4；補齊跨任務缺口（例如 repo.reject）；全套測試＋`import main`。
+- [ ] **Step 1:** 依序 merge Task 1→3→2→4→6→7；補齊跨任務缺口（例如 repo.reject）；全套測試＋`import main`。
 - [ ] **Step 2: 凝聚審查**：run 呼叫的 repo 函式都存在、類別 key 在 config/classify/suggest/plan/UI 一致、守衛測試仍綠。
 - [ ] **Step 3: 唯讀 dry-run**（`scripts/gmail_probe.sh`）：全量信頭 → 分類 → 歷史計畫統計，各類封數應與 `~/Desktop/gmail-reports/2026-10-12-歷史信件分析.md` 同量級；**不呼叫 apply**。
 - [ ] **Step 4: 垃圾桶實測**：請本人寄一封測試信給自己（`add_user_action` 卡），用 probe 對那一封依序做 label → archive → trash，確認在垃圾桶看得到、移得回收件匣；沒過就停（spec〈錯誤處理〉）。
