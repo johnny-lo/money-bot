@@ -385,6 +385,28 @@ body {
 .tag-add { display: flex; gap: 6px; align-items: center; }
 .tag-add .note-input { flex: 1; }
 
+/* 📬 信件名單分頁（唯讀）。沿用 .video 的版型：上方固定一條、下面清單自己捲。 */
+.mail { display: flex; flex-direction: column; height: 100%; }
+.mail-scroll { flex: 1; overflow-y: auto; padding: calc(8px + env(safe-area-inset-top)) 12px 16px; }
+.mail-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
+.mail-tile { display: flex; flex-direction: column; gap: 6px; text-align: left; min-width: 0;
+  background: #fff; border: 1px solid #eee; border-radius: 14px; padding: 12px; }
+.mail-tile-title { font-size: 13px; font-weight: 600; line-height: 1.3; }
+.mail-tile-n { font-size: 1.4rem; font-weight: 700; color: var(--brand); }
+.mail-bar { padding: calc(8px + env(safe-area-inset-top)) 12px 8px; display: flex; flex-direction: column; gap: 8px; }
+.mail-head { display: flex; align-items: center; gap: 10px; }
+.mail-title { font-weight: 700; font-size: 15px; min-width: 0; }
+.mail-search { border: 1px solid #ddd; border-radius: 10px; padding: 8px 12px; font-size: 15px; }
+.mail-list { flex: 1; overflow-y: auto; padding: 4px 12px 16px; display: flex; flex-direction: column; gap: 8px; }
+.mail-row { display: flex; gap: 8px; align-items: center; justify-content: space-between;
+  background: #fff; border: 1px solid #eee; border-radius: 12px; padding: 8px 10px; }
+.mail-row-info { min-width: 0; flex: 1; }
+.mail-row-main { font-weight: 600; font-size: 14px; line-height: 1.3; overflow-wrap: anywhere; }
+.mail-row-sub { font-size: 12px; color: #888; margin-top: 2px; overflow-wrap: anywhere; }
+.mail-row .mini-tag { flex: 0 0 auto; }
+.mail-more { align-self: center; margin-top: 4px; }
+.mail-empty { text-align: center; color: #999; font-size: 0.85rem; padding: 28px 16px; line-height: 1.6; }
+
 
 /* 美食分頁的三態切換：現在在哪個模式要看得見，另外兩個要點得到。
    原本是一顆顯示「下一個模式」圖示的循環鈕 → 沒人知道自己在哪、也不知道有幾個模式。 */
