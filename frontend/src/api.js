@@ -167,3 +167,18 @@ export async function removeVideoTag(id, tag) {
 export async function deleteVideo(id) {
   return authedFetch(`/api/videos/${id}`, { method: 'DELETE' })
 }
+
+// ── 信件整理（名單檢視，唯讀）────────────────────────────────
+
+// 每一層名單的筆數。回 {layers: [{key, title, count}]}。
+export async function getMailOverview() {
+  return authedFetch('/api/mail/overview')
+}
+
+// 某一層的名單。回 {key, title, kind, total, rows}（kind 決定 rows 的欄位，見 mailView.js rowText）。
+// key 進路徑要 encodeURIComponent；q/offset/limit 用 URLSearchParams 帶，
+// 搜尋字含中文或 & 時才不會把網址弄壞。
+export async function getMailLayer(key, { q = '', offset = 0, limit = 200 } = {}) {
+  const qs = new URLSearchParams({ q, offset: String(offset), limit: String(limit) })
+  return authedFetch('/api/mail/layers/' + encodeURIComponent(key) + '?' + qs)
+}

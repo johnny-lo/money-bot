@@ -3,6 +3,7 @@ import Food from './Food.jsx'
 import Spend from './Spend.jsx'
 import Recipe from './Recipe.jsx'
 import Videos from './Videos.jsx'
+import Mail from './Mail.jsx'
 import { currentBundle, fetchServerBundle, forceUpdate, isStale } from './update.js'
 
 // 底部分頁。先用陣列定義，下面用 .map() 一次畫出來。
@@ -11,6 +12,7 @@ const TABS = [
   { key: 'spend', icon: '💰', label: '消費' },
   { key: 'recipe', icon: '🍳', label: '食譜' },
   { key: 'video', icon: '🎥', label: '歷史' },
+  { key: 'mail', icon: '📬', label: '信件' },
 ]
 
 export default function App() {
@@ -42,9 +44,10 @@ export default function App() {
         {tab === 'spend' && <Spend />}
         {tab === 'recipe' && <Recipe />}
         {tab === 'video' && <Videos />}
+        {tab === 'mail' && <Mail />}
       </main>
 
-      {/* 底部分頁列：拇指區。用 .map() 把 TABS 畫成三顆按鈕。 */}
+      {/* 底部分頁列：拇指區。用 .map() 把 TABS 畫成一排按鈕。 */}
       <nav className="tabbar">
         {TABS.map((t) => (
           <button

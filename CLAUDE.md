@@ -83,7 +83,7 @@ ingest.py   orchestrator：extract → 正規化 → upsert → 事後補強（b
 - **認證兩層**（`auth.py`）：報表短效 token（30 分鐘、in-memory）↔ PWA 長效 device token（DB）。
   `routes/device.py` 只收短效換發長效——洩漏的 device token 無法自我繁殖。
 - **前端**：`frontend/` 是 React + Vite + vite-plugin-pwa 的手機 PWA，build 產物 `frontend/dist`
-  由 `main.py` 掛在 `/m`（**被 gitignore，只 commit `frontend/src`**）。四個 tab：美食 / 消費 / 食譜 / 歷史。
+  由 `main.py` 掛在 `/m`（**被 gitignore，只 commit `frontend/src`**）。五個 tab：美食 / 消費 / 食譜 / 歷史 / 信件。
   `main.py` 的 `pwa_cache_headers` middleware 負責殼 `no-cache` + assets `immutable`，
   **動到它等於動到「手機拿不拿得到新版」**。
 
