@@ -108,6 +108,17 @@ try:
                 "CREATE INDEX IF NOT EXISTS ix_food_places_district ON food_places (district)"
             ))
             _conn.commit()
+        # mail_messages / mail_state 補欄位（消失的信、退訂連結、顯示名稱、已發的歷史計畫卡）
+        for _tbl, _col, _ddl in (
+            ("mail_messages", "gone_at", "ALTER TABLE mail_messages ADD COLUMN gone_at TIMESTAMP"),
+            ("mail_messages", "unsub", "ALTER TABLE mail_messages ADD COLUMN unsub BOOLEAN DEFAULT FALSE NOT NULL"),
+            ("mail_messages", "from_name", "ALTER TABLE mail_messages ADD COLUMN from_name VARCHAR"),
+            ("mail_state", "plan_posted_card", "ALTER TABLE mail_state ADD COLUMN plan_posted_card VARCHAR"),
+        ):
+            if _inspector.has_table(_tbl) and _col not in [c["name"] for c in _inspector.get_columns(_tbl)]:
+                _conn.execute(_text(_ddl))
+                _conn.commit()
+                print(f"✅ 已自動新增 {_tbl}.{_col} 欄位")
 except Exception as e:
     # ⚠️ 這裡吞例外：ALTER 失敗會靜默，然後每次 food 查詢都 SELECT 不存在的欄位而炸。
     #    重啟後務必 `docker logs money-bot | grep -E '✅|⚠️'` 確認。
@@ -241,22 +252,16 @@ scheduler.add_job(_weekly_pipeline, "cron", day_of_week="sun", hour=21, minute=0
 
 
 def _mail_daily():
-    """每日信件整理（時間見 mailrules.config.DAILY_RUN）：同步→分類→（歷史完成後）執行→報告；有新建議卡就發確認卡。"""
+    """每日信件整理（時間見 mailrules.config.DAILY_RUN）：同步→分類→（歷史完成後）執行→報告；
+    新確認卡完整發、舊卡一行提醒；歷史未完成且沒有待確認卡、這份計畫沒發過 → 自動發歷史計畫卡。"""
     try:
         from zoneinfo import ZoneInfo
-        from database import SessionLocal
-        from mailrules import repo as mail_repo
         from mailrules.run import run_daily
-        from discordbot.mailrules_ui import notify_daily, notify_cards
-        rep = run_daily(datetime.now(ZoneInfo("Asia/Taipei")).date())
+        from discordbot.mailrules_ui import notify_daily, after_daily
+        today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+        rep = run_daily(today)
         notify_daily(rep)
-        db = SessionLocal()
-        try:
-            cards = mail_repo.pending_cards(db)
-        finally:
-            db.close()
-        if cards:
-            notify_cards(cards)
+        after_daily(rep, today)
     except Exception as e:
         print(f"⚠️ 每日信件整理失敗：{e}")
         try:

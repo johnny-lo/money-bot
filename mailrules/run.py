@@ -1,4 +1,8 @@
-"""每日／歷史流程編排：同步信頭 → 分類 → 建議 → 規劃 → 執行。歷史整理完成前每日只分類不寫入。"""
+"""每日／歷史流程編排：同步信頭 → 分類 → 建議 → 規劃 → 執行。歷史整理完成前每日只分類不寫入。
+
+同一時間只跑一個（_LOCK）：每日排程搶不到就整個略過，歷史準備／執行搶不到就拋 RuntimeError。
+"""
+import threading
 from contextlib import contextmanager
 from datetime import date, timedelta
 
@@ -6,9 +10,22 @@ from . import classify as C
 from . import config, gmail_rw, repo, suggest
 from .patterns import subject_pattern
 from .plan import plan_actions
+from .repo import card_no
 from .types import MailHeader, MessageState, RunReport
 
 _AI_BY = "ai"
+_BUSY = "另一個信件整理正在跑，請稍後再試"
+_LOCK = threading.Lock()
+
+
+@contextmanager
+def _exclusive():
+    if not _LOCK.acquire(blocking=False):
+        raise RuntimeError(_BUSY)
+    try:
+        yield
+    finally:
+        _LOCK.release()
 
 
 @contextmanager
@@ -22,7 +39,7 @@ def _session(db):
 
 
 def _sync(db, full: bool = False) -> list[MailHeader]:
-    """增量（uidvalidity 變了、或 full=True 就全量）抓信頭寫進 DB，回傳本次抓到的信頭（含 DB 不存的 unsub）。"""
+    """增量（uidvalidity 變了、或 full=True 就全量）抓信頭寫進 DB，回傳本次抓到的信頭。"""
     state = repo.get_state(db)
     uidv, hs = gmail_rw.read_headers(None if full or state is None else state[1])
     if full or (state is not None and uidv != state[0]):
@@ -37,7 +54,7 @@ def _sync(db, full: bool = False) -> list[MailHeader]:
 
 
 def _classify_all(db, today: date, fresh=()) -> dict:
-    """對每封未丟的信算樣式與判定並存檔。fresh 的信頭（帶 unsub）蓋過 DB 重建的版本。"""
+    """對每封未丟、還在信箱的信算樣式與判定並存檔。fresh（本次同步的信頭）蓋過 DB 讀回的版本。"""
     over = {h.gm_msgid: h for h in fresh}
     hs = [over.get(h.gm_msgid, h) for h in repo.headers(db)]
     owner, selfs, comp = config.owner_name(), config.self_addresses(), config.company_domains()
@@ -97,23 +114,39 @@ def _plan_all(db, verdicts: dict, today: date, mode: str) -> list:
 
 
 def _execute(db, actions: list, cats: dict, report: RunReport, batch: int | None = None) -> None:
+    """逐批 apply；每批做完的立刻記進 DB（後面的批次出事也不丟）。已不在信箱的信記 gone、不算失敗。"""
     step = batch or max(len(actions), 1)
+    gone_ids: set[str] = set()
     for i in range(0, len(actions), step):
-        done, failed = gmail_rw.apply(actions[i:i + step])
+        done, failed, gone = gmail_rw.apply(actions[i:i + step])
         repo.record_actions(db, done)
+        if gone:
+            repo.mark_gone(db, sorted({a.gm_msgid for a in gone} - gone_ids))
+            gone_ids |= {a.gm_msgid for a in gone}
         report.failed += len(failed)
+        report.gone = len(gone_ids)
         for a in done:
             key = (cats.get(a.gm_msgid), a.kind)
             report.counts[key] = report.counts.get(key, 0) + 1
 
 
 def run_daily(today: date, db=None) -> RunReport:
+    """另一個信件整理正在跑 → 回傳 skipped 的報告（不同步、不寫入、不拋例外）。"""
+    if not _LOCK.acquire(blocking=False):
+        return RunReport(skipped=True)
+    try:
+        return _run_daily(today, db)
+    finally:
+        _LOCK.release()
+
+
+def _run_daily(today: date, db=None) -> RunReport:
     with _session(db) as db:
         fresh = _sync(db)
         verdicts = _classify_all(db, today, fresh)
-        _suggest_unknown(db, verdicts)
+        new_cards = _suggest_unknown(db, verdicts)
         fresh_ids = {h.gm_msgid for h in fresh}
-        report = RunReport(unknown_patterns=len(_unknown_groups(db, verdicts)),
+        report = RunReport(unknown_patterns=len(_unknown_groups(db, verdicts)), new_cards=list(new_cards),
                            protected=[h for g, (h, v) in verdicts.items() if v.protected and g in fresh_ids])
         state = repo.get_state(db)
         if state is None or state[2] is None:
@@ -130,37 +163,47 @@ def run_daily(today: date, db=None) -> RunReport:
 
 
 def prepare_history(today: date, db=None) -> int:
-    with _session(db) as db:
-        fresh = _sync(db, full=True)          # 舊信的 unsub / 顯示名稱只有信頭有，DB 不存
+    with _exclusive(), _session(db) as db:
+        fresh = _sync(db, full=True)          # 舊信的 unsub / 顯示名稱只有信頭有
         verdicts = _classify_all(db, today, fresh)
         _suggest_unknown(db, verdicts)
         return len(repo.pending_cards(db))
 
 
 def history_plan(today: date, db=None) -> dict:
+    """歷史計畫：各（類別, 動作）封數、每類 3 個不重複的範例主旨、待確認卡數、未知樣式數，
+    以及 upto_card（算計畫當下的最大確認卡號；執行鈕只被不大於它的卡擋）。"""
     with _session(db) as db:
         verdicts = _classify_all(db, today)
         cats = {g: v.category for g, (_, v) in verdicts.items()}
         subjects = {g: h.subject for g, (h, _) in verdicts.items()}
-        counts, samples = {}, {}
+        counts, samples, sampled = {}, {}, set()
         for a in _plan_all(db, verdicts, today, "history"):
             cat = cats.get(a.gm_msgid)
             counts[(cat, a.kind)] = counts.get((cat, a.kind), 0) + 1
-            if len(samples.setdefault(cat, [])) < 3:
-                samples[cat].append(subjects[a.gm_msgid])
+            subs = samples.setdefault(cat, [])
+            if a.gm_msgid in sampled or len(subs) >= 3:
+                continue
+            sampled.add(a.gm_msgid)
+            if subjects[a.gm_msgid] not in subs:
+                subs.append(subjects[a.gm_msgid])
         return {"counts": counts, "samples": samples, "pending_cards": len(repo.pending_cards(db)),
-                "unknown": len(_unknown_groups(db, verdicts))}
+                "unknown": len(_unknown_groups(db, verdicts)), "upto_card": repo.max_card(db)}
 
 
-def execute_history(today: date, db=None) -> RunReport:
-    with _session(db) as db:
+def execute_history(today: date, db=None, upto_card: str | None = None) -> RunReport:
+    """upto_card＝計畫卡發出當下的最大卡號（'none'＝當時沒有卡）：只有卡號不大於它的卡還沒處理才拒絕，
+    之後才長出的卡不擋（它們的信是未知，本來就不會動）。None＝任何待確認卡都擋（原本行為）。"""
+    with _exclusive(), _session(db) as db:
         state = repo.get_state(db)
         if state is not None and state[2] is not None:
             raise RuntimeError("歷史整理已完成，不能再用 history 模式重跑")
         pending = repo.pending_cards(db)
+        if upto_card is not None:
+            pending = [c for c in pending if card_no(c) <= card_no(upto_card)]
         if pending:
             raise RuntimeError(f"還有 {len(pending)} 張確認卡沒處理")
-        fresh = _sync(db, full=True)          # 寫入用的 UID 要是現在的；unsub 也只有信頭有
+        fresh = _sync(db, full=True)          # 寫入用的 UID 要是現在的；舊信的 unsub／顯示名稱也一併刷新
         verdicts = _classify_all(db, today, fresh)
         report = RunReport(unknown_patterns=len(_unknown_groups(db, verdicts)),
                            protected=[h for h, v in verdicts.values() if v.protected])

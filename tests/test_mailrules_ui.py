@@ -66,11 +66,12 @@ def _fake_interaction(values=None, uid=1):
 def test_執行鈕結果編輯原訊息_不用會過期的_followup(monkeypatch):
     from mailrules import run
     monkeypatch.setenv("AUTOFIX_OWNER_USER_ID", "1")
-    monkeypatch.setattr(run, "execute_history", lambda today, db=None: RunReport(applied=True, counts={("promo", "trash"): 7}))
+    monkeypatch.setattr(run, "execute_history",
+                        lambda today, db=None, upto_card=None: RunReport(applied=True, counts={("promo", "trash"): 7}))
     it = _fake_interaction()
 
     async def go():
-        await ui.ExecuteButton().callback(it)
+        await ui.ExecuteButton("s3").callback(it)
     asyncio.run(go())
     it.response.edit_message.assert_awaited_once()
     assert "執行中" in it.response.edit_message.await_args.kwargs["embed"].title
@@ -83,14 +84,14 @@ def test_執行鈕結果編輯原訊息_不用會過期的_followup(monkeypatch)
 def test_執行鈕失敗也編輯原訊息(monkeypatch):
     from mailrules import run
 
-    def boom(today, db=None):
+    def boom(today, db=None, upto_card=None):
         raise RuntimeError("IMAP 斷線")
     monkeypatch.setenv("AUTOFIX_OWNER_USER_ID", "1")
     monkeypatch.setattr(run, "execute_history", boom)
     it = _fake_interaction()
 
     async def go():
-        await ui.ExecuteButton().callback(it)
+        await ui.ExecuteButton("s3").callback(it)
     asyncio.run(go())
     emb = it.message.edit.await_args.kwargs["embed"]
     assert "失敗" in emb.title and "IMAP 斷線" in emb.description

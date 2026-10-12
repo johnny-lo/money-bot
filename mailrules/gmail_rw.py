@@ -1,7 +1,7 @@
 """Gmail IMAP：只讀信頭、只做三種寫入（建標籤、±X-GM-LABELS、丟垃圾桶）。
 
 硬規矩（守衛測試掃原始碼）：不讀內文、不永久刪、不寄信；讀取一律 readonly=True；
-IMAP 連線變數一律叫 M。
+IMAP 連線變數一律叫 M。寫入時用的 UID SEARCH X-GM-MSGID 只拿來查信現在的 uid（唯讀）。
 """
 import base64
 import email
@@ -10,6 +10,7 @@ import email.utils
 import imaplib
 import os
 import re
+from dataclasses import replace
 
 from app_secrets import get_secret
 
@@ -263,13 +264,50 @@ def _current_msgids(M, uids: list[int]) -> dict[int, str]:
     return out
 
 
-def apply(actions: list[Action], expected_uidvalidity: int | None = None) -> tuple[list[Action], list[Action]]:
+def _find_uids(M, gm_msgids: set[str]) -> dict[str, int]:
+    """唯讀查詢：用 X-GM-MSGID 在所有郵件找這封信現在的 UID；找不到（已刪、在垃圾桶）就不列。"""
+    out = {}
+    for g in sorted(gm_msgids):
+        typ, data = M.uid("SEARCH", "X-GM-MSGID", str(g))
+        if typ != "OK":
+            raise RuntimeError(f"SEARCH 失敗：{typ}")
+        uids = [int(u) for u in (data[0] or b"").split()] if data else []
+        if uids:
+            out[g] = uids[0]
+    return out
+
+
+def _verify(M, batch: list[Action]) -> tuple[list[Action], list[Action], list[Action]]:
+    """寫入前核對：uid 仍對應 gm_msgid 的直接寫；對不上的用 X-GM-MSGID 找新 uid、再核對一次。
+    回傳 (ok, failed, gone)；ok 裡換過 uid 的動作帶新 uid。"""
+    current = _current_msgids(M, sorted({a.uid for a in batch}))
+    ok = [a for a in batch if current.get(a.uid) == str(a.gm_msgid)]
+    lost = [a for a in batch if current.get(a.uid) != str(a.gm_msgid)]
+    if not lost:
+        return ok, [], []
+    found = _find_uids(M, {str(a.gm_msgid) for a in lost})
+    recheck = _current_msgids(M, sorted(set(found.values()))) if found else {}
+    failed, gone = [], []
+    for a in lost:
+        u = found.get(str(a.gm_msgid))
+        if u is None:
+            gone.append(a)
+        elif recheck.get(u) == str(a.gm_msgid):
+            ok.append(replace(a, uid=u))
+        else:
+            failed.append(a)
+    return ok, failed, gone
+
+
+def apply(actions: list[Action], expected_uidvalidity: int | None = None
+          ) -> tuple[list[Action], list[Action], list[Action]]:
     """寫入前先核對 UIDVALIDITY；不符（或沒存過）→ UidValidityChanged，一封都不寫。
-    每批寫入前再唯讀核對 UID → X-GM-MSGID：DB 裡舊 epoch 留下、沒被重讀到的列 uid 已指向別封信，
-    只寫 uid 仍對應 action.gm_msgid 的動作，其餘直接進 failed。"""
+    每批寫入前再唯讀核對 UID → X-GM-MSGID；uid 對不上的先用 X-GM-MSGID 在所有郵件找新 uid
+    （找到再核對一次才寫，找不到 → gone）。某一批核對或寫入拋例外（例如斷線）→ 那一批整批進 failed，
+    已完成的批次照常回傳。回傳 (done, failed, gone)；done 裡的 uid 是實際寫入的 uid。"""
     if not actions:
-        return [], []
-    done, failed = [], []
+        return [], [], []
+    done, failed, gone = [], [], []
     M = _connect()
     try:
         trash = _special(M, _TRASH)
@@ -284,19 +322,26 @@ def apply(actions: list[Action], expected_uidvalidity: int | None = None) -> tup
         created: set[str] = set()
         for i in range(0, len(actions), CHUNK):
             batch = actions[i:i + CHUNK]
-            current = _current_msgids(M, sorted({a.uid for a in batch}))
-            ok = [a for a in batch if current.get(a.uid) == str(a.gm_msgid)]
-            failed += [a for a in batch if current.get(a.uid) != str(a.gm_msgid)]
-            for label in sorted({a.label for a in ok if a.kind == "label" and a.label} - created):
-                created.add(label)
-                try:
-                    M.create('"' + imap_utf7_encode(label) + '"')
-                except Exception:
-                    pass                                   # 已存在
-            _write(M, ok, trash, use_move, done, failed)
+            b_done, b_failed = [], []
+            try:
+                ok, b_failed, b_gone = _verify(M, batch)
+                for label in sorted({a.label for a in ok if a.kind == "label" and a.label} - created):
+                    created.add(label)
+                    try:
+                        M.create('"' + imap_utf7_encode(label) + '"')
+                    except Exception:
+                        pass                               # 已存在
+                _write(M, ok, trash, use_move, b_done, b_failed)
+            except Exception as e:
+                print(f"⚠️ mailrules 第 {i // CHUNK + 1} 批寫入中斷，整批 {len(batch)} 筆算失敗：{type(e).__name__}: {e}")
+                failed += batch
+                continue
+            done += b_done
+            failed += b_failed
+            gone += b_gone
     finally:
         _logout(M)
-    return done, failed
+    return done, failed, gone
 
 
 def _write(M, actions: list[Action], trash: str, use_move: bool, done: list, failed: list) -> None:

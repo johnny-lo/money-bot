@@ -1,4 +1,4 @@
-"""slash commands 的註冊（記帳/查詢/固定收支/美食/食譜/信件名單/測試報表）。
+"""slash commands 的註冊（記帳/查詢/固定收支/美食/食譜/信件名單/信件計畫/測試報表）。
 
 慢 commands（/記帳、/收入、/分類、/抓發票…）必 defer 避免 3 秒超時。
 """
@@ -310,3 +310,13 @@ def register_commands(bot) -> None:
             await ix.followup.send(embed=error_embed(f"只有 {pages} 頁"), ephemeral=True)
             return
         await ix.followup.send(embed=mailrules_ui.layer_embed(data, page, pages), ephemeral=True)
+
+    @tree.command(name="信件計畫", description="把目前的歷史信件整理計畫卡發到信件頻道（執行鈕仍只有本人能按）")
+    async def cmd_mail_plan(ix: discord.Interaction):
+        await ix.response.defer(ephemeral=True)
+        try:
+            msg = await asyncio.to_thread(mailrules_ui.post_history_plan, mailrules_ui._today())
+        except Exception as ex:
+            await ix.followup.send(embed=error_embed(f"發計畫卡失敗：{ex}"), ephemeral=True)
+            return
+        await ix.followup.send(msg, ephemeral=True)

@@ -97,8 +97,8 @@ def test_apply_uidvalidity不符_整批中止_零寫入(monkeypatch):
 def test_apply_uidvalidity相符_照常寫入(monkeypatch):
     M = FakeM(uidvalidity=42)
     monkeypatch.setattr(gmail_rw, "_connect", lambda: M)
-    done, failed = gmail_rw.apply(ACTS, expected_uidvalidity=42)
-    assert len(done) == 3 and failed == []
+    done, failed, gone = gmail_rw.apply(ACTS, expected_uidvalidity=42)
+    assert len(done) == 3 and failed == [] and gone == []
     assert ("create", '"' + gmail_rw.imap_utf7_encode("整理/收據") + '"') in M.calls
     assert ("uid", "STORE", "11", "+X-GM-LABELS", '("' + gmail_rw.imap_utf7_encode("整理/收據") + '")') in M.calls
     assert ("uid", "STORE", "11", "-X-GM-LABELS", "(\\Inbox)") in M.calls
@@ -181,11 +181,11 @@ def test_read_headers_單封解析失敗_記錄並跳過(monkeypatch, capsys):
 
 def test_apply_epoch改變後_未重讀到的舊列_零寫入(monkeypatch):
     # 新 epoch 已存進 mail_state（42 相符），但這三筆是舊 epoch 留下的 uid：
-    # uid 11 現在是別封信、uid 12 現在不存在 → 一封都不能動
+    # uid 11 現在是別封信、uid 12 現在不存在、兩封在所有郵件都搜不到 → 一封都不能動，回報已不在
     M = FakeM(uidvalidity=42, msgids={11: "5555"})
     monkeypatch.setattr(gmail_rw, "_connect", lambda: M)
-    done, failed = gmail_rw.apply(ACTS, expected_uidvalidity=42)
-    assert done == [] and failed == ACTS
+    done, failed, gone = gmail_rw.apply(ACTS, expected_uidvalidity=42)
+    assert done == [] and failed == [] and gone == ACTS
     assert M.writes() == []
     fetches = [c for c in M.calls if c[:2] == ("uid", "FETCH")]
     assert fetches and all(c[3] == "(X-GM-MSGID)" for c in fetches)
@@ -194,8 +194,8 @@ def test_apply_epoch改變後_未重讀到的舊列_零寫入(monkeypatch):
 def test_apply_只寫_uid_仍對應_msgid_的動作(monkeypatch):
     M = FakeM(uidvalidity=42, msgids={11: "1001", 12: "7777"})
     monkeypatch.setattr(gmail_rw, "_connect", lambda: M)
-    done, failed = gmail_rw.apply(ACTS, expected_uidvalidity=42)
-    assert done == ACTS[:2] and failed == ACTS[2:]
+    done, failed, gone = gmail_rw.apply(ACTS, expected_uidvalidity=42)
+    assert done == ACTS[:2] and failed == [] and gone == ACTS[2:]
     assert not any(c[0] == "uid" and c[1] in ("STORE", "MOVE") and c[2] == "12" for c in M.calls)
 
 

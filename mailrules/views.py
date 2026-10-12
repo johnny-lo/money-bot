@@ -119,7 +119,8 @@ def _collect(key, msgs, rules, domains, today, q) -> tuple[str, list]:
         return "rules", items
     if key == "valued":
         out = []
-        valued_doms = [addr_domain(m["from_addr"]) for m in msgs if m.get("reason") == REASON_VALUED]
+        valued_doms = [addr_domain(m["from_addr"]) for m in msgs
+                       if m.get("reason") == REASON_VALUED and not m.get("gone_at")]
         for d in domains:
             dom = (d["domain"] or "").lower()
             if not _hit(q, dom):
@@ -129,7 +130,7 @@ def _collect(key, msgs, rules, domains, today, q) -> tuple[str, list]:
                         "pattern": d.get("source_subject_pattern"), "count": n})
         out.sort(key=lambda r: (-r["count"], r["domain"]))
         return "domains", out
-    hits = [m for m in msgs if _match_msg(m, key, today)]
+    hits = [m for m in msgs if not m.get("gone_at") and _match_msg(m, key, today)]   # 已不在信箱的不列
     if key == "unknown":
         groups: dict = defaultdict(lambda: [0, None])
         for m in hits:
@@ -158,7 +159,7 @@ def overview_from(msgs, rules, domains, today) -> list[dict]:
 def load(db) -> tuple[list[dict], list[dict], list[dict]]:
     """三張表各讀一次轉成 dict 列（約一萬列，整包讀進來再交給純函式）。"""
     mc = ("from_addr", "subject", "subject_pattern", "sent_date", "category", "reason", "in_inbox",
-          "labels_applied", "trashed_at")
+          "labels_applied", "trashed_at", "gone_at")
     msgs = [dict(zip(mc, r)) for r in db.query(*[getattr(MailMessage, c) for c in mc]).all()]
     rc = ("sender", "subject_pattern", "category", "status", "suggested_by")
     rules = [dict(zip(rc, r)) for r in db.query(*[getattr(MailRule, c) for c in rc]).all()]

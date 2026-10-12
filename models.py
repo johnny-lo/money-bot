@@ -220,6 +220,9 @@ class MailMessage(Base):
     in_inbox = Column(Boolean, nullable=False, default=True)
     labels_applied = Column(JSON, nullable=False, default=list)
     trashed_at = Column(DateTime, nullable=True)
+    gone_at = Column(DateTime, nullable=True)                          # 所有郵件找不到了（不再規劃、不算失敗）
+    unsub = Column(Boolean, nullable=False, default=False)             # 有 List-Unsubscribe
+    from_name = Column(String, nullable=True)                          # 寄件者顯示名稱
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 
@@ -238,3 +241,4 @@ class MailState(Base):
     uidvalidity = Column(Integer, nullable=True)
     last_uid = Column(Integer, nullable=True)
     history_done_at = Column(DateTime, nullable=True)
+    plan_posted_card = Column(String, nullable=True)   # 已自動發過的歷史計畫卡（發卡當下最大卡號，沒有卡＝'none'）

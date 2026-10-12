@@ -1,6 +1,7 @@
 """信件規則引擎的 Discord 端：建議確認卡、每日報告、職缺／推銷摘要、歷史整理計畫卡。
 
 元件用 DynamicItem：custom_id 自帶卡號／規則 id，bot 重啟後不需要記憶體狀態就能接手。只有本人能按。
+執行鈕的 custom_id 帶「計畫卡發出當下的最大卡號」：之後才長出的確認卡不擋執行。
 """
 import asyncio
 import os
@@ -66,6 +67,8 @@ def digest_embed(title: str, headers: list[MailHeader]) -> discord.Embed:
 
 
 def daily_embed(rep: RunReport) -> discord.Embed:
+    if rep.skipped:
+        return discord.Embed(title="📬 每日信件整理", description="⏭ 另一個信件整理正在跑，這次略過。", color=COLOR)
     lines = []
     if not rep.applied:
         lines.append("⏸ 歷史整理完成前只分類、不動信件。")
@@ -74,6 +77,8 @@ def daily_embed(rep: RunReport) -> discord.Embed:
     lines.append(f"❓ 未知樣式：{rep.unknown_patterns} 個")
     if rep.failed:
         lines.append(f"⚠️ 失敗：{rep.failed} 封")
+    if rep.gone:
+        lines.append(f"📭 已不在信箱 {rep.gone} 封（略過）")
     if rep.protected:
         lines.append(f"🛡 安全網留在收件匣（看起來重要，我沒動）：{len(rep.protected)} 封")
         room = 4096 - len("\n".join(lines)) - 1
@@ -94,7 +99,7 @@ def history_embed(plan: dict) -> discord.Embed:
     lines = [f"{_cat(cat)}｜{kind}｜{n} 封" for (cat, kind), n in sorted(plan.get("counts", {}).items())]
     for cat, subs in sorted(plan.get("samples", {}).items()):
         lines.append(f"　{_cat(cat)} 例：" + "、".join(s[:30] for s in subs[:3]))
-    lines.append(f"待確認卡 {plan.get('pending_cards', 0)} 張｜未知 {plan.get('unknown', 0)} 封")
+    lines.append(f"待確認卡 {plan.get('pending_cards', 0)} 張｜未知 {plan.get('unknown', 0)} 個樣式")
     e = discord.Embed(title="🗂 歷史信件整理計畫", description="\n".join(lines)[:4096], color=COLOR)
     e.set_footer(text="確認無誤再按「執行」")
     return e
@@ -142,6 +147,15 @@ def _guard_fail(interaction):
     return can_act(interaction.user.id, _owner_id())
 
 
+def _safe_counts(db, card: str) -> dict:
+    """封數只是輔助資訊：查不到就不顯示，不擋按鈕。"""
+    try:
+        return repo.card_counts(db, card)
+    except Exception as e:
+        print(f"⚠️ 確認卡 {card} 封數查詢失敗：{e}")
+        return {}
+
+
 async def _send_assign_cards(interaction, rejected: list[Rule]) -> None:
     """被拒絕的規則沒有建議類別可確認，每 4 條發一張手動指定卡（Discord 一則訊息最多 5 列元件）。"""
     for i in range(0, len(rejected), 4):
@@ -173,10 +187,11 @@ class RejectSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"mailrul
         try:
             repo.reject(db, self.card, ids)
             rules = repo.card_rules(db, self.card)
+            counts = _safe_counts(db, self.card)
         finally:
             db.close()
         view = suggest_view(self.card, rules)
-        await interaction.response.edit_message(embed=suggest_embed(self.card, rules, {}), view=view)
+        await interaction.response.edit_message(embed=suggest_embed(self.card, rules, counts), view=view)
         if view is None:      # 卡上規則全被拒絕：沒有確認鈕了，直接發手動指定卡
             await _send_assign_cards(interaction, [r for r in rules if r.status == "rejected"])
 
@@ -201,16 +216,18 @@ class ConfirmButton(discord.ui.DynamicItem[discord.ui.Button], template=r"mailru
             repo.confirm_card(db, self.card, [])
             rules = repo.card_rules(db, self.card)
             rejected = [r for r in repo.rejected_rules(db) if r.card == self.card]
+            counts = _safe_counts(db, self.card)
         finally:
             db.close()
-        await interaction.response.edit_message(embed=suggest_embed(self.card, rules, {}), view=None)
+        await interaction.response.edit_message(embed=suggest_embed(self.card, rules, counts), view=None)
         await interaction.followup.send(f"已確認（by {interaction.user.display_name}）")
         await _send_assign_cards(interaction, rejected)
 
 
 class AssignSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"mailrules:assign:(?P<rid>\d+)"):
     def __init__(self, rid: int, label: str = ""):
-        opts = [discord.SelectOption(label=name, value=key) for key, name in config.CATEGORIES]
+        # 不提供「重要」：保護的信不走規則（安全網），手動指定只給會整理的類別
+        opts = [discord.SelectOption(label=name, value=key) for key, name in config.CATEGORIES if key != "keep_inbox"]
         super().__init__(discord.ui.Select(placeholder=(label or f"規則 {rid}")[:144] + " → 選類別",
                                            min_values=1, max_values=1, options=opts,
                                            custom_id=f"mailrules:assign:{rid}"))
@@ -226,7 +243,7 @@ class AssignSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"mailrul
             await interaction.response.send_message(f"⛔ {why}", ephemeral=True)
             return
         vals = (interaction.data or {}).get("values", [])
-        if not vals or vals[0] not in config.LABELS:
+        if not vals or vals[0] not in config.LABELS or vals[0] == "keep_inbox":
             await interaction.response.send_message("⛔ 類別無效", ephemeral=True)
             return
         db = SessionLocal()
@@ -237,14 +254,17 @@ class AssignSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"mailrul
         await interaction.response.send_message(f"規則 {self.rid} 已歸為『{_cat(vals[0])}』")
 
 
-class ExecuteButton(discord.ui.DynamicItem[discord.ui.Button], template=r"mailrules:exec:history"):
-    def __init__(self):
+class ExecuteButton(discord.ui.DynamicItem[discord.ui.Button],
+                    template=r"mailrules:exec:history(?::(?P<card>s\d+|none))?"):
+    """upto＝計畫卡發出當下的最大卡號（'none'＝當時沒有卡）；舊版不帶卡號的鈕 → None（任何待確認卡都擋）。"""
+    def __init__(self, upto: str | None = None):
         super().__init__(discord.ui.Button(label="🚀 執行歷史整理", style=discord.ButtonStyle.danger,
-                                           custom_id="mailrules:exec:history"))
+                                           custom_id="mailrules:exec:history" + (f":{upto}" if upto else "")))
+        self.upto = upto
 
     @classmethod
     async def from_custom_id(cls, interaction, item, match):
-        return cls()
+        return cls(match["card"])
 
     async def callback(self, interaction: discord.Interaction):
         why = _guard_fail(interaction)
@@ -258,13 +278,15 @@ class ExecuteButton(discord.ui.DynamicItem[discord.ui.Button], template=r"mailru
         await interaction.response.edit_message(embed=running, view=None)
         from mailrules import run
         try:
-            rep = await asyncio.to_thread(run.execute_history, _today())
+            rep = await asyncio.to_thread(run.execute_history, _today(), upto_card=self.upto)
             emb = daily_embed(rep)
             emb.title = "🗂 歷史整理完成"
+            view = None
         except Exception as e:
             emb = discord.Embed(title="❌ 歷史整理失敗", description=str(e)[:4000], color=_FAIL_COLOR)
+            view = _exec_view(self.upto)          # 處理完再按一次：同一顆鈕要留著
         try:
-            await interaction.message.edit(embed=emb, view=None)
+            await interaction.message.edit(embed=emb, view=view)
         except Exception as e:
             print(f"⚠️ 歷史整理結果編輯訊息失敗：{e}")
 
@@ -310,21 +332,78 @@ def notify_cards(card_ids: list[str]) -> None:
         return
     db = SessionLocal()
     try:
-        cards = [(c, repo.card_rules(db, c)) for c in card_ids]
+        cards = [(c, repo.card_rules(db, c), repo.card_counts(db, c)) for c in card_ids]
     finally:
         db.close()
-    for card, rules in cards:
-        _post([suggest_embed(card, rules, {})], make_view=lambda c=card, rs=rules: suggest_view(c, rs))
+    for card, rules, counts in cards:
+        _post([suggest_embed(card, rules, counts)], make_view=lambda c=card, rs=rules: suggest_view(c, rs))
+
+
+def notify_card_reminder(card_ids: list[str]) -> None:
+    """舊的待確認卡不重發整張，只發一行提醒。"""
+    if not card_ids:
+        return
+    _post([discord.Embed(description=f"📝 還有 {len(card_ids)} 張確認卡沒處理：{'、'.join(card_ids)}",
+                         color=COLOR)])
 
 
 def notify_history_plan(plan: dict) -> None:
-    _post([history_embed(plan)], make_view=lambda: _exec_view())
+    upto = plan.get("upto_card") or "none"
+    _post([history_embed(plan)], make_view=lambda: _exec_view(upto))
 
 
-def _exec_view() -> discord.ui.View:
+def _exec_view(upto: str | None) -> discord.ui.View:
     v = discord.ui.View(timeout=None)
-    v.add_item(ExecuteButton())
+    v.add_item(ExecuteButton(upto))
     return v
+
+
+def _post_plan(today) -> dict:
+    """算目前的歷史計畫、發計畫卡，並記下這份計畫的卡號（每日排程據此判斷發過沒）。"""
+    from mailrules import run
+    plan = run.history_plan(today)
+    notify_history_plan(plan)
+    db = SessionLocal()
+    try:
+        repo.set_plan_posted(db, plan.get("upto_card") or "none")
+    finally:
+        db.close()
+    return plan
+
+
+def after_daily(rep: RunReport, today) -> None:
+    """每日整理後：新卡完整發、舊的待確認卡一行提醒；歷史未完成、沒有待確認卡、
+    且這份計畫（以目前最大卡號為準）還沒發過 → 自動發歷史計畫卡。"""
+    if rep.skipped:
+        return
+    db = SessionLocal()
+    try:
+        pending = repo.pending_cards(db)
+        state = repo.get_state(db)
+        posted, upto = repo.plan_posted_card(db), repo.max_card(db) or "none"
+    finally:
+        db.close()
+    if rep.new_cards:
+        notify_cards(rep.new_cards)
+    notify_card_reminder([c for c in pending if c not in rep.new_cards])
+    if pending or state is None or state[2] is not None or posted == upto or not config.mail_channel_id():
+        return
+    _post_plan(today)
+
+
+def post_history_plan(today) -> str:
+    """/信件計畫：隨時把目前的計畫卡發到信件頻道（發過也照發）。回傳給下指令的人看的訊息。"""
+    if not config.mail_channel_id():
+        return "⚠️ 還沒設定 MAIL_CHANNEL_ID，發不出去"
+    db = SessionLocal()
+    try:
+        state = repo.get_state(db)
+    finally:
+        db.close()
+    if state is not None and state[2] is not None:
+        return "歷史整理已完成，不需要計畫卡"
+    plan = _post_plan(today)
+    return f"✅ 已發到信件頻道（待確認卡 {plan.get('pending_cards', 0)} 張）"
 
 
 def notify_failure(err: str) -> None:

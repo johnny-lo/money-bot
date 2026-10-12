@@ -16,12 +16,13 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 ├── line_handler.py      # LINE Bot：webhook /callback、文字/圖片訊息事件處理（純文字介面）。**憑證可選**：`LINE_ENABLED` 為假時整段跳過掛載,不再 import 期崩潰拖垮全站（測試 tests/test_line_optional.py）
 ├── discordbot/          # Discord Bot package（原 discord_handler.py 拆分，邏輯不變；不能叫 discord 會遮蔽套件）
 │   ├── bot.py           # MoneyBot client：on_message 頻道分流、on_raw_reaction_add(✅ 標去過)、create_discord_bot、run_discord_bot（監管迴圈：暫時性失敗退避重試、壞 token 停手；on_ready/重試訊息 flush=True 即時可見）
-│   ├── commands.py      # 28 個 slash commands 註冊（記帳/查詢/固定收支/美食/食譜/測試報表）；BASE_URL 在此
+│   ├── commands.py      # 29 個 slash commands 註冊（記帳/查詢/固定收支/美食/食譜/信件名單/信件計畫/測試報表）；BASE_URL 在此
 │   ├── embeds.py        # 全部 embed builders + 顏色常數 + fmt_money/fmt_dt（純呈現層）
 │   ├── ingest_handlers.py # 美食/食譜/圖片記帳的 on_message 處理（handle_food_message/handle_recipe_message/do_image_recording）
 │   ├── reports.py       # 週報/月報/發票通知：_query_period 彙總 + _generate_ai_comment + notify_*
 │   ├── bridge.py        # sync→async 橋接：set_bot/post_embeds_sync（排程 thread 投遞 embeds）；`post_sync(chan, embeds, make_view)` 可附元件——View 必須在 bot loop 內建立，所以傳工廠函式
 │   ├── cardrecon_ui.py  # 刷卡比對 Discord 端：`page_embed`/`page_view`（每頁 ≤25 筆）、`RecordButton`（`cardrecon:record:<batch>`，整批補記）、`IgnoreSelect`（`cardrecon:ignore:<batch>`，多選忽略）、`IgnoreAllButton`（`cardrecon:ignoreall:<batch>`，整張忽略）；每行附時間與線索、標題帶分組名、每組各自 k/K 頁、description 截在 4096 內——DynamicItem，bot.setup_hook 註冊，重啟後仍可按；只限 AUTOFIX_OWNER_USER_ID；`notify_weekly`/`notify_failure`。測 tests/test_cardrecon_ui.py
+│   ├── mailrules_ui.py  # 信件規則 Discord 端：確認卡（`RejectSelect`/`ConfirmButton`，卡片顯示每個樣式的封數）、`AssignSelect`（手動指定類別，不提供 keep_inbox）、`ExecuteButton`（`mailrules:exec:history:<卡號|none>`，失敗時把同一顆鈕帶回）、每日報告（含「已不在信箱 N 封（略過）」、略過說明）。`notify_cards`（完整發）／`notify_card_reminder`（舊卡一行提醒）／`notify_history_plan`／`after_daily(rep, today)`（每日排程的後續發卡）／`post_history_plan(today)`（/信件計畫）。測 tests/test_mailrules_ui.py、tests/test_mailrules_integration.py
 │   └── autofix_ui.py    # 自動修復 Discord 端：`can_act`（只限 AUTOFIX_OWNER_USER_ID、狀態 reported、7 天內）、`AutofixButton`（DynamicItem，custom_id `autofix:deploy|abandon:<id>`，bot.setup_hook add_dynamic_items → 重啟後仍可按）、`process_outbox`（bot 每 30 秒輪詢 autofix/outbox/，同事件先報告後部署結果，壞檔改名 .bad）。測 tests/test_autofix_ui.py
 ├── gemini.py            # Gemini API 封裝：gemini_image(model=, schema=)（單次呼叫；schema → generationConfig.responseJsonSchema）、gemini_text()、generate_persona_comment()（錢鼠阿財記帳評論，走 Gemini 文字）。
 │                        # **影像一律走 vision_text()**：MODEL_NAME → GEMINI_FALLBACK_MODELS 逐個退避 →（allow_codex=True 才）codex_image。
@@ -68,7 +69,10 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   ├── drill.py / drill.patch  # 演習：`python -m autofix.drill` 觸發 drill 事件；run.sh 在 worktree 套 drill.patch（把 _login_landing 的「登出」改「登入」）讓 Claude 修
 │   ├── （tests/conftest.py：autouse 關掉 AUTOFIX_ENABLED——測試在正式容器跑時不能寫進正式事件表。測 tests/test_autofix_isolation.py）
 │   └── install.sh       # 主機：mkdir 交接目錄（inbox/approved/outbox/state，gitignore）+ 連結並啟用 scripts/systemd/linebot-autofix-{inbox,deploy}.path
-├── mailrules/           # 信件規則引擎（spec: docs/superpowers/specs/2026-10-12-mail-rules-design.md；plan: docs/superpowers/plans/2026-10-12-mail-rules.md）。此處只記名單檢視這一塊
+├── mailrules/           # 信件規則引擎（spec: docs/superpowers/specs/2026-10-12-mail-rules-design.md；plan: docs/superpowers/plans/2026-10-12-mail-rules.md）
+│   ├── gmail_rw.py      # IMAP：只讀信頭（BODY.PEEK[HEADER.FIELDS ...]）、只做三種寫入（CREATE 標籤、UID STORE ±X-GM-LABELS、丟垃圾桶 MOVE 或 +\Trash）。**`apply(actions, expected_uidvalidity=None)` 回傳 `(done, failed, gone)`**：先核對 UIDVALIDITY（不符→`UidValidityChanged` 零寫入）；每批寫入前唯讀核對 UID→X-GM-MSGID，對不上的用唯讀 `UID SEARCH X-GM-MSGID` 在所有郵件找新 uid、**再核對一次**才寫（done 裡帶新 uid），找不到＝gone；某批核對／寫入拋例外（斷線）→ 那批整批進 failed、已完成的批次照常回傳。守衛測試掃原始碼禁內文／\Deleted／EXPUNGE／APPEND／COPY／寄信
+│   ├── repo.py          # 唯一 DB 存取層。`upsert_headers` 寫 unsub／from_name、重新同步到的信清 gone_at；`headers()` 讀回 unsub／顯示名稱、排除 gone；`record_actions`（含更新 uid）、`mark_gone`；`add_suggestions` 依類別排序、每類各自分卡（≤25 樣式，卡號只增不減）；`card_counts(db, card)`＝{(sender, pattern): 封數}；`max_card`／`card_no`；`plan_posted_card`／`set_plan_posted`
+│   ├── run.py           # orchestrator，模組層 `_LOCK`：`run_daily` 搶不到鎖回 `RunReport(skipped=True)`（不寫不拋），`prepare_history`／`execute_history` 搶不到拋 RuntimeError（「另一個信件整理正在跑」）。歷史未完成前每日零寫入。`history_plan` 回 counts／samples（每類 3 個不重複主旨、一封信只算一次）／pending_cards／unknown（樣式數）／**upto_card**（當下最大卡號）。`execute_history(today, db=None, upto_card=None)`：只被卡號 ≤ upto_card 的待確認卡擋（'none'＝都不擋；None＝原本行為）。每批 apply 後立刻 `record_actions`，gone 記 `mark_gone`；RunReport 有 gone、new_cards、skipped
 │   ├── classify.py      # `REASON_JOB/VALUED/HUMAN/SELF/UNKNOWN`＝`Verdict.reason` 的固定字串（mail_messages.reason 存的就是它們，名單檢視依它分層；改字串＝改歷史資料）；`classify()` 用這些常數
 │   ├── plan.py          # `next_step(category, sent_date, st, today=None)`：這封信接下來（每日模式）最早的動作與日期（`("archive"|"trash", date)`，沒有下一步 None）；帶 `today` 時丟的期限已到就直接回丟（和 `plan_actions` 的 trash 優先一致）。只給名單檢視顯示用，不影響 `plan_actions`
 │   └── views.py         # **名單檢視（只讀 mail_messages / mail_rules / mail_valued_domains，不寫 DB、不連 Gmail）**。`LAYERS`＝19 層（🛡求職字眼/重視的公司/真人來信、寄給自己、你的規則、未知、12 個類別、🗑30 天內丟的；順序固定，Discord 下拉放得下 25 個）。純函式 `build_layer(key, msgs, rules, domains, today, q, offset, limit)`（回 `{key,title,kind,total,rows}`，kind＝messages/rules/domains/groups；未知 key `KeyError`）與 `overview_from(...)`；`load(db)` 把三張表讀成 dict 列；`overview(db, today)`／`layer(db, key, today, ...)` 是薄包裝（db=None 自開 SessionLocal）。Discord `/信件名單` 與 `routes/mail.py` 共用。測 tests/test_mailrules_views.py
@@ -154,9 +158,12 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 | `autofix_incidents` | id, sensor, signature, title, status, hit_keys(JSON), context(JSON), first_seen, last_seen, verdict, report_message_id, reported_at, closed_at | 自動修復事件；同 (sensor, signature) 同時最多一筆未結案。新表，開機 create_all 自動建 |
 | `history_videos` | id(PK), title(str), url(str, UNIQUE 去重鍵), topic(str?, index, 主分類書架), channel(str?, v1 不自動填), platform(str?), discord_message_id(str?, index), created_at | 歷史教學影片；topic=單一書架 |
 | `video_tags` | id(PK), video_id(FK→history_videos.id, ON DELETE CASCADE, index), tag(str, index) | 影片標籤（去正規化多對多）：標籤直接存字串，查=WHERE tag=?、全部=DISTINCT tag |
+| `mail_messages` | id, gm_msgid(UNIQUE), uid, from_addr(index), **from_name?**, subject_pattern, subject, sent_date?(index), category?(index), reason?, protected, in_inbox, labels_applied(JSON), trashed_at?, **gone_at?**, **unsub(bool, not null, 預設 false)**, updated_at | 信件規則引擎每封信的狀態（只存信頭衍生資料）。unsub＝有 List-Unsubscribe（存起來，舊電子報才不會在每日分類被當成真人寄的）；gone_at＝寫入時所有郵件已找不到（之後不規劃、不算失敗、名單不列；再同步到就清掉） |
+| `mail_state` | id(恆 1), uidvalidity?, last_uid?, history_done_at?, **plan_posted_card?** | 所有郵件高水位；plan_posted_card＝自動發過的歷史計畫卡是在哪個最大卡號下發的（沒有卡＝`none`），每日排程據此不重發 |
 
 main.py 啟動時自動 `CREATE TABLE` + 檢查/補上既有表的新欄位（`transactions` 的 category / invoice_no /
-source / shared / **seller**、`recurring_records.shared`、`food_places` 的料理兩層分類、`food_photos` 的 FK）
+source / shared / **seller**、`recurring_records.shared`、`food_places` 的料理兩層分類、`food_photos` 的 FK、
+`mail_messages` 的 gone_at / unsub（DEFAULT FALSE NOT NULL）/ from_name、`mail_state.plan_posted_card`）
 ＋建對應索引。**`create_all` 只建新表不改既有表結構**，所以既有表加欄一定要在那段 inspector + `ALTER TABLE`
 補一筆；那段 try 會吞例外 → 重啟後跑 `docker logs money-bot | grep -E '✅|⚠️'` 確認真的加成功
 （ALTER 沒成功但 model 已有欄位 = 之後每次查 transactions 都 SELECT 不存在的欄位而炸）。
@@ -195,6 +202,7 @@ LINE/Discord 訊息
 | daily_recurring | 每日 00:05 | `recurring.run_daily_recurring()` |
 | daily_invoice_sync | 週一 ~ 週六 21:00 | `_daily_invoice_with_notify()` — `sync_with_backfill()` 智能補拓 + 通知 Discord `#🧾-發票通知`（含「新增明細」second embed；失敗改發失敗卡） |
 | weekly_pipeline | 週日 21:00 | `_weekly_pipeline()` — 一條龍：(1) 補拓+通知 → (1.5) **刷卡比對** `cardrecon.ingest.run_weekly` + `cardrecon_ui.notify_weekly`（自己的 try：失敗發「刷卡比對失敗」卡，不擋後面）→ (2) `run_weekly_categorization()` → (3) `notify_weekly_summary()` 週報。**每月第一個週日**（即 `day ≤ 7` 的週日）會額外串接 (4) `notify_monthly_summary()` 推上月完整月結 |
+| mail_daily | 每日 23:30（`mailrules.config.DAILY_RUN`） | `_mail_daily()` — `run_daily` → `notify_daily` → `mailrules_ui.after_daily`：本次新開的確認卡完整發、舊的待確認卡只發一行提醒；歷史未完成、沒有待確認卡、且這份計畫（以最大卡號為準）沒發過 → 自動發歷史計畫卡並記 `plan_posted_card` |
 | startup_catchup | 開機後 3 分鐘（一次性 `date` job） | `_startup_catchup()` — 背景補拓一次（機器關了又開盡快追上）；只在有新發票或失敗才發卡 |
 
 > 所有排程 job 都掛了 autofix 監聽器（`_autofix_job_listener`，EVENT_JOB_ERROR|EXECUTED）：同簽名連 3 次例外 → 自動修復；成功一次歸零。
@@ -255,7 +263,8 @@ LINE/Discord 訊息
 
 - **MoneyBot(discord.Client)** + `app_commands.CommandTree`
 - `/信件名單 [層] [頁] [搜尋]`（`commands.py`）：層選項來自 `mailrules.views.LAYERS`；不加本人限制（只有本人和女友的裝置會登入，spec 定案）→ `defer(ephemeral=True)` → `asyncio.to_thread` 呼叫 views（不選層＝`overview_embed`，選層＝每頁 25 筆 `layer_embed`；頁數超過回「只有 N 頁」）。唯讀
-- 27 個 slash commands 全用中文名稱（`/記帳`, `/查詢`, `/最近`, `/測試週報`, `/測試月報`, `/美食新增`, `/美食推薦`, `/美食清單`, `/去過`, `/美食地圖`, `/美食刪除`, `/隨機食譜`, `/食譜清單`, `/食譜刪除` 等）
+- `/信件計畫`（`commands.py`）：任何人可下，`mailrules_ui.post_history_plan` 把目前的歷史計畫卡發到信件頻道（發過也照發、記 plan_posted_card；歷史已完成就不發）。卡上執行鈕 custom_id `mailrules:exec:history:<發卡當下最大卡號|none>`，只有本人能按；執行失敗時重編訊息會把同一顆鈕帶回來
+- 29 個 slash commands 全用中文名稱（`/記帳`, `/查詢`, `/最近`, `/測試週報`, `/測試月報`, `/美食新增`, `/美食推薦`, `/美食清單`, `/去過`, `/美食地圖`, `/美食刪除`, `/隨機食譜`, `/食譜清單`, `/食譜刪除` 等）
 - 每個 command callback 流程：(1) `await ix.response.defer()` 必要時、(2) 呼叫 `core.*_data()`、(3) 用對應 embed builder 組卡片、(4) `ix.followup.send(embeds=...)`
 - 慢 commands（`/記帳`, `/收入`, `/分類`, `/抓發票`）必 defer 避免 3 秒超時
 - 配色：支出 `#E74C3C` / 收入 `#2ECC71` / 查詢 `#3498DB` / 錢鼠阿財 `#9B59B6` / 警告 `#F1C40F`

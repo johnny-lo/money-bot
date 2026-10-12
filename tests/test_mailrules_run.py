@@ -38,7 +38,7 @@ class FakeRepo:
 def wire(monkeypatch, fake, headers, verdict, actions):
     monkeypatch.setattr(run, "repo", fake)
     monkeypatch.setattr(run.gmail_rw, "read_headers", lambda since: (1, headers))
-    monkeypatch.setattr(run.gmail_rw, "apply", lambda acts: (acts, []))
+    monkeypatch.setattr(run.gmail_rw, "apply", lambda acts: (acts, [], []))
     monkeypatch.setattr(run, "subject_pattern", lambda s, o: s)
     monkeypatch.setattr(run.C, "learn_valued_domains", lambda hs, s, c: {})
     monkeypatch.setattr(run.C, "classify", lambda h, p, r, v, s: verdict(h))
@@ -52,7 +52,7 @@ def test_歷史未完成前_每日只分類建議_不寫入(monkeypatch):
     called = []
     wire(monkeypatch, fake, [H("m1"), H("m2", addr="b@x.example")],
          lambda h: Verdict(None, "未知", False), lambda h, v, m: [Action(h.gm_msgid, h.uid, "trash")])
-    monkeypatch.setattr(run.gmail_rw, "apply", lambda acts: called.append(acts) or (acts, []))
+    monkeypatch.setattr(run.gmail_rw, "apply", lambda acts: called.append(acts) or (acts, [], []))
     rep = run.run_daily(T, db=object())
     assert rep.applied is False and called == [] and fake.recorded == []
     assert len(fake.suggested) == 2
@@ -121,7 +121,7 @@ def test_execute_history_已完成_拒絕重跑(monkeypatch):
     called, since = [], []
     wire(monkeypatch, fake, [H("m1")], lambda h: Verdict("promo", "規則", False),
          lambda h, v, m: [Action(h.gm_msgid, h.uid, "trash")])
-    monkeypatch.setattr(run.gmail_rw, "apply", lambda acts: called.append(acts) or (acts, []))
+    monkeypatch.setattr(run.gmail_rw, "apply", lambda acts: called.append(acts) or (acts, [], []))
     monkeypatch.setattr(run.gmail_rw, "read_headers", lambda s: since.append(s) or (1, []))
     try:
         run.execute_history(T, db=object())
