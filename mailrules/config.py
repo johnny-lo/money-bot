@@ -6,7 +6,7 @@ from dataclasses import dataclass
 LABEL_ROOT = "整理"
 FINANCE_KEEP_DAYS = 730          # 刷卡扣款、收據訂單、帳單：滾動保留天數（plan board 卡片決定）
 BATCH_SIZE = 500                 # 歷史執行每批封數
-DAILY_RUN = (22, 30)             # 每日執行時間（台北）
+DAILY_RUN = (23, 30)             # 每日執行時間（台北；本人指定 23:30）
 PROMO_DIGEST_DOW = 6             # 週日（date.weekday()）
 
 CATEGORIES = [

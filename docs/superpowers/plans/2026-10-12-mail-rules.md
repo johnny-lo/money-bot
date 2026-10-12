@@ -4,7 +4,7 @@
 
 **Goal:** 依「寄件者＋主旨樣式」把 Gmail 信件歸類、照保留期限表自動加標籤／移出收件匣／丟垃圾桶；新樣式由 AI 預填、本人在 Discord 確認；歷史 9,854 封照同一套規則整批清一次。
 
-**Architecture:** 新模組 `mailrules/`：純函式層（patterns、classify、plan）→ AI 建議（suggest，codex，輸出鎖成類別 enum）→ I/O 層（gmail_rw 只讀信頭＋三種寫入、repo、run）→ Discord（`discordbot/mailrules_ui.py`）＋每日 22:30 排程。Task 0（契約＋空殼）由主線先 commit，Task 1–4 從那裡開 worktree **同時**做，Task 5 主線整合上線。
+**Architecture:** 新模組 `mailrules/`：純函式層（patterns、classify、plan）→ AI 建議（suggest，codex，輸出鎖成類別 enum）→ I/O 層（gmail_rw 只讀信頭＋三種寫入、repo、run）→ Discord（`discordbot/mailrules_ui.py`）＋每日 23:30 排程。Task 0（契約＋空殼）由主線先 commit，Task 1–4 從那裡開 worktree **同時**做，Task 5 主線整合上線。
 
 **Tech Stack:** Python 3.11、imaplib（Gmail X-GM-EXT-1）、SQLAlchemy 2.0、discord.py 2.7、codex CLI（`codex_cli.codex_text(prompt, schema=...)`）、pytest。
 
@@ -194,7 +194,7 @@ from dataclasses import dataclass
 LABEL_ROOT = "整理"
 FINANCE_KEEP_DAYS = 730          # 刷卡扣款、收據訂單、帳單：滾動保留天數（plan board 卡片決定）
 BATCH_SIZE = 500                 # 歷史執行每批封數
-DAILY_RUN = (22, 30)             # 每日執行時間（台北）
+DAILY_RUN = (23, 30)             # 每日執行時間（台北；本人指定 23:30）
 PROMO_DIGEST_DOW = 6             # 週日（date.weekday()）
 
 CATEGORIES = [
@@ -886,7 +886,7 @@ def test_分批_一批失敗不影響其他批(monkeypatch):
 
 ### Task 4: Discord 卡片＋排程
 
-**Files:** Replace 空殼 `discordbot/mailrules_ui.py`；Modify `discordbot/bot.py`（註冊 DynamicItem）、`main.py`（每日 22:30 job）；Test `tests/test_mailrules_ui.py`
+**Files:** Replace 空殼 `discordbot/mailrules_ui.py`；Modify `discordbot/bot.py`（註冊 DynamicItem）、`main.py`（每日 23:30 job）；Test `tests/test_mailrules_ui.py`
 
 **Interfaces:**
 - Consumes：`repo.card_rules / confirm_card / assign / rejected_rules / pending_cards`、`run.run_daily / history_plan / execute_history`（開工時是空殼，測試不呼叫）、`config.CATEGORIES / LABELS / mail_channel_id`、`bridge.post_sync`、`cardrecon_ui.can_act` 同款邏輯（本檔自己實作 `can_act`、`_owner_id`，照 `AUTOFIX_OWNER_USER_ID`）。
@@ -899,7 +899,7 @@ def test_分批_一批失敗不影響其他批(monkeypatch):
   - `daily_embed(rep: RunReport) -> Embed`、`digest_embed(title, headers) -> Embed`（一行一封「寄件者｜主旨｜MM/DD」，截 4096）、`history_embed(plan: dict) -> Embed`。
   - `ExecuteButton`（`mailrules:exec:history`）：owner only → `await asyncio.to_thread(run.execute_history, today)` → 編輯訊息顯示結果。
   - `notify_daily(rep)`、`notify_cards(card_ids)`、`notify_history_plan(plan)`、`notify_failure(err)`：都發到 `config.mail_channel_id()`（None 就不發），附元件時用 `post_sync(..., make_view=lambda …: …)` 並以預設參數綁值。
-  - `main.py`：`_mail_daily()`：`rep = run_daily(台北今天)`；`notify_daily(rep)`；有新卡 `notify_cards(repo.pending_cards(...))`；例外 → print＋`notify_failure`。`scheduler.add_job(_mail_daily, "cron", hour=22, minute=30, id="mail_daily")`；開機排程說明字串補「每日 22:30 信件整理」。run/ui 都在函式內 import。
+  - `main.py`：`_mail_daily()`：`rep = run_daily(台北今天)`；`notify_daily(rep)`；有新卡 `notify_cards(repo.pending_cards(...))`；例外 → print＋`notify_failure`。`scheduler.add_job(_mail_daily, "cron", hour=DAILY_RUN[0], minute=DAILY_RUN[1], id="mail_daily")`（時間只從 `mailrules.config.DAILY_RUN` 讀，不在 main.py 寫死）；開機排程說明字串補「每日 23:30 信件整理」。run/ui 都在函式內 import。
 
 - [ ] **Step 1: 寫失敗測試** `tests/test_mailrules_ui.py`
 
@@ -952,7 +952,7 @@ def test_建議卡_view_含拒絕下拉與確認鈕():
     asyncio.run(go())
 ```
 
-- [ ] **Step 2–4:** 紅 → 實作（照 `discordbot/cardrecon_ui.py` 的 DynamicItem 寫法）→ bot.py 註冊 `ConfirmButton, RejectSelect, AssignSelect, ExecuteButton` → main.py 排程 → `scripts/check_tests.sh` 全過（含 `import main`）→ commit `feat(mailrules): Discord 確認卡、每日報告與摘要、歷史計畫卡，每日 22:30 排程`
+- [ ] **Step 2–4:** 紅 → 實作（照 `discordbot/cardrecon_ui.py` 的 DynamicItem 寫法）→ bot.py 註冊 `ConfirmButton, RejectSelect, AssignSelect, ExecuteButton` → main.py 排程 → `scripts/check_tests.sh` 全過（含 `import main`）→ commit `feat(mailrules): Discord 確認卡、每日報告與摘要、歷史計畫卡，每日 23:30 排程`
 
 ---
 
