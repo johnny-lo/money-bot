@@ -292,10 +292,6 @@ def register_commands(bot) -> None:
     @app_commands.choices(層=[app_commands.Choice(name=t, value=k) for k, t in mail_views.LAYERS])
     async def cmd_mail_lists(ix: discord.Interaction, 層: app_commands.Choice[str] | None = None,
                              頁: int = 1, 搜尋: str = ""):
-        why = mailrules_ui._guard_fail(ix)      # 名單是本人信件的寄件者與主旨，跟確認鈕一樣只給卡主看
-        if why:
-            await ix.response.send_message(f"⛔ {why}", ephemeral=True)
-            return
         await ix.response.defer(ephemeral=True)
         today = mailrules_ui._today()
         try:

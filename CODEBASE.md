@@ -70,7 +70,7 @@ Python 3.11 / FastAPI / SQLAlchemy / PostgreSQL 15 / Gemini API / LINE Bot SDK 2
 │   └── install.sh       # 主機：mkdir 交接目錄（inbox/approved/outbox/state，gitignore）+ 連結並啟用 scripts/systemd/linebot-autofix-{inbox,deploy}.path
 ├── mailrules/           # 信件規則引擎（spec: docs/superpowers/specs/2026-10-12-mail-rules-design.md；plan: docs/superpowers/plans/2026-10-12-mail-rules.md）。此處只記名單檢視這一塊
 │   ├── classify.py      # `REASON_JOB/VALUED/HUMAN/SELF/UNKNOWN`＝`Verdict.reason` 的固定字串（mail_messages.reason 存的就是它們，名單檢視依它分層；改字串＝改歷史資料）；`classify()` 用這些常數
-│   ├── plan.py          # `next_step(category, sent_date, st)`：這封信接下來（每日模式）最早的動作與日期（`("archive"|"trash", date)`，沒有下一步 None）。只給名單檢視顯示用，不影響 `plan_actions`
+│   ├── plan.py          # `next_step(category, sent_date, st, today=None)`：這封信接下來（每日模式）最早的動作與日期（`("archive"|"trash", date)`，沒有下一步 None）；帶 `today` 時丟的期限已到就直接回丟（和 `plan_actions` 的 trash 優先一致）。只給名單檢視顯示用，不影響 `plan_actions`
 │   └── views.py         # **名單檢視（只讀 mail_messages / mail_rules / mail_valued_domains，不寫 DB、不連 Gmail）**。`LAYERS`＝19 層（🛡求職字眼/重視的公司/真人來信、寄給自己、你的規則、未知、12 個類別、🗑30 天內丟的；順序固定，Discord 下拉放得下 25 個）。純函式 `build_layer(key, msgs, rules, domains, today, q, offset, limit)`（回 `{key,title,kind,total,rows}`，kind＝messages/rules/domains/groups；未知 key `KeyError`）與 `overview_from(...)`；`load(db)` 把三張表讀成 dict 列；`overview(db, today)`／`layer(db, key, today, ...)` 是薄包裝（db=None 自開 SessionLocal）。Discord `/信件名單` 與 `routes/mail.py` 共用。測 tests/test_mailrules_views.py
 ├── persona.md           # AI 角色設定（**本機私人檔,.gitignore 不入版控**）。gemini.py 找不到就退回 `persona.example.md`,全新 clone 也能跑。判斷基準是**四桶（投資/固定/生活/爽）桶位**而非金額大小;摘要沒帶桶位資訊時**預設沒超支、禁止說教**（舊版只看金額→每筆稍大的都被念）。寫法與踩過的坑見 persona.example.md
 ├── resource/            # Discord 頻道歡迎 banner 圖（手動放入，由 _setup_discord 一次性上傳；已 .gitignore 不入版本控制）
@@ -251,7 +251,7 @@ LINE/Discord 訊息
 ## Discord Bot Architecture (discordbot/ package)
 
 - **MoneyBot(discord.Client)** + `app_commands.CommandTree`
-- `/信件名單 [層] [頁] [搜尋]`（`commands.py`）：層選項來自 `mailrules.views.LAYERS`；先過 `mailrules_ui._guard_fail`（只有卡主本人）→ `defer(ephemeral=True)` → `asyncio.to_thread` 呼叫 views（不選層＝`overview_embed`，選層＝每頁 25 筆 `layer_embed`；頁數超過回「只有 N 頁」）。唯讀
+- `/信件名單 [層] [頁] [搜尋]`（`commands.py`）：層選項來自 `mailrules.views.LAYERS`；不加本人限制（只有本人和女友的裝置會登入，spec 定案）→ `defer(ephemeral=True)` → `asyncio.to_thread` 呼叫 views（不選層＝`overview_embed`，選層＝每頁 25 筆 `layer_embed`；頁數超過回「只有 N 頁」）。唯讀
 - 27 個 slash commands 全用中文名稱（`/記帳`, `/查詢`, `/最近`, `/測試週報`, `/測試月報`, `/美食新增`, `/美食推薦`, `/美食清單`, `/去過`, `/美食地圖`, `/美食刪除`, `/隨機食譜`, `/食譜清單`, `/食譜刪除` 等）
 - 每個 command callback 流程：(1) `await ix.response.defer()` 必要時、(2) 呼叫 `core.*_data()`、(3) 用對應 embed builder 組卡片、(4) `ix.followup.send(embeds=...)`
 - 慢 commands（`/記帳`, `/收入`, `/分類`, `/抓發票`）必 defer 避免 3 秒超時

@@ -34,12 +34,17 @@ def plan_actions(h: MailHeader, v: Verdict, st: MessageState, today: date, mode:
     return out
 
 
-def next_step(category: str | None, sent_date: date | None, st: MessageState) -> tuple[str, date] | None:
-    """這封信接下來（每日模式）最早會被做什麼、哪天做；沒有下一步回 None。只給名單檢視顯示用。"""
+def next_step(category: str | None, sent_date: date | None, st: MessageState,
+              today: date | None = None) -> tuple[str, date] | None:
+    """這封信接下來（每日模式）最早會被做什麼、哪天做；沒有下一步回 None。只給名單檢視顯示用。
+
+    帶 today 時，丟的期限已到就直接回丟（和 plan_actions 每日模式「trash 優先」一致）。"""
     r = config.RETENTION.get(category) if category else None
     if r is None or sent_date is None or st.trashed:
         return None
     arch, trash = r.archive_after_days, r.trash_after_days
+    if today is not None and trash is not None and (today - sent_date).days >= trash:
+        return "trash", sent_date + timedelta(days=trash)
     if st.in_inbox and arch is not None and (trash is None or arch < trash):
         return "archive", sent_date + timedelta(days=arch)
     if trash is not None:

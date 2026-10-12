@@ -120,3 +120,51 @@ def test_信件名單指令註冊_層選項來自LAYERS_頁與搜尋有預設():
     assert set(params) == {"層", "頁", "搜尋"}
     assert [c.value for c in params["層"].choices] == [k for k, _ in views.LAYERS]
     assert not params["層"].required and params["頁"].default == 1 and params["搜尋"].default == ""
+
+
+def test_下一步_兩個期限都過了_每日模式直接丟_和plan_actions一致():
+    d = date(2026, 9, 1)                                  # company：當天移出、30 天後丟 → 10/01 起已到丟的期限
+    st = MessageState(in_inbox=True)
+    assert next_step("company", d, st, today=T) == ("trash", date(2026, 10, 1))
+    assert next_step("company", d, st, today=date(2026, 9, 20)) == ("archive", d)   # 還沒到丟的期限：仍先移出
+    assert next_step("company", d, st) == ("archive", d)                            # 不帶 today：舊行為
+    assert next_step("company", d, MessageState(in_inbox=False, trashed=True), today=T) is None
+
+
+def test_名單_很舊還在收件匣的信_下一步是丟不是過去日期的移出():
+    old = M(d=date(2026, 9, 1), cat="company", reason="規則 #2")
+    assert views.build_layer("company", [old], [], [], T)["rows"][0]["next"] == "10/01 丟"
+
+
+def _呼叫信件名單(monkeypatch, user_id, owner):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+
+    import discord
+    from discord import app_commands
+
+    from discordbot.commands import register_commands
+    if owner is None:
+        monkeypatch.delenv("AUTOFIX_OWNER_USER_ID", raising=False)
+    else:
+        monkeypatch.setenv("AUTOFIX_OWNER_USER_ID", str(owner))
+    monkeypatch.setattr(views, "overview", lambda db, today: [{"key": "job", "title": "🛡 求職字眼", "count": 2}])
+    tree = app_commands.CommandTree(discord.Client(intents=discord.Intents.none()))
+    register_commands(SimpleNamespace(tree=tree))
+    ix = MagicMock()
+    ix.user.id = user_id
+    ix.response.defer = AsyncMock()
+    ix.response.send_message = AsyncMock()
+    ix.followup.send = AsyncMock()
+    asyncio.run(tree.get_command("信件名單").callback(ix))
+    return ix
+
+
+@pytest.mark.parametrize("owner", [None, 111])
+def test_信件名單指令不限本人_沒設卡主或不是卡主都能看(monkeypatch, owner):
+    ix = _呼叫信件名單(monkeypatch, user_id=222, owner=owner)
+    ix.response.send_message.assert_not_awaited()
+    ix.response.defer.assert_awaited_once_with(ephemeral=True)
+    assert ix.followup.send.await_args.kwargs["ephemeral"] is True
+    assert "求職字眼" in ix.followup.send.await_args.kwargs["embed"].description

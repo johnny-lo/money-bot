@@ -62,7 +62,7 @@ def _next(m: dict, key: str, today: date) -> str | None:
         return f"{_short(t + timedelta(days=TRASH_RECOVER_DAYS), today)} 前救得回" if t else None
     st = MessageState(in_inbox=bool(m.get("in_inbox")), labels_applied=frozenset(m.get("labels_applied") or ()),
                       trashed=bool(m.get("trashed_at")))
-    step = next_step(m.get("category"), _day(m.get("sent_date")), st)
+    step = next_step(m.get("category"), _day(m.get("sent_date")), st, today)
     return f"{_short(step[1], today)} {_STEP[step[0]]}" if step else None
 
 
