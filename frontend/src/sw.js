@@ -6,6 +6,7 @@ import { registerRoute, NavigationRoute } from 'workbox-routing'
 import { NetworkFirst, CacheFirst } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 import { clientsClaim } from 'workbox-core'
+import { isCachedApi } from './swRoutes.js'
 
 // 新版 SW 立刻接管（配合 registerType: 'autoUpdate'）
 self.skipWaiting()
@@ -19,8 +20,9 @@ cleanupOutdatedCaches()
 registerRoute(new NavigationRoute(createHandlerBoundToURL('/m/index.html')))
 
 // API：先打網路（5 秒沒回應或離線 → 退回上次快取）→ 離線還看得到上次的清單
+// （哪些網址算數見 swRoutes.js：信件 API 刻意排除，避免把這 50 格擠光）
 registerRoute(
-  ({ url }) => url.pathname.startsWith('/api/'),
+  ({ url }) => isCachedApi(url.pathname),
   new NetworkFirst({
     cacheName: 'api',
     networkTimeoutSeconds: 5,
