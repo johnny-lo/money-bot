@@ -239,7 +239,7 @@ scheduler.add_job(_weekly_pipeline, "cron", day_of_week="sun", hour=21, minute=0
 
 
 def _mail_daily():
-    """每日 22:30 信件整理：同步→分類→（歷史完成後）執行→報告；有新建議卡就發確認卡。"""
+    """每日信件整理（時間見 mailrules.config.DAILY_RUN）：同步→分類→（歷史完成後）執行→報告；有新建議卡就發確認卡。"""
     try:
         from zoneinfo import ZoneInfo
         from database import SessionLocal
@@ -264,7 +264,8 @@ def _mail_daily():
             pass
 
 
-scheduler.add_job(_mail_daily, "cron", hour=22, minute=30, id="mail_daily")
+from mailrules.config import DAILY_RUN as _MAIL_RUN
+scheduler.add_job(_mail_daily, "cron", hour=_MAIL_RUN[0], minute=_MAIL_RUN[1], id="mail_daily")
 
 
 def _startup_catchup():
@@ -285,7 +286,7 @@ async def startup_event():
         "每日 00:05 固定收支 / "
         "週一~週六 21:00 發票補拓+Discord 通知 / "
         "週日 21:00 補拓→刷卡比對→分類→週報（每月第一個週日多推上月月結）/ "
-        "每日 22:30 信件整理 / "
+        f"每日 {_MAIL_RUN[0]:02d}:{_MAIL_RUN[1]:02d} 信件整理 / "
         "開機後 3 分鐘背景發票補拓"
     )
 
