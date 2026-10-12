@@ -40,6 +40,15 @@ class TxGroup:
 
 
 @dataclass(frozen=True)
+class Bitmap:
+    """1-bit 圖片（中信帳單的店名格）。每列補齊到整數位元組，PDF 與 PBM 同款。"""
+    width: int
+    height: int
+    data: bytes
+    one_is_black: bool
+
+
+@dataclass(frozen=True)
 class RawMail:
     message_id: str
     sender: str

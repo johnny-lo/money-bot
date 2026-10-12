@@ -11,4 +11,10 @@ CARD_SOURCES = {
     "sinopac_daily": ("spendservice@sinopac.com", "消費通知"),
     "ctbc_statement": ("ebill@estats.ctbcbank.com", "信用卡電子帳單"),
 }
-RECEIPT_SOURCES = [("cs@autopass.xyz", "停車訂單收據")]
+# 收據來源：(寄件者, 主旨關鍵字, parse.RECEIPT_PARSERS 的鍵)。收據只用來替同金額的刷卡補店名。
+RECEIPT_SOURCES = [
+    ("cs@autopass.xyz", "停車訂單收據", "autopass"),
+    ("CardAuthService@sinopac.com", "網路消費通知", "sinopac_online"),
+]
+OCR_BATCH = 25                  # 中信店名格一次讀幾行（codex 讀圖每張超過 25 行會漏行）
+BRAND_BATCH = 40                # 店名換品牌一次問幾個

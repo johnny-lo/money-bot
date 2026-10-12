@@ -1,7 +1,8 @@
+from dataclasses import replace
 from datetime import date
 
 from cardrecon import ingest
-from cardrecon.types import Charge, RawMail, Receipt, TxGroup, TxHint
+from cardrecon.types import Bitmap, Charge, RawMail, Receipt, TxGroup, TxHint
 
 TODAY = date(2026, 10, 18)
 
@@ -37,7 +38,28 @@ class FakeRepo:
         return [(i, r["c"]) for i, r in self.rows.items() if r["status"] == "unmatched" and r["c"].charge_date <= until]
     def unlisted(self, db, until, since):
         return [(i, c) for i, c in self.pending(db, until) if self.rows[i]["batch"] is None and c.charge_date >= since]
-    def set_merchant(self, db, m): self.merchants = m
+    def set_merchant(self, db, m):
+        self.merchants = m
+        for i, name in m.items():
+            self.rows[i]["c"] = replace(self.rows[i]["c"], merchant=name)
+    def missing_merchant_lines(self, db, mid):
+        return {r["c"].line_no for r in self.rows.values() if r["msg"] == mid and not r["c"].merchant}
+    def set_merchant_by_line(self, db, mid, mapping):
+        n = 0
+        for r in self.rows.values():
+            if r["msg"] == mid and not r["c"].merchant and r["c"].line_no in mapping:
+                r["c"] = replace(r["c"], merchant=mapping[r["c"].line_no])
+                n += 1
+        return n
+    def missing_merchant(self, db): return [(i, r["c"]) for i, r in self.rows.items() if not r["c"].merchant]
+    brands = {}
+    def brand_map(self, db): return dict(self.brands)
+    def missing_brands(self, db):
+        return sorted({r["c"].merchant for r in self.rows.values() if r["c"].merchant and r["c"].merchant not in self.brands})
+    def save_brands(self, db, m):
+        new = {k: v for k, v in m.items() if k not in self.brands}
+        self.brands = {**self.brands, **new}
+        return len(new)
     def used_group_keys(self, db): return set()
     def load_groups(self, db, since): return self.groups
     def mark_matched(self, db, m):
@@ -149,7 +171,8 @@ def test_收據補店名(monkeypatch):
     ap = "cs@autopass.xyz"
     _wire(monkeypatch, fake, {ap: [mail("<r>", None, "收據")]}, {})
     monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: []})
-    monkeypatch.setattr(ingest.parse, "parse_autopass", lambda t: Receipt(date(2026, 10, 1), 110, "停車費"))
+    monkeypatch.setattr(ingest.parse, "RECEIPT_PARSERS",
+                        {"autopass": lambda t: Receipt(date(2026, 10, 1), 110, "停車費"), "sinopac_online": lambda t: None})
     fake._add(ch(date(2026, 10, 1), 110))
     ingest.run_weekly(TODAY)
     assert fake.merchants == {1: "停車費"}
@@ -209,3 +232,86 @@ def test_relist_同日舊批次全未處理_新批次號不與舊的重複(monke
     _wire(monkeypatch, fake, {}, {})
     res = ingest.relist(TODAY)
     assert [b for b, _, _ in res.pages] == [f"{day}-4"]
+
+
+def _no_codex(monkeypatch):
+    monkeypatch.setattr(ingest.brand, "suggest", lambda raws: {})
+    monkeypatch.setattr(ingest.pdf, "ctbc_merchant_cells", lambda data, pw: [])
+
+
+def test_永豐網路消費通知_補店名(monkeypatch):
+    fake = FakeRepo()
+    fake.groups = []
+    sp = "CardAuthService@sinopac.com"
+    note = "您永豐信用卡末四碼 1234 於 2026-10-01 19:19 消費台幣10,540，商店名稱:SHOP.EXAMPLE，實際商店名稱請以帳單為準"
+    _wire(monkeypatch, fake, {sp: [mail("<n>", None, note)]}, {})
+    _no_codex(monkeypatch)
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: []})
+    fake._add(ch(date(2026, 10, 1), 10540))
+    ingest.run_weekly(TODAY)
+    assert fake.merchants == {1: "SHOP.EXAMPLE"}
+
+
+def test_中信每封upsert後讀圖補店名_只補缺的_回報排序(monkeypatch):
+    fake = FakeRepo()
+    fake.groups = []
+    _wire(monkeypatch, fake, {"ebill@estats.ctbcbank.com": [mail("<c>", b"C")]}, {b"C": "c"})
+    d1, d2 = date(2026, 10, 1), date(2026, 10, 2)
+    charges = [replace(ch(d1, 3000, 0, "ctbc_statement"), post_date=d2, card_last4="1111"),
+               replace(ch(d1, 50, 1, "ctbc_statement"), post_date=d2, card_last4="1111", merchant="SHOP.EXAMPLE")]
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: charges})
+    bm = Bitmap(width=8, height=1, data=b"\x00", one_is_black=True)
+    cells = [((d1, d2, 3000, "1111"), bm), ((d1, d2, 50, "1111"), bm)]
+    monkeypatch.setattr(ingest.pdf, "ctbc_merchant_cells", lambda data, pw: cells)
+    monkeypatch.setattr(ingest.merchant_ocr, "read_names", lambda bms: ["某某店", "不該覆蓋"][:len(bms)])
+    monkeypatch.setattr(ingest.brand, "suggest", lambda raws: {})
+    ingest.run_weekly(TODAY)
+    assert [r["c"].merchant for r in fake.rows.values()] == ["某某店", "SHOP.EXAMPLE"]
+
+
+def test_讀圖與品牌例外_只警告不擋清單(monkeypatch, capsys):
+    fake = FakeRepo()
+    fake.groups = []
+    _wire(monkeypatch, fake, {"ebill@estats.ctbcbank.com": [mail("<c>", b"C")]}, {b"C": "c"})
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [],
+                                                   "ctbc_statement": lambda t: [ch(date(2026, 10, 1), 700, 0, "ctbc_statement")]})
+    def boom(*a, **k): raise RuntimeError("codex down")
+    monkeypatch.setattr(ingest.pdf, "ctbc_merchant_cells", boom)
+    monkeypatch.setattr(ingest.brand, "suggest", boom)
+    fake._add(ch(date(2026, 10, 1), 20, 5), )
+    fake.rows[1]["c"] = replace(fake.rows[1]["c"], merchant="某店")           # 讓 _fill_brands 真的去問
+    res = ingest.run_weekly(TODAY)
+    assert [len(items) for _, _, items in res.pages] == [1, 1]
+    assert capsys.readouterr().out.count("⚠️") >= 2
+
+
+def test_清單與補記用品牌_原名留著(monkeypatch):
+    fake = FakeRepo()
+    fake.groups = []
+    fake._add(replace(ch(date(2026, 10, 1), 700), merchant="台灣某某餐廳－123"))
+    _wire(monkeypatch, fake, {}, {})
+    monkeypatch.setattr(ingest.brand, "suggest", lambda raws: {r: "某某" for r in raws})
+    res = ingest.relist(TODAY)
+    assert fake.brands == {"台灣某某餐廳－123": "某某"}
+    assert [c.merchant for _, _, items in res.pages for _, c, _ in items] == ["某某"]
+    assert fake.rows[1]["c"].merchant == "台灣某某餐廳－123"
+
+
+def test_backfill_merchants_回計數(monkeypatch):
+    fake = FakeRepo()
+    fake.groups = []
+    _wire(monkeypatch, fake, {"ebill@estats.ctbcbank.com": [mail("<c>", b"C"), mail("<x>", None)],
+                              "cs@autopass.xyz": [mail("<r>", None, "收據")]}, {b"C": "c"})
+    d1, d2 = date(2026, 10, 1), date(2026, 10, 2)
+    c0 = replace(ch(d1, 3000, 0, "ctbc_statement"), post_date=d2, card_last4="1111")
+    fake.upsert_charges(None, "<c>", [c0])
+    fake._add(ch(d1, 110, 0))
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: [c0]})
+    monkeypatch.setattr(ingest.parse, "RECEIPT_PARSERS",
+                        {"autopass": lambda t: Receipt(d1, 110, "停車費"), "sinopac_online": lambda t: None})
+    bm = Bitmap(width=8, height=1, data=b"\x00", one_is_black=True)
+    monkeypatch.setattr(ingest.pdf, "ctbc_merchant_cells", lambda data, pw: [((d1, d2, 3000, "1111"), bm)])
+    monkeypatch.setattr(ingest.merchant_ocr, "read_names", lambda bms: ["某某店"])
+    monkeypatch.setattr(ingest.brand, "suggest", lambda raws: {"某某店": "某某"})
+    assert ingest.backfill_merchants(TODAY) == {"ocr": 1, "receipts": 1, "brands": 1}
+    assert ingest.backfill_merchants(TODAY) == {"ocr": 0, "receipts": 0, "brands": 0}      # 冪等：已補的不再動

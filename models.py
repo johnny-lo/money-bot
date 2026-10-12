@@ -189,6 +189,14 @@ class CardCharge(Base):
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 
+class MerchantBrand(Base):
+    """店名／公司名 → 一般人認得的品牌（cardrecon/brand.py 的快取，每個原名只問一次）。"""
+    __tablename__ = "merchant_brands"
+    raw = Column(String, primary_key=True)
+    brand = Column(String, nullable=False)
+    created_at = Column(DateTime, default=func.now())
+
+
 class MailRule(Base):
     """信件規則：寄件者（完整地址或 @網域）＋主旨樣式 → 類別。只有 confirmed 會被執行。"""
     __tablename__ = "mail_rules"

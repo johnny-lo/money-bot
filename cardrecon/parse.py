@@ -90,4 +90,20 @@ def parse_autopass(text: str) -> Receipt | None:
     return Receipt(paid_date=date(int(t[1]), int(t[2]), int(t[3])), amount=_amount(a[1]), merchant=m[1].strip())
 
 
+_SP_ONLINE = re.compile(r"於 (\d{4})-(\d\d)-(\d\d) \d\d:\d\d 消費台幣([\d,]+)，商店名稱:(.+?)，")
+
+
+def parse_sinopac_online(text: str) -> Receipt | None:
+    """永豐網路消費通知（CardAuthService@sinopac.com）：內文寫了商店名稱，當收據用來補店名。"""
+    m = _SP_ONLINE.search(text)
+    if not m:
+        return None
+    try:
+        paid = date(int(m[1]), int(m[2]), int(m[3]))
+    except ValueError:
+        return None
+    return Receipt(paid_date=paid, amount=_amount(m[4]), merchant=m[5].strip())
+
+
+RECEIPT_PARSERS = {"autopass": parse_autopass, "sinopac_online": parse_sinopac_online}
 PARSERS = {"sinopac_daily": parse_sinopac, "ctbc_statement": parse_ctbc}
