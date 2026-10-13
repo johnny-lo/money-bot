@@ -1,10 +1,10 @@
-"""信件規則引擎的 Discord 端：建議確認卡、每日報告、職缺／推銷摘要、歷史整理計畫卡。
+"""信件規則引擎的 Discord 端：建議確認卡、重視公司確認卡、每日報告、職缺／推銷摘要、歷史整理計畫卡。
 
 元件用 DynamicItem：custom_id 自帶卡號／規則 id，bot 重啟後不需要記憶體狀態就能接手。只有本人能按。
 執行鈕的 custom_id 帶「計畫卡發出當下的最大卡號」與「已確認規則集合的指紋」：之後才長出的確認卡不擋執行，
 但之後又確認卡／手動指定規則 → 計畫過期，要用 /信件計畫 重發。
 確認卡與計畫卡都用 post_sync_wait 發：Discord 真的送出才記成已發（確認卡記在 mail_rules.posted_at、
-計畫卡記在 mail_state.plan_posted_card），沒發出去的下次會完整重發。
+重視公司卡記在 mail_valued_domains.posted_at、計畫卡記在 mail_state.plan_posted_card），沒發出去的下次會完整重發。
 """
 import asyncio
 import os
@@ -15,7 +15,7 @@ import discord
 
 from database import SessionLocal
 from mailrules import config, repo
-from mailrules.types import MailHeader, Rule, RunReport
+from mailrules.types import MailHeader, Rule, RunReport, ValuedDomain
 
 from .bridge import post_sync, post_sync_wait
 
@@ -61,6 +61,20 @@ def suggest_embed(card: str, rules: list[Rule], counts: dict) -> discord.Embed:
     return e
 
 
+def valued_embed(card: str, rows: list[ValuedDomain], counts: dict) -> discord.Embed:
+    """每行「網域｜當初的主旨樣式｜封數」；封數查不到就不顯示。拒絕的劃掉；沒有待確認的＝最終狀態。"""
+    lines = []
+    for r in rows:
+        n = counts.get(r.domain)
+        s = f"{r.domain}｜{r.pattern or '—'}" + (f"｜{n} 封" if n is not None else "")
+        lines.append(f"~~{s}~~ 已拒絕" if r.status == "rejected" else s)
+    e = discord.Embed(title=f"🛡 新的重視公司：{len(rows)} 個網域", description="\n".join(lines)[:4096], color=COLOR)
+    done = not any(r.status == "pending" for r in rows)
+    e.set_footer(text=f"信件整理 · {card} · " + ("已確認" if done else
+                                                  "確認後這些網域寄來的信都留收件匣；下拉勾不是的，再按「確認」"))
+    return e
+
+
 def digest_embed(title: str, headers: list[MailHeader]) -> discord.Embed:
     lines = []
     for h in headers:
@@ -102,7 +116,8 @@ def history_embed(plan: dict) -> discord.Embed:
     lines = [f"{_cat(cat)}｜{kind}｜{n} 封" for (cat, kind), n in sorted(plan.get("counts", {}).items())]
     for cat, subs in sorted(plan.get("samples", {}).items()):
         lines.append(f"　{_cat(cat)} 例：" + "、".join(s[:30] for s in subs[:3]))
-    lines.append(f"待確認卡 {plan.get('pending_cards', 0)} 張｜未知 {plan.get('unknown', 0)} 個樣式")
+    lines.append(f"待確認卡 {plan.get('pending_cards', 0)} 張｜待確認重視公司 {plan.get('pending_valued', 0)} 個"
+                 f"｜未知 {plan.get('unknown', 0)} 個樣式")
     e = discord.Embed(title="🗂 歷史信件整理計畫", description="\n".join(lines)[:4096], color=COLOR)
     e.set_footer(text="確認無誤再按「執行」")
     return e
@@ -129,7 +144,7 @@ def _layer_line(kind: str, r: dict) -> str:
         return (f"{d}｜{_one_line(r['sender'], 40)}｜{_one_line(r['subject'], 40)}"
                 f"｜{r['where']}｜{r['next'] or '—'}")
     if kind == "domains":
-        return f"{r['domain']}｜加入 {r['since'] or '--'}｜{r['count']} 封"
+        return f"{r['domain']}｜{r.get('status') or '—'}｜加入 {r['since'] or '--'}｜{r['count']} 封"
     if kind == "rules":
         return (f"{_one_line(r['sender'], 40)}｜{_one_line(r['pattern'], 40)}"
                 f"｜→ {r['category']}｜{r['status']}")
@@ -156,6 +171,14 @@ def _safe_counts(db, card: str) -> dict:
         return repo.card_counts(db, card)
     except Exception as e:
         print(f"⚠️ 確認卡 {card} 封數查詢失敗：{e}")
+        return {}
+
+
+def _safe_valued_counts(db, card: str) -> dict:
+    try:
+        return repo.valued_card_counts(db, card)
+    except Exception as e:
+        print(f"⚠️ 重視公司卡 {card} 封數查詢失敗：{e}")
         return {}
 
 
@@ -299,6 +322,77 @@ class ExecuteButton(discord.ui.DynamicItem[discord.ui.Button],
             print(f"⚠️ 歷史整理結果編輯訊息失敗：{e}")
 
 
+class ValuedRejectSelect(discord.ui.DynamicItem[discord.ui.Select],
+                         template=r"mailrules:vreject:(?P<card>v\d+)"):
+    """重視公司卡：下拉多選「這些不是重視的公司」（值＝網域）。"""
+    def __init__(self, card: str, options: list[discord.SelectOption]):
+        options = options or [discord.SelectOption(label="-", value="-")]
+        super().__init__(discord.ui.Select(placeholder="這些不是重視的公司", min_values=1,
+                                           max_values=len(options), options=options,
+                                           custom_id=f"mailrules:vreject:{card}"))
+        self.card = card
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        opts = [discord.SelectOption(label=o.label, value=o.value) for o in getattr(item, "options", [])]
+        return cls(match["card"], opts)
+
+    async def callback(self, interaction: discord.Interaction):
+        why = _guard_fail(interaction)
+        if why:
+            await interaction.response.send_message(f"⛔ {why}", ephemeral=True)
+            return
+        domains = [v for v in (interaction.data or {}).get("values", []) if v != "-"]
+        db = SessionLocal()
+        try:
+            repo.reject_valued(db, self.card, domains)
+            rows = repo.valued_card(db, self.card)
+            counts = _safe_valued_counts(db, self.card)
+        finally:
+            db.close()
+        await interaction.response.edit_message(embed=valued_embed(self.card, rows, counts),
+                                                view=valued_view(self.card, rows))
+
+
+class ValuedConfirmButton(discord.ui.DynamicItem[discord.ui.Button],
+                          template=r"mailrules:vconfirm:(?P<card>v\d+)"):
+    """重視公司卡：卡上仍待確認的網域全部確認（確認後才保護信；舊的歷史計畫卡因此過期）。"""
+    def __init__(self, card: str):
+        super().__init__(discord.ui.Button(label="✅ 確認", style=discord.ButtonStyle.success,
+                                           custom_id=f"mailrules:vconfirm:{card}"))
+        self.card = card
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["card"])
+
+    async def callback(self, interaction: discord.Interaction):
+        why = _guard_fail(interaction)
+        if why:
+            await interaction.response.send_message(f"⛔ {why}", ephemeral=True)
+            return
+        db = SessionLocal()
+        try:
+            n = repo.confirm_valued_card(db, self.card)
+            rows = repo.valued_card(db, self.card)
+            counts = _safe_valued_counts(db, self.card)
+        finally:
+            db.close()
+        await interaction.response.edit_message(embed=valued_embed(self.card, rows, counts), view=None)
+        await interaction.followup.send(f"已確認 {n} 個重視公司（by {interaction.user.display_name}）")
+
+
+def valued_view(card: str, rows: list[ValuedDomain]) -> discord.ui.View | None:
+    live = [r for r in rows if r.status == "pending"]
+    if not live:
+        return None
+    v = discord.ui.View(timeout=None)
+    opts = [discord.SelectOption(label=r.domain[:100], value=r.domain) for r in live[:25]]
+    v.add_item(ValuedRejectSelect(card, opts))
+    v.add_item(ValuedConfirmButton(card))
+    return v
+
+
 def suggest_view(card: str, rules: list[Rule]) -> discord.ui.View | None:
     live = [r for r in rules if r.status == "suggested"]
     if not live:
@@ -376,16 +470,71 @@ def notify_cards(card_ids: list[str]) -> list[str]:
     return sent
 
 
-def post_unposted_cards() -> list[str]:
-    """還沒成功發出過的待確認卡完整發（每日排程出錯時也呼叫：出錯前已存進 DB 的新卡不會被吞掉）。"""
-    if not config.mail_channel_id():
-        return []
+def _valued_payload(card: str):
     db = SessionLocal()
     try:
-        cards = repo.unposted_cards(db)
+        return repo.valued_card(db, card), _safe_valued_counts(db, card)
     finally:
         db.close()
-    return notify_cards(cards)
+
+
+def _mark_valued_posted(cards: list[str]) -> None:
+    db = SessionLocal()
+    try:
+        repo.mark_valued_posted(db, cards)
+    finally:
+        db.close()
+
+
+def notify_valued_cards(card_ids: list[str]) -> list[str]:
+    """完整發重視公司確認卡；回傳真的送出的卡號，並在 DB 記已發（沒送出的不記，下次再完整發）。"""
+    if not config.mail_channel_id() or not card_ids:
+        return []
+    sent = []
+    for card in card_ids:
+        try:
+            rows, counts = _valued_payload(card)
+            ok = _post_wait([valued_embed(card, rows, counts)],
+                            make_view=lambda c=card, rs=rows: valued_view(c, rs))
+            if ok:
+                _mark_valued_posted([card])
+                sent.append(card)
+        except Exception as e:                   # 一張卡出事不擋其他卡；沒記已發 → 下次再發
+            print(f"⚠️ 重視公司卡 {card} 發送或記錄已發失敗：{type(e).__name__}: {e}")
+    return sent
+
+
+def _unposted_all() -> tuple[list[str], list[str]]:
+    """（還沒成功發過的規則確認卡, 還沒成功發過的重視公司卡）。"""
+    db = SessionLocal()
+    try:
+        return repo.unposted_cards(db), repo.unposted_valued_cards(db)
+    finally:
+        db.close()
+
+
+def _post_unposted() -> tuple[list[str], list[str]]:
+    """兩種卡都完整補發；回傳（想發的, 真的送出的）。"""
+    want, vwant = _unposted_all()
+    return want + vwant, notify_cards(want) + notify_valued_cards(vwant)
+
+
+def post_unposted_cards() -> list[str]:
+    """還沒成功發出過的待確認卡（規則確認卡＋重視公司卡）完整發
+    （每日排程出錯時也呼叫：出錯前已存進 DB 的新卡不會被吞掉）。"""
+    if not config.mail_channel_id():
+        return []
+    return _post_unposted()[1]
+
+
+def _repost_notes(want: list[str], sent: list[str]) -> list[str]:
+    lost = [c for c in want if c not in sent]
+    notes = []
+    if sent:
+        notes.append(f"補發確認卡 {'、'.join(sent)}")
+    if lost:
+        notes.append(f"❌ 確認卡 {'、'.join(lost)} 發送失敗，下次再試")
+    return notes
 
 
 def notify_card_reminder(card_ids: list[str]) -> None:
@@ -421,20 +570,24 @@ def _send_plan(plan: dict) -> bool:
 
 
 def after_daily(rep: RunReport, today) -> None:
-    """每日整理後：還沒成功發出過的待確認卡完整發、已發過的舊卡一行提醒（看 DB，不靠 rep.new_cards）；
-    歷史未完成、沒有待確認卡、且目前已確認規則集合的計畫還沒成功發過 → 自動發歷史計畫卡。頻道沒設什麼都不發。"""
+    """每日整理後：還沒成功發出過的待確認卡（規則確認卡＋重視公司卡）完整發、已發過的舊卡併成一行提醒
+    （看 DB，不靠 rep.new_cards）；歷史未完成、沒有待確認卡、沒有待確認的重視網域、
+    且目前已確認規則＋網域的計畫還沒成功發過 → 自動發歷史計畫卡。頻道沒設什麼都不發。"""
     if rep.skipped or not config.mail_channel_id():
         return
     db = SessionLocal()
     try:
         pending, fresh = repo.pending_cards(db), repo.unposted_cards(db)
+        vpending, vfresh = repo.pending_valued_cards(db), repo.unposted_valued_cards(db)
+        nvalued = repo.pending_valued_count(db)
         state = repo.get_state(db)
         posted, fp = repo.plan_posted_card(db), repo.confirmed_fingerprint(db)
     finally:
         db.close()
     notify_cards(fresh)
-    notify_card_reminder([c for c in pending if c not in fresh])
-    if pending or state is None or state[2] is not None or posted == fp:
+    notify_valued_cards(vfresh)
+    notify_card_reminder([c for c in pending if c not in fresh] + [c for c in vpending if c not in vfresh])
+    if pending or nvalued or state is None or state[2] is not None or posted == fp:
         return
     from mailrules import run
     try:
@@ -447,7 +600,8 @@ def after_daily(rep: RunReport, today) -> None:
 
 
 def post_history_plan(today) -> str:
-    """/信件計畫：隨時把目前的計畫卡發到信件頻道（發過也照發），並順便完整重發還沒成功發出過的待確認卡。
+    """/信件計畫：隨時把目前的計畫卡發到信件頻道（發過也照發），並順便完整重發還沒成功發出過的待確認卡
+    （規則確認卡＋重視公司卡；歷史整理已完成時也照補發，只是不發計畫卡）。
     回傳給下指令的人看的訊息；發送失敗如實說、不記已發。"""
     if not config.mail_channel_id():
         return "⚠️ 還沒設定 MAIL_CHANNEL_ID，發不出去"
@@ -457,24 +611,14 @@ def post_history_plan(today) -> str:
     finally:
         db.close()
     if state is not None and state[2] is not None:
-        return "歷史整理已完成，不需要計畫卡"
+        notes = _repost_notes(*_post_unposted())
+        return "歷史整理已完成，不需要計畫卡" + (("；" + "；".join(notes)) if notes else "")
     from mailrules import run
     try:
         plan = run.history_plan(today)
     except run.Busy:
         return "⏳ 另一個信件整理正在跑，請稍後再試"
-    db = SessionLocal()
-    try:
-        want = repo.unposted_cards(db)
-    finally:
-        db.close()
-    sent = notify_cards(want)
-    lost = [c for c in want if c not in sent]
-    notes = []
-    if sent:
-        notes.append(f"補發確認卡 {'、'.join(sent)}")
-    if lost:
-        notes.append(f"❌ 確認卡 {'、'.join(lost)} 發送失敗，下次再試")
+    notes = _repost_notes(*_post_unposted())
     tail = ("；" + "；".join(notes)) if notes else ""
     if not _send_plan(plan):
         return "❌ 計畫卡發送失敗（Discord 沒回應或 bot 還沒 ready），沒有記成已發，請稍後再試" + tail

@@ -47,10 +47,44 @@ def test_保護層依理由分_類別層不含保護的信_跨年寫年份():
 def test_重視公司層列網域與封數():
     msgs = [M(sender="hr@corp.example", reason=REASON_VALUED, cat="keep_inbox"),
             M(sender="x@mail.corp.example", reason=REASON_VALUED, cat="keep_inbox")]
-    doms = [{"domain": "corp.example", "first_seen": datetime(2026, 5, 1), "source_subject_pattern": "面試邀請"}]
+    doms = [{"domain": "corp.example", "first_seen": datetime(2026, 5, 1), "source_subject_pattern": "面試邀請",
+             "status": "confirmed"}]
     out = views.build_layer("valued", msgs, [], doms, T)
     assert out["kind"] == "domains"
-    assert out["rows"] == [{"domain": "corp.example", "since": "2026-05-01", "pattern": "面試邀請", "count": 2}]
+    assert out["rows"] == [{"domain": "corp.example", "since": "2026-05-01", "pattern": "面試邀請", "count": 2,
+                            "status": "已確認"}]
+
+
+def test_重視公司層_待確認在前_拒絕的不列_待確認封數是還在信箱的信():
+    def D(d, status):
+        return {"domain": d, "first_seen": datetime(2026, 5, 1), "source_subject_pattern": "面試 #", "status": status}
+    msgs = [M(sender="hr@ok.example", reason=REASON_VALUED, cat="keep_inbox"),
+            M(sender="a@ok2.example", reason=REASON_VALUED, cat="keep_inbox"),
+            M(sender="b@ok2.example", reason=REASON_VALUED, cat="keep_inbox"),
+            # 待確認網域的信：理由不是重視的公司，照樣算（含子網域；丟了、不在信箱的不算）
+            M(sender="x@wait.example", cat="promo", reason="規則 #1"),
+            M(sender="y@mail.wait.example", reason="未知"),
+            M(sender="z@wait.example", cat="promo", reason="規則 #1", trashed=datetime(2026, 10, 2)),
+            dict(M(sender="w@wait.example"), gone_at=datetime(2026, 10, 2)),
+            M(sender="q@other-wait.example", reason="未知"),
+            M(sender="r@no.example", reason="未知")]
+    doms = [D("ok.example", "confirmed"), D("ok2.example", "confirmed"), D("wait.example", "pending"),
+            D("other-wait.example", "pending"), D("no.example", "rejected")]
+    out = views.build_layer("valued", msgs, [], doms, T)
+    assert [(r["domain"], r["status"], r["count"]) for r in out["rows"]] == [
+        ("wait.example", "待確認", 2), ("other-wait.example", "待確認", 1),
+        ("ok2.example", "已確認", 2), ("ok.example", "已確認", 1)]
+    assert out["total"] == 4
+    assert {o["key"]: o["count"] for o in views.overview_from(msgs, [], doms, T)}["valued"] == 4
+
+
+def test_views_load_讀網域狀態():
+    seen = []
+    from types import SimpleNamespace
+    db = SimpleNamespace()
+    db.query = lambda *cols: seen.append([str(c) for c in cols]) or SimpleNamespace(all=lambda: [])
+    views.load(db)
+    assert any(c.endswith(".status") for c in seen[2])
 
 
 def test_未知依寄件者加樣式分組_多的在前():

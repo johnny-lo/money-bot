@@ -28,6 +28,14 @@ class Rule:
 
 
 @dataclass(frozen=True)
+class ValuedDomain:
+    domain: str                   # 重視的公司網域（安全網第 2 條）
+    pattern: str | None           # 當初學到它的主旨樣式
+    status: str                   # 'pending' | 'confirmed' | 'rejected'；只有 confirmed 會保護信
+    card: str | None = None       # 出現在哪張重視公司確認卡（'v<N>'，只增不減）
+
+
+@dataclass(frozen=True)
 class Verdict:
     category: str | None          # None = 未知
     reason: str

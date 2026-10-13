@@ -6,7 +6,7 @@ from datetime import datetime
 from models import MailMessage, MailRule, MailState, MailValuedDomain
 
 from . import config
-from .types import Action, MailHeader, MessageState, Rule, Verdict
+from .types import Action, MailHeader, MessageState, Rule, ValuedDomain, Verdict
 
 CARD_SIZE = 25
 _IN_CHUNK = 500
@@ -173,8 +173,17 @@ def rules_fingerprint(rules: list[Rule]) -> str:
     return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
 
 
+def plan_fingerprint(rules: list[Rule], valued: set[str]) -> str:
+    """計畫卡核可的是哪一套「已確認規則＋已確認重視網域」。沒有已確認網域時等於 rules_fingerprint
+    （升級前發出的計畫卡不會因此過期）。確認網域會讓它變；新增待確認網域、拒絕網域不會。"""
+    if not valued:
+        return rules_fingerprint(rules)
+    key = rules_fingerprint(rules) + "\nvalued:" + ",".join(sorted(valued))
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+
+
 def confirmed_fingerprint(db) -> str:
-    return rules_fingerprint(confirmed_rules(db))
+    return plan_fingerprint(confirmed_rules(db), valued_set(db))
 
 
 def known_keys(db) -> set[tuple[str, str]]:
@@ -316,21 +325,137 @@ def mark_cards_posted(db, cards: list[str]) -> None:
 
 
 # ── 重視網域 ───────────────────────────────────────────────────────
+# 新學到的一律 pending，分到重視公司確認卡（v<N>，只增不減、和規則確認卡 s<N> 各自獨立）；
+# 只有 confirmed 會保護信（valued_set）；rejected 的網域留在表裡，永遠不再學、不重開。
 
-def add_valued(db, domains: dict[str, str]) -> None:
-    if not domains:
-        return
-    have = valued(db)
-    new = [MailValuedDomain(domain=d, source_subject_pattern=p) for d, p in domains.items() if d not in have]
-    for r in new:
-        db.add(r)
-    if new:
+VALUED_CARD_SIZE = 20
+
+
+def _vd(r) -> ValuedDomain:
+    return ValuedDomain(domain=r.domain, pattern=r.source_subject_pattern, status=r.status, card=r.card)
+
+
+def valued_card_no(card: str | None) -> int:
+    """'v7' → 7；None／壞值 → 0。"""
+    m = re.fullmatch(r"v(\d+)", card or "")
+    return int(m.group(1)) if m else 0
+
+
+def _valued_rows(db) -> list:
+    return db.query(MailValuedDomain).all()
+
+
+def add_valued(db, domains: dict[str, str]) -> list[str]:
+    """domains＝這次（從所有還在信箱的信）學到的 {網域: 主旨樣式}。只新增表裡完全沒有的網域，一律 pending、
+    每 VALUED_CARD_SIZE 個一張卡；回傳新開的卡號。
+    沒卡號的 pending 列是舊版規則學的（欄位 migration 補成 pending）：這次還學得到的補上卡，學不到的刪掉
+    （當初是弱字眼學的，從沒生效、也沒給本人看過）。"""
+    rows = _valued_rows(db)
+    have = {r.domain for r in rows}
+    legacy = [r for r in rows if r.card is None and r.status == "pending"]
+    changed = False
+    for r in legacy:
+        if r.domain not in domains:
+            db.delete(r)
+            changed = True
+    todo = sorted([(d, p, None) for d, p in domains.items() if d not in have]
+                  + [(r.domain, r.source_subject_pattern, r) for r in legacy if r.domain in domains],
+                  key=lambda t: t[0])
+    n = max((valued_card_no(r.card) for r in rows), default=0)
+    cards = []
+    for i in range(0, len(todo), VALUED_CARD_SIZE):
+        n += 1
+        card = f"v{n}"
+        cards.append(card)
+        for d, p, r in todo[i:i + VALUED_CARD_SIZE]:
+            if r is None:
+                db.add(MailValuedDomain(domain=d, source_subject_pattern=p, status="pending", card=card))
+            else:
+                r.card = card
+    if cards or changed:
         db.commit()
+    return cards
 
 
 def valued(db) -> set[str]:
-    return {r.domain for r in db.query(MailValuedDomain).all()}
+    """表裡所有網域（任何狀態）。"""
+    return {r.domain for r in _valued_rows(db)}
 
 
 def valued_set(db) -> set[str]:
-    return valued(db)
+    """只有本人確認過的網域會保護信。"""
+    return {r.domain for r in db.query(MailValuedDomain).filter(MailValuedDomain.status == "confirmed").all()
+            if r.status == "confirmed"}
+
+
+def pending_valued_count(db) -> int:
+    return sum(1 for r in db.query(MailValuedDomain).filter(MailValuedDomain.status == "pending").all()
+               if r.status == "pending")
+
+
+def _valued_card_rows(db, card: str) -> list:
+    rows = db.query(MailValuedDomain).filter(MailValuedDomain.card == card).order_by(MailValuedDomain.domain).all()
+    return sorted((r for r in rows if r.card == card), key=lambda r: r.domain)
+
+
+def valued_card(db, card: str) -> list[ValuedDomain]:
+    return [_vd(r) for r in _valued_card_rows(db, card)]
+
+
+def valued_card_counts(db, card: str) -> dict[str, int]:
+    """{網域: 封數}：卡上每個網域（含子網域）現在還在信箱（沒丟、沒消失）的信有幾封（確認卡顯示用）。"""
+    from .patterns import count_by_domain
+    doms = [r.domain for r in _valued_card_rows(db, card)]
+    if not doms:
+        return {}
+    rows = (db.query(MailMessage)
+            .filter(MailMessage.gone_at.is_(None), MailMessage.trashed_at.is_(None)).all())
+    return count_by_domain([r.from_addr for r in rows if r.gone_at is None and r.trashed_at is None], doms)
+
+
+def pending_valued_cards(db) -> list[str]:
+    """還有待確認網域的重視公司卡。"""
+    rows = db.query(MailValuedDomain).filter(MailValuedDomain.status == "pending").all()
+    return sorted({r.card for r in rows if r.status == "pending" and r.card}, key=valued_card_no)
+
+
+def unposted_valued_cards(db) -> list[str]:
+    """還有待確認網域、而且從沒成功發到 Discord 的重視公司卡：下次要完整發。"""
+    rows = [r for r in db.query(MailValuedDomain).filter(MailValuedDomain.status == "pending").all()
+            if r.status == "pending" and r.card]
+    posted = {r.card for r in rows if r.posted_at is not None}
+    return sorted({r.card for r in rows} - posted, key=valued_card_no)
+
+
+def mark_valued_posted(db, cards: list[str]) -> None:
+    """只在卡真的送出（post_sync_wait 回 True）後呼叫；整張卡的每一列都記。"""
+    want = set(cards)
+    if not want:
+        return
+    now = _now()
+    for r in db.query(MailValuedDomain).filter(MailValuedDomain.card.in_(sorted(want))).all():
+        if r.card in want and r.posted_at is None:
+            r.posted_at = now
+    db.commit()
+
+
+def reject_valued(db, card: str, domains: list[str]) -> int:
+    """拒絕某張卡上指定的（還在待確認的）網域；回傳拒絕了幾個。"""
+    want, n, now = set(domains), 0, _now()
+    for r in _valued_card_rows(db, card):
+        if r.status == "pending" and r.domain in want:
+            r.status, r.decided_at = "rejected", now
+            n += 1
+    db.commit()
+    return n
+
+
+def confirm_valued_card(db, card: str) -> int:
+    """卡上仍待確認的網域全部確認；回傳確認了幾個。"""
+    n, now = 0, _now()
+    for r in _valued_card_rows(db, card):
+        if r.status == "pending":
+            r.status, r.decided_at = "confirmed", now
+            n += 1
+    db.commit()
+    return n

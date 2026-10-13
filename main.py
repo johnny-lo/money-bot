@@ -108,13 +108,19 @@ try:
                 "CREATE INDEX IF NOT EXISTS ix_food_places_district ON food_places (district)"
             ))
             _conn.commit()
-        # mail_messages / mail_state / mail_rules 補欄位（消失的信、退訂連結、顯示名稱、已發的歷史計畫卡、確認卡已發）
+        # mail_messages / mail_state / mail_rules / mail_valued_domains 補欄位（消失的信、退訂連結、顯示名稱、
+        # 已發的歷史計畫卡、確認卡已發、重視公司的確認狀態與確認卡）
         for _tbl, _col, _ddl in (
             ("mail_messages", "gone_at", "ALTER TABLE mail_messages ADD COLUMN gone_at TIMESTAMP"),
             ("mail_messages", "unsub", "ALTER TABLE mail_messages ADD COLUMN unsub BOOLEAN DEFAULT FALSE NOT NULL"),
             ("mail_messages", "from_name", "ALTER TABLE mail_messages ADD COLUMN from_name VARCHAR"),
             ("mail_state", "plan_posted_card", "ALTER TABLE mail_state ADD COLUMN plan_posted_card VARCHAR"),
             ("mail_rules", "posted_at", "ALTER TABLE mail_rules ADD COLUMN posted_at TIMESTAMP"),
+            # 既有列（舊規則學的）變 pending、沒卡號：repo.add_valued 會把強字眼還學得到的補上卡、其餘刪掉
+            ("mail_valued_domains", "status", "ALTER TABLE mail_valued_domains ADD COLUMN status VARCHAR DEFAULT 'pending' NOT NULL"),
+            ("mail_valued_domains", "card", "ALTER TABLE mail_valued_domains ADD COLUMN card VARCHAR"),
+            ("mail_valued_domains", "posted_at", "ALTER TABLE mail_valued_domains ADD COLUMN posted_at TIMESTAMP"),
+            ("mail_valued_domains", "decided_at", "ALTER TABLE mail_valued_domains ADD COLUMN decided_at TIMESTAMP"),
         ):
             if _inspector.has_table(_tbl) and _col not in [c["name"] for c in _inspector.get_columns(_tbl)]:
                 _conn.execute(_text(_ddl))
@@ -254,8 +260,9 @@ scheduler.add_job(_weekly_pipeline, "cron", day_of_week="sun", hour=21, minute=0
 
 def _mail_daily():
     """每日信件整理（時間見 mailrules.config.DAILY_RUN）：同步→分類→（歷史完成後）執行→報告；
-    還沒成功發出過的確認卡完整發、發過的舊卡一行提醒；歷史未完成、沒有待確認卡、
-    目前已確認規則集合的計畫還沒成功發過 → 自動發歷史計畫卡。出錯時也補發還沒發出的確認卡。"""
+    還沒成功發出過的確認卡（規則確認卡＋重視公司卡）完整發、發過的舊卡一行提醒；歷史未完成、沒有待確認卡、
+    沒有待確認的重視網域、目前已確認規則＋網域的計畫還沒成功發過 → 自動發歷史計畫卡。
+    出錯時也補發還沒發出的確認卡（兩種都補）。"""
     try:
         from zoneinfo import ZoneInfo
         from mailrules.run import run_daily
@@ -269,7 +276,7 @@ def _mail_daily():
         try:
             from discordbot.mailrules_ui import notify_failure as mail_notify_failure, post_unposted_cards
             mail_notify_failure(str(e))
-            post_unposted_cards()          # 出錯前已存進 DB 的新確認卡照發；沒發成功的下次每日再發
+            post_unposted_cards()          # 出錯前已存進 DB 的新確認卡（含重視公司卡）照發；沒發成功的下次每日再發
         except Exception:
             pass
 

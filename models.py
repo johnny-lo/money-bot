@@ -228,11 +228,16 @@ class MailMessage(Base):
 
 
 class MailValuedDomain(Base):
-    """重視的公司網域（寄過求職字眼主旨）；安全網第 2 條。屬個資，只存 DB。"""
+    """重視的公司網域（寄過強求職字眼主旨）；安全網第 2 條。屬個資，只存 DB。
+    新學到的一律 pending，本人在重視公司確認卡（v<N>）確認才 confirmed、才保護信；rejected 永遠不再學。"""
     __tablename__ = "mail_valued_domains"
     domain = Column(String, primary_key=True)
     first_seen = Column(DateTime, default=func.now())
     source_subject_pattern = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="pending")   # pending/confirmed/rejected
+    card = Column(String, nullable=True)                   # 重視公司確認卡號 v<N>（只增不減）
+    posted_at = Column(DateTime, nullable=True)            # 這張卡真的發到 Discord 的時間（沒發成功＝NULL，下次完整重發）
+    decided_at = Column(DateTime, nullable=True)           # 本人確認／拒絕的時間
 
 
 class MailState(Base):

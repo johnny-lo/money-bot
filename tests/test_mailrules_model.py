@@ -12,7 +12,8 @@ def test_tables():
     assert set(MailMessage.__table__.columns.keys()) == {
         "id", "gm_msgid", "uid", "from_addr", "subject_pattern", "subject", "sent_date", "category", "reason",
         "protected", "in_inbox", "labels_applied", "trashed_at", "updated_at", "gone_at", "unsub", "from_name"}
-    assert set(MailValuedDomain.__table__.columns.keys()) == {"domain", "first_seen", "source_subject_pattern"}
+    assert set(MailValuedDomain.__table__.columns.keys()) == {
+        "domain", "first_seen", "source_subject_pattern", "status", "card", "posted_at", "decided_at"}
     assert set(MailState.__table__.columns.keys()) == {"id", "uidvalidity", "last_uid", "history_done_at", "plan_posted_card"}
     assert MailMessage.__table__.columns["gm_msgid"].unique
 

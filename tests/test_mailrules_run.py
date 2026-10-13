@@ -26,6 +26,7 @@ class FakeRepo:
     def states(self, db): return {g: MessageState(in_inbox=True) for g in self.store}
     def add_valued(self, db, d): self.valued.update(d)
     def valued_set(self, db): return set(self.valued)
+    def pending_valued_count(self, db): return 0
     def confirmed_rules(self, db): return []
     def known_keys(self, db): return set()
     def save_verdicts(self, db, v): self.verdicts = v

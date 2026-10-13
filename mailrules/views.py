@@ -12,7 +12,7 @@ from models import MailMessage, MailRule, MailValuedDomain
 
 from . import config
 from .classify import REASON_HUMAN, REASON_JOB, REASON_VALUED
-from .patterns import _domain_in, addr_domain
+from .patterns import _domain_in, addr_domain, count_by_domain
 from .plan import next_step
 from .types import MessageState
 
@@ -21,6 +21,7 @@ TRASH_RECOVER_DAYS = 30        # Gmail 垃圾桶 30 天後永久刪除
 _PROTECT_REASONS = (REASON_JOB, REASON_VALUED, REASON_HUMAN)
 _STATUS = {"suggested": "待確認", "confirmed": "已確認", "rejected": "已拒絕"}
 _STATUS_ORDER = {"suggested": 0, "confirmed": 1, "rejected": 2}
+_VALUED_STATUS = {"pending": "待確認", "confirmed": "已確認"}       # rejected 不列
 _BY = {"builtin": "內建", "ai": "AI", "user": "你"}
 _STEP = {"archive": "移出", "trash": "丟"}
 
@@ -118,17 +119,23 @@ def _collect(key, msgs, rules, domains, today, q) -> tuple[str, list]:
                                   r["sender"], r["subject_pattern"]))
         return "rules", items
     if key == "valued":
+        # 已確認：因重視的公司而留下的信；待確認：確認卡上的數字（含子網域、還在信箱的信）
         out = []
         valued_doms = [addr_domain(m["from_addr"]) for m in msgs
                        if m.get("reason") == REASON_VALUED and not m.get("gone_at")]
-        for d in domains:
+        live = [m["from_addr"] for m in msgs if not m.get("gone_at") and not m.get("trashed_at")]
+        shown = [d for d in domains if d.get("status") in _VALUED_STATUS and _hit(q, (d["domain"] or "").lower())]
+        pending = count_by_domain(live, [d["domain"] for d in shown if d["status"] == "pending"])
+        for d in shown:
             dom = (d["domain"] or "").lower()
-            if not _hit(q, dom):
-                continue
-            n = sum(1 for md in valued_doms if _domain_in(md, [dom]))
+            if d["status"] == "pending":
+                n = pending.get(dom, 0)
+            else:
+                n = sum(1 for md in valued_doms if _domain_in(md, [dom]))
             out.append({"domain": d["domain"], "since": _ymd(d.get("first_seen")),
-                        "pattern": d.get("source_subject_pattern"), "count": n})
-        out.sort(key=lambda r: (-r["count"], r["domain"]))
+                        "pattern": d.get("source_subject_pattern"), "count": n,
+                        "status": _VALUED_STATUS[d["status"]]})
+        out.sort(key=lambda r: (r["status"] != "待確認", -r["count"], r["domain"]))
         return "domains", out
     hits = [m for m in msgs if not m.get("gone_at") and _match_msg(m, key, today)]   # 已不在信箱的不列
     if key == "unknown":
@@ -163,7 +170,7 @@ def load(db) -> tuple[list[dict], list[dict], list[dict]]:
     msgs = [dict(zip(mc, r)) for r in db.query(*[getattr(MailMessage, c) for c in mc]).all()]
     rc = ("sender", "subject_pattern", "category", "status", "suggested_by")
     rules = [dict(zip(rc, r)) for r in db.query(*[getattr(MailRule, c) for c in rc]).all()]
-    dc = ("domain", "first_seen", "source_subject_pattern")
+    dc = ("domain", "first_seen", "source_subject_pattern", "status")
     domains = [dict(zip(dc, r)) for r in db.query(*[getattr(MailValuedDomain, c) for c in dc]).all()]
     return msgs, rules, domains
 

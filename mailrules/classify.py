@@ -2,7 +2,8 @@
 import re
 
 from . import config
-from .patterns import _domain_in, addr_domain, has_job_keyword, is_human, subject_pattern
+from .patterns import (_domain_in, addr_domain, has_job_keyword, has_strong_job_keyword, is_human, is_school,
+                       subject_pattern)
 from .types import MailHeader, Rule, Verdict
 
 __all__ = ["has_job_keyword", "is_human", "learn_valued_domains", "match_rule", "classify", "builtin_suggest",
@@ -17,15 +18,17 @@ REASON_UNKNOWN = "未知"
 
 
 def learn_valued_domains(headers: list[MailHeader], self_addrs: set[str], company_domains: set[str]) -> dict[str, str]:
+    """{網域: 當初的主旨樣式}：只從強求職字眼的信學；群發信（有退訂連結）、學校、求職平台、免費信箱、
+    本人與目前公司的網域不學。學到的只是「待確認」，本人在確認卡上確認才會保護信（repo.valued_set）。"""
     self_domains = {addr_domain(a) for a in self_addrs}
     out: dict[str, str] = {}
     for h in headers:
-        if not has_job_keyword(h.subject):
+        if h.unsub or not has_strong_job_keyword(h.subject):
             continue
         d = addr_domain(h.from_addr)
         if not d or d in out:
             continue
-        if (_domain_in(d, config.JOB_BOARD_DOMAINS) or _domain_in(d, config.FREEMAIL_DOMAINS)
+        if (_domain_in(d, config.JOB_BOARD_DOMAINS) or _domain_in(d, config.FREEMAIL_DOMAINS) or is_school(d)
                 or d in self_domains or _domain_in(d, company_domains)):
             continue
         out[d] = subject_pattern(h.subject, "")

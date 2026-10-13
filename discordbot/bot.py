@@ -32,7 +32,8 @@ class MoneyBot(discord.Client):
                                cardrecon_ui.RecordButton, cardrecon_ui.IgnoreSelect,
                                cardrecon_ui.IgnoreAllButton,  # 刷卡比對清單卡
                                mailrules_ui.ConfirmButton, mailrules_ui.RejectSelect,
-                               mailrules_ui.AssignSelect, mailrules_ui.ExecuteButton)  # 信件規則確認卡
+                               mailrules_ui.AssignSelect, mailrules_ui.ExecuteButton,  # 信件規則確認卡
+                               mailrules_ui.ValuedConfirmButton, mailrules_ui.ValuedRejectSelect)  # 重視公司確認卡
         await self.tree.sync()
         self._autofix_outbox.start()
 

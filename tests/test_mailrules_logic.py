@@ -47,7 +47,7 @@ def test_重視公司_只有完整地址規則能覆蓋_網域規則不行():
 
 
 def test_學習重視網域_排除平台_免費信箱_本人與目前公司():
-    hs = [h("a@corp-a.example", "面試邀請"), h("b@mail.104.com.tw", "面試邀約"), h("c@gmail.com", "面試"),
+    hs = [h("a@corp-a.example", "面試邀請", unsub=False), h("b@mail.104.com.tw", "面試邀約"), h("c@gmail.com", "面試"),
           h("hr@now-corp.example", "春酒邀請"), h("d@corp-b.example", "一般通知")]
     got = C.learn_valued_domains(hs, {"me@other.example"}, {"now-corp.example"})
     assert set(got) == {"corp-a.example"}

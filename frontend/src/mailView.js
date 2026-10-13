@@ -39,10 +39,11 @@ export function rowText(kind, row) {
         badge: row.next ?? row.where,
       }
     case 'domains':
+      // status＝「待確認」或「已確認」：待確認的網域還不保護信，要在 Discord 確認卡上確認才生效
       return {
         main: row.domain,
         sub: `加入 ${row.since}・${row.pattern ?? ''}`,
-        badge: `${row.count} 封`,
+        badge: row.status ? `${row.count} 封・${row.status}` : `${row.count} 封`,
       }
     case 'rules':
       return {

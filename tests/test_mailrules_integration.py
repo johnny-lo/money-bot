@@ -18,7 +18,7 @@ from mailrules import config, gmail_rw, repo, run, views
 from mailrules.gmail_rw import apply as _real_apply
 from mailrules.repo import card_no
 from mailrules.run import history_plan as _real_history_plan
-from mailrules.types import Action, MailHeader, MessageState, Rule, RunReport, Verdict
+from mailrules.types import Action, MailHeader, MessageState, Rule, RunReport, ValuedDomain, Verdict
 from models import MailMessage, MailRule, MailState
 from tests.test_mailrules_gmail import FakeM
 from tests.test_mailrules_run import FakeRepo, H, T, wire
@@ -95,10 +95,22 @@ def test_mail_state_有_plan_posted_card_欄位():
 
 class UiRepo:
     """mailrules_ui 用到的 repo 假物件：待確認卡、哪些卡還沒成功發過、已確認規則指紋都放記憶體。"""
-    def __init__(self, state=(1, 0, None), pending=(), unposted=(), max_card="s7", posted=None, fp="f1"):
+    def __init__(self, state=(1, 0, None), pending=(), unposted=(), max_card="s7", posted=None, fp="f1",
+                 vpending=(), vunposted=(), vcount=None):
         self.state, self.pending, self.unposted = state, list(pending), list(unposted)
         self.max, self.posted, self.fp = max_card, posted, fp
         self.set_calls, self.marked = [], []
+        # 重視公司卡（v<N>）：vpending＝還有待確認網域的卡、vunposted＝其中還沒成功發過的、vcount＝待確認網域數
+        self.vpending, self.vunposted, self.vmarked = list(vpending), list(vunposted), []
+        self.vcount = len(self.vpending) if vcount is None else vcount
+    def pending_valued_cards(self, db): return list(self.vpending)
+    def unposted_valued_cards(self, db): return [c for c in self.vpending if c in self.vunposted]
+    def pending_valued_count(self, db): return self.vcount
+    def mark_valued_posted(self, db, cards):
+        self.vmarked += list(cards)
+        self.vunposted = [c for c in self.vunposted if c not in cards]
+    def valued_card(self, db, card): return [ValuedDomain(f"{card}.example", "面試 #", "pending", card)]
+    def valued_card_counts(self, db, card): return {}
     def get_state(self, db): return self.state
     def pending_cards(self, db): return list(self.pending)
     def unposted_cards(self, db): return [c for c in self.pending if c in self.unposted]
