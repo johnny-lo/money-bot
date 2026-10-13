@@ -64,7 +64,7 @@ def _sender_rows(rules: list[Rule], counts: dict) -> list[dict]:
     for r in rules:
         by.setdefault(r.sender, []).append(r)
     out = []
-    for i, sender in enumerate(sorted(by)):
+    for i, sender in enumerate(card_senders(rules)):      # 索引與 callback 對回寄件者共用同一個函式
         rs = by[sender]
         manual = [r for r in rs if r.status == "confirmed" and r.suggested_by == "user"]
         if any(r.status == "suggested" for r in rs):
@@ -476,12 +476,10 @@ class ExecuteButton(discord.ui.DynamicItem[discord.ui.Button],
             # 擋下來的卡可能根本沒發出去過（頻道沒設、bot 沒 ready）：當場補發。post_sync_wait 會等 event loop，
             # 不能在 loop 上直接呼叫
             try:
-                sent = await asyncio.to_thread(post_unposted_cards)
+                tail = await asyncio.to_thread(_repost_pending)
             except Exception as err:
                 print(f"⚠️ 執行鈕補發確認卡失敗：{err}")
-                sent = []
-            tail = (f"已補發還沒發出去的確認卡：{'、'.join(sent)}；處理完再用 /信件計畫 重發計畫卡" if sent
-                    else "待確認的卡都發過了，請先到信件頻道處理；找不到卡可用 /信件計畫 重發")
+                tail = "❌ 補發確認卡時出錯，請稍後用 /信件計畫 重發"
             emb = discord.Embed(title="⏸ 還有待確認的卡，歷史整理沒有執行", description=f"{e}\n{tail}"[:4000],
                                 color=_FAIL_COLOR)
             view = _exec_view(self.upto, self.fp)
@@ -719,6 +717,17 @@ def _repost_notes(want: list[str], sent: list[str]) -> list[str]:
     if lost:
         notes.append(f"❌ 確認卡 {'、'.join(lost)} 發送失敗，下次再試")
     return notes
+
+
+def _repost_pending() -> str:
+    """執行鈕被待確認擋下時補發還沒發出的卡（要在 event loop 外呼叫）；回傳如實的說明：
+    該發哪些、真的送出哪些、哪些沒送出去。"""
+    if not config.mail_channel_id():
+        return "⚠️ 還沒設定 MAIL_CHANNEL_ID，待確認的卡發不出去"
+    want, sent = _post_unposted()
+    if not want:
+        return "待確認的卡都發過了，請先到信件頻道處理；找不到卡可用 /信件計畫 重發"
+    return "；".join(_repost_notes(want, sent)) + "；處理完再用 /信件計畫 重發計畫卡"
 
 
 def notify_card_reminder(card_ids: list[str]) -> None:

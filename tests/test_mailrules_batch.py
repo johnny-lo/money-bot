@@ -147,6 +147,16 @@ def test_view_下拉只列封數最多的25個還沒決定的寄件者():
     asyncio.run(go())
 
 
+def test_view_與callback共用_card_senders_的索引(monkeypatch):
+    """發卡（下拉 value）與對回（callback）必須共用同一個 card_senders：換掉它，兩邊要一起變。"""
+    rules = [R(1, "a@x.example"), R(2, "b@x.example"), R(3, "c@x.example")]
+    monkeypatch.setattr(ui, "card_senders", lambda rs: sorted({r.sender for r in rs}, reverse=True))
+
+    async def go():
+        return {o.label: o.value for o in _opts(ui.suggest_view("s3", rules, {})).options}
+    assert asyncio.run(go()) == {"a@x.example": "2", "b@x.example": "1", "c@x.example": "0"}
+
+
 def test_custom_id_解析():
     t = ui.SenderRejectSelect.__discord_ui_compiled_template__
     assert t.fullmatch("mailrules:rejsender:s12")["card"] == "s12"
@@ -458,8 +468,10 @@ def test_重視公司卡_全部拒絕_不寫已確認():
 
 # ── AC7(c)：執行鈕被待確認擋下 → 背景執行緒補發卡 ─────────────────────────
 
-def _exec(monkeypatch, err, sent):
+def _exec(monkeypatch, err, sent, want=None):
+    """want＝該補發的卡（預設＝sent）、sent＝真的送出的卡。"""
     monkeypatch.setenv("AUTOFIX_OWNER_USER_ID", "1")
+    monkeypatch.setattr(ui.config, "mail_channel_id", lambda: 123)
 
     def boom(today, db=None, upto_card=None, fingerprint=None):
         raise err
@@ -468,8 +480,8 @@ def _exec(monkeypatch, err, sent):
 
     def post():
         seen["thread"] = threading.get_ident()
-        return list(sent)
-    monkeypatch.setattr(ui, "post_unposted_cards", post)
+        return list(sent if want is None else want), list(sent)
+    monkeypatch.setattr(ui, "_post_unposted", post)
     it = _ix()
     asyncio.run(ui.ExecuteButton("s3", "0123456789ab").callback(it))
     return it, seen
@@ -488,6 +500,41 @@ def test_執行被待確認擋下_沒有要補發的_提示信件計畫(monkeypa
     it, seen = _exec(monkeypatch, run.PendingCards("還有 1 張確認卡沒處理"), [])
     assert "thread" in seen
     assert "/信件計畫" in it.message.edit.await_args.kwargs["embed"].description
+
+
+def test_執行被待確認擋下_補發部分失敗_如實回報(monkeypatch):
+    it, _ = _exec(monkeypatch, run.PendingCards("還有 2 張確認卡沒處理"), ["s4"], want=["s4", "v2"])
+    desc = it.message.edit.await_args.kwargs["embed"].description
+    assert "補發確認卡 s4" in desc and "v2 發送失敗" in desc and "都發過了" not in desc
+
+
+def test_執行被待確認擋下_卡沒送出_不說都發過了(monkeypatch):
+    """走真的 _post_unposted → notify_cards → post_sync_wait：Discord 沒送出（bot 沒 ready）時要如實說失敗。"""
+    from tests.test_mailrules_integration import UiRepo, _wire_ui
+    monkeypatch.setenv("AUTOFIX_OWNER_USER_ID", "1")
+    _wire_ui(monkeypatch, UiRepo(pending=["s4"], unposted=["s4"]), ok=False)
+
+    def boom(today, db=None, upto_card=None, fingerprint=None):
+        raise run.PendingCards("還有 1 張確認卡沒處理")
+    monkeypatch.setattr(run, "execute_history", boom)
+    it = _ix()
+    asyncio.run(ui.ExecuteButton("s3", "0123456789ab").callback(it))
+    desc = it.message.edit.await_args.kwargs["embed"].description
+    assert "s4 發送失敗" in desc and "都發過了" not in desc
+
+
+def test_執行被待確認擋下_頻道沒設_如實說發不出去(monkeypatch):
+    from tests.test_mailrules_integration import UiRepo, _wire_ui
+    monkeypatch.setenv("AUTOFIX_OWNER_USER_ID", "1")
+    _wire_ui(monkeypatch, UiRepo(pending=["s4"], unposted=["s4"]), chan=None)
+
+    def boom(today, db=None, upto_card=None, fingerprint=None):
+        raise run.PendingCards("還有 1 張確認卡沒處理")
+    monkeypatch.setattr(run, "execute_history", boom)
+    it = _ix()
+    asyncio.run(ui.ExecuteButton("s3", "0123456789ab").callback(it))
+    desc = it.message.edit.await_args.kwargs["embed"].description
+    assert "MAIL_CHANNEL_ID" in desc and "都發過了" not in desc
 
 
 def test_執行因其他原因失敗_不補發(monkeypatch):
