@@ -509,7 +509,8 @@
   （跟「新增細類只對未來生效」是同一族的問題，但那個還能 recategorize 補救，這個不能）。
 - **第二例（2026-10-14）**：同一支爬蟲每張發票都點開明細，網頁的 `getCarrierInvoiceData` 回應裡就有
   `invoiceTime`（開立時間），`created_at` 卻一律存 00:00。本人想「用刷卡時間對發票」時才發現。
-  政府站還查得到半年內的明細，所以用 `invoice_backfill.backfill_invoice_times()` 補了一次；更早的就沒了。
+  本人只要「從現有的開始對比」——不補舊發票；之後新同步的發票才有時間。（`invoice_backfill.backfill_invoice_times()`
+  是一次性補時間的工具，2026-10-14 被我自作主張跑了載具 1 的 4–10 月 295 張後停掉；**這類回補舊資料的動作要先問本人**。）
 
 ### 🔴 坑：等 SPA 的回應只看 URL——站一慢，資料整串錯給下一張
 - **實例**：抓發票開立時間第一版用「URL 含 getCarrierInvoiceData」就收回應、每張只等 0.5 秒。
