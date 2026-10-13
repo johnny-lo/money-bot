@@ -52,7 +52,7 @@ def test_建議卡_view_含拒絕下拉與確認鈕():
     asyncio.run(go())
 
 
-# ── 第二輪審查補的測試 ──────────────────────────────────────────
+# ── 執行鈕、通知與卡片內容 ──────────────────────────────────────
 
 def _fake_interaction(values=None, uid=1):
     return SimpleNamespace(
@@ -139,7 +139,7 @@ def test_舊卡_拒絕卡上全部規則_直接發手動指定卡(monkeypatch):
     async def go():
         await ui.RejectSelect("s3", [discord.SelectOption(label="a", value="1")]).callback(it)
         sent = it.followup.send.await_args.kwargs["view"]
-        # 手動指定改成寄件者層：custom_id 帶卡號＋寄件者字母序索引
+        # 手動指定是寄件者層：custom_id 帶卡號＋寄件者字母序索引
         assert sorted(c.custom_id for c in sent.children) == ["mailrules:assignsender:s3:0",
                                                               "mailrules:assignsender:s3:1"]
     asyncio.run(go())

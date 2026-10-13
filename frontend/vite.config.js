@@ -4,12 +4,12 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // Vite = 開發伺服器 + 打包器。
 export default defineConfig({
-  // 部署時 FastAPI 把這個 app serve 在 https://<ngrok>/m/ 底下
+  // 部署時 FastAPI 把這個 app serve 在 https://<對外網址>/m/ 底下
   base: '/m/',
 
   // 版本戳：build 當下的時間，直接編進 bundle 並顯示在畫面右下角。
-  // 為什麼要有：這個 app 的頭號疑難雜症是「改了手機上看不到」，而過去只能靠
-  // curl 伺服器 + 猜裝置端快取。有這個戳記，使用者看一眼就知道手上是不是新版。
+  // 為什麼要有：「改了手機上看不到」時，不用靠 curl 伺服器 + 猜裝置端快取，
+  // 使用者看一眼就知道手上是不是新版。
   define: {
     __BUILD_ID__: JSON.stringify(
       new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Taipei' }).slice(5, 16),

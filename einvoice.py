@@ -93,7 +93,7 @@ def parse_invoice_time(s) -> time | None:
 
 
 def invoice_datetime(date_str: str, t: time | None) -> datetime:
-    """發票日期 'YYYY-MM-DD' ＋ 開立時間；沒有時間就是當天 00:00（＝原本只存日期的行為）。"""
+    """發票日期 'YYYY-MM-DD' ＋ 開立時間；沒有時間就是當天 00:00。"""
     return datetime.combine(datetime.strptime(date_str, "%Y-%m-%d").date(), t or time())
 
 
@@ -126,7 +126,7 @@ async def _solve_captcha(page) -> tuple[str, bytes]:
     img_bytes = base64.b64decode(src.split(",", 1)[1])
 
     # 第一層：本地 ddddocr，4 ms、不出網、不會 503、不會被政策拒答。
-    # 實測 30 張真圖 30/30。解不出來（含沒裝 ddddocr）才往下走 AI。
+    # 解不出來（含沒裝 ddddocr）才往下走 AI。
     local = captcha_ocr.recognize(img_bytes)
     if local:
         return local, img_bytes
@@ -136,7 +136,7 @@ async def _solve_captcha(page) -> tuple[str, bytes]:
         "請只回傳 5 個數字，不要有空白、標點或其他字。"
     )
     # 「必須是 5 位數字」當驗證器往下傳，而不是拿到答案才自己檢查：模型拒絕辨識
-    # 驗證碼時是 HTTP 200 回一段道歉文（實測 gemini-3.5-flash 就會），事後檢查只能
+    # 驗證碼時是 HTTP 200 回一段道歉文（例如 gemini-3.5-flash），事後檢查只能
     # 讓這一輪失敗，退避鏈上還認得出驗證碼的模型永遠輪不到。
     # allow_codex=False：codex 政策上一律拒絕驗證碼，退過去純粹是白等。
     raw = vision_text(
@@ -182,8 +182,8 @@ _SEARCH_KEYWORDS = ["發票清單", "查詢發票", "載具明細", "發票號�
 def _login_landing(url: str, body: str) -> str:
     """登入後落在哪：'search' 查詢頁／'elsewhere' 已登入但在別頁／'unknown'。
 
-    'elsewhere' 是實際踩過的坑：財政部會把帳號導到「資料設定／變更驗證碼(密碼)」
-    (btc508w)，登入其實成功，只是頁上沒有查詢關鍵字——舊邏輯當未知狀態重試到死。
+    'elsewhere'：財政部會把帳號導到「資料設定／變更驗證碼(密碼)」
+    (btc508w)，登入其實成功，只是頁上沒有查詢關鍵字——當成未知狀態會重試到死。
     """
     if any(kw in body for kw in _SEARCH_KEYWORDS):
         return "search"
@@ -195,8 +195,8 @@ def _login_landing(url: str, body: str) -> str:
 async def _wait_landing(page, url: str, tries: int = 20, interval_ms: int = 1000) -> tuple[str, str]:
     """讀 body 判斷落地頁，回 (landing, body)。
 
-    /portal/btc/ 的 SPA 登入後內容是慢慢畫出來的（踩過：已登入卻因 body 還空白判成 unknown
-    → 重試 → 第二次已登入等不到登入頁逾時）→ 輪詢到不是 unknown 或次數用完。其他網址只讀一次。
+    /portal/btc/ 的 SPA 登入後內容是慢慢畫出來的，body 可能還空白（判成 unknown 會重試，
+    而已登入的第二次等不到登入頁會逾時）→ 輪詢到不是 unknown 或次數用完。其他網址只讀一次。
     """
     polling = "/portal/btc/" in url
     body = ""
@@ -233,7 +233,7 @@ async def _goto_search_page(page) -> str:
 
 
 async def _login(page, phone: str, password: str) -> bool:
-    """成功回 True；全部失敗拋 LoginFailed（不再回 False——回 False 會被當成「0 張」）。"""
+    """成功回 True；全部失敗拋 LoginFailed（不回 False——回 False 會被當成「0 張」）。"""
     attempts: list[str] = []
     for attempt in range(1, MAX_CAPTCHA_RETRIES + 1):
         print(f"🔐 登入嘗試 {attempt}/{MAX_CAPTCHA_RETRIES}")
@@ -453,10 +453,9 @@ async def _fetch_detail_items(page) -> list[dict]:
 async def _close_detail_modal(page) -> None:
     """關閉發票明細 modal(若有開)。
 
-    這是整支爬蟲「只抓得到第一筆明細」的根因修正:明細是開在同一個 SPA URL 上的
-    Bootstrap modal,舊版用 page.go_back() 想退出 → 反而把整個清單頁帶走,
-    後續發票的號碼連結就消失(或被 modal backdrop 擋住點不到)→ items 空 → 退化成
-    只寫「賣方+總額」一筆。正解是關 modal(不換頁)再點下一筆。
+    明細是開在同一個 SPA URL 上的 Bootstrap modal,用 page.go_back() 退出會把整個
+    清單頁帶走,後續發票的號碼連結就消失(或被 modal backdrop 擋住點不到)→ items 空
+    → 退化成只寫「賣方+總額」一筆。所以要關 modal(不換頁)再點下一筆。
     """
     try:
         if await page.locator(_DETAIL_MODAL).count() == 0:
@@ -540,7 +539,7 @@ async def _parse_current_page(page, since_date: str,
 
     # 點進每筆抓明細:明細開在 Bootstrap modal(同一 SPA URL,不換頁)。
     # 流程 = 點號碼 → 等 modal 開 → 讀品項 → 關 modal → 下一筆。
-    # 嚴禁 go_back():那會把 SPA 清單整個帶走,只剩第一筆抓得到明細(本次修正的根因)。
+    # 嚴禁 go_back():那會把 SPA 清單整個帶走,只剩第一筆抓得到明細。
     for inv in invoices:
         try:
             link = page.locator(f"a:text-is('{inv['invoice_no']}')").first
@@ -564,8 +563,8 @@ async def _parse_current_page(page, since_date: str,
     return invoices, stop
 
 
-# 真正的翻頁是 Bootstrap 分頁 a.page-link「下一頁」(父 li 未 disabled);舊版用
-# button[aria-label]/rel=next 從來沒中過,所以多頁時只抓得到第 1 頁。
+# 真正的翻頁是 Bootstrap 分頁 a.page-link「下一頁」(父 li 未 disabled);
+# 頁面上沒有 button[aria-label]/rel=next 這類翻頁元素。
 _NEXT_PAGE_FIND = r"""() => {
     const a = Array.from(document.querySelectorAll('a.page-link')).find(a =>
         a.textContent.includes('下一頁') && !(a.closest('li')?.classList.contains('disabled')));

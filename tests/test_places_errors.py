@@ -1,8 +1,8 @@
 """Places I/O 邊界的錯誤語意與 log。
 
-背景：2026-09 專案免費試用到期被 Google 停用，Places 每一發都 403，
-而**伺服器 log 一行都沒有**——只有 Discord 上的補件卡片寫著「查 Google 失敗」。
-故障存在了好幾天沒人知道。這組測試釘住兩件事：
+背景：Google 停用專案（例如免費試用到期）時 Places 每一發都 403；
+若**伺服器 log 一行都沒有**，就只有 Discord 上的補件卡片寫著「查 Google 失敗」，
+故障很久都不會被發現。這組測試釘住兩件事：
 ① 403 的原因要在 log 裡講人話（尤其「金鑰沒問題、是專案層級」這個最難猜的情況）；
 ② 「服務掛了」與「Google 真的查無此店」不能長得一樣。
 """
@@ -56,9 +56,9 @@ def test_service_disabled_is_named():
 
 
 def test_bare_403_points_at_project_not_the_key():
-    """今天踩到的那個：金鑰通過全部檢查，Google 卻只回一句沒有 reason 的拒絕。
+    """金鑰通過全部檢查，Google 卻只回一句沒有 reason 的拒絕。
 
-    這時最容易走錯的路是去翻金鑰設定（我們就走了一次）。log 要直接說「不是金鑰」。
+    這時最容易走錯的路是去翻金鑰設定。log 要直接說「不是金鑰」。
     """
     body = json.dumps({"error": {"code": 403,
                                  "message": "The caller does not have permission",

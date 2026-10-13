@@ -1,5 +1,5 @@
-"""信件規則引擎整合修正：歷史計畫卡自動發、執行鈕帶卡號與規則指紋、消失的信、斷線不丟紀錄、
-unsub／顯示名稱存 DB、migration、並行保護、確認卡分類分卡與封數、確認卡逐卡記已發、小修。"""
+"""信件規則引擎整合行為：歷史計畫卡自動發、執行鈕帶卡號與規則指紋、消失的信、斷線不丟紀錄、
+unsub／顯示名稱存 DB、migration、並行保護、確認卡分類分卡與封數、確認卡逐卡記已發。"""
 import asyncio
 import re
 from contextlib import contextmanager
@@ -781,7 +781,7 @@ def test_add_suggestions_依類別排序_各類別各自分卡(monkeypatch):
     items = ([(f"p{i}@x.example", "p", "promo", "ai") for i in range(27)]
              + [(f"l{i}@x.example", "p", "login", "builtin") for i in range(3)])
     cards = repo.add_suggestions(db, items)
-    assert cards == ["s8", "s9"]                     # 每類一張整批核可卡（不再 25 條一張）
+    assert cards == ["s8", "s9"]                     # 每類一張整批核可卡（不是每 25 條一張）
     by = {}
     for r in db.added:
         by.setdefault(r.card, set()).add(r.category)
@@ -915,7 +915,7 @@ def test_舊卡提醒一行(monkeypatch):
     assert len(got) == 1 and "還有 3 張確認卡沒處理：s3、s5、s7" in got[0][0].description
 
 
-# ── AC9：小修 ─────────────────────────────────────────────────────
+# ── AC9：手動指定選項與計畫卡文字 ─────────────────────────────────
 
 def test_手動指定不提供_keep_inbox():
     async def go():

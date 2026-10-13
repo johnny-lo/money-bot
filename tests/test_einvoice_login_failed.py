@@ -1,6 +1,6 @@
 """登入全敗必須「看得見」：拋 LoginFailed，補拓記失敗、高水位不推進。
 
-背景：_scrape_carrier 原本在 _login 回 False 時 `return []` → 呼叫端看到「抓 0 張」
+背景：若 _scrape_carrier 在登入失敗時 `return []` → 呼叫端看到「抓 0 張」
 當成功 → 高水位照推，那幾天的發票永久漏抓，而且自動修復的感測器數不到失敗。
 """
 import asyncio

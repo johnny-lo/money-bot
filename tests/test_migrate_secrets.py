@@ -101,7 +101,7 @@ def test_compose_lists_same_secrets():
 
 
 def test_probe_reads_credentials_from_secrets_files():
-    """autofix/bin/probe 的 einvoice 帳密來自 secrets 檔，不再 grep .env。"""
+    """autofix/bin/probe 的 einvoice 帳密來自 secrets 檔，不 grep .env。"""
     text = (SCRIPT.parent.parent / "autofix" / "bin" / "probe").read_text(encoding="utf-8")
     assert ".config/money-bot/secrets" in text
     assert "einvoice_phone_" in text and "einvoice_password_" in text

@@ -5,13 +5,13 @@
 # user timer 每 5 分鐘叫一次。
 #
 # ─────────────────────────────────────────────────────────────────────────────
-# 為什麼需要它（2026-08-29 的事故）
+# 為什麼需要它
 #
-#   主機重開機後：docker ps 全 Up、curl localhost:8000 回 200、
+#   主機重開機後可能出現：docker ps 全 Up、curl localhost:8000 回 200、
 #   `tailscale status` Online 無警告、`tailscale funnel status` 顯示 "Funnel on"
 #   ——**每一項本地指標都是綠的，可是外面的裝置完全連不上**（TLS 回
-#   `no peer certificate available`）。根因：Funnel 的**設定**活過了重開機，
-#   但**入口註冊**沒有；`funnel status` 讀的是設定，所以它照樣說 on。
+#   `no peer certificate available`）。原因：Funnel 的**設定**會活過重開機，
+#   但**入口註冊**不一定；`funnel status` 讀的是設定，所以它照樣說 on。
 #
 #   最陰險的是：在主機上 `curl https://<name>.ts.net/...` 也會回 200——
 #   **MagicDNS 把它解析到 tailnet 內網 IP（100.x），根本沒走 Funnel**。
@@ -100,7 +100,7 @@ _gt_zero() { awk -v v="${1:-0}" 'BEGIN { exit !(v + 0 > 0) }'; }
 # 只是把好的東西關掉再打開（而且會中斷正在用的人）。
 # 分界線是 **TLS 有沒有握手成功**（curl 的 time_appconnect）：
 #   握手成功 → 憑證是 Funnel 發的，入口註冊正常 → 問題在 app。
-#   握手沒成功 → 正是 2026-08-29 那次的簽名（`no peer certificate available`）→ 入口沒註冊。
+#   握手沒成功 → 入口沒註冊的簽名（`no peer certificate available`）。
 classify() {
     local exit_code="$1" http_code="${2:-000}" appconnect="${3:-0}"
     if [ "$exit_code" -eq 0 ]; then
@@ -259,7 +259,7 @@ check_once() {
 # ── 修復 ─────────────────────────────────────────────────────────────────────
 
 # 重掛 Funnel：先關再開。**只有 class=tunnel:* 才會走到這裡。**
-# 為什麼要先 off：這次事故的形狀就是「設定還在、入口註冊沒了」，直接再 on 一次
+# 為什麼要先 off：這種故障的形狀是「設定還在、入口註冊沒了」，直接再 on 一次
 # 對 tailscaled 來說是 no-op（設定沒變），要先把設定拿掉才會真的重新註冊。
 repair_funnel() {
     local rc=0

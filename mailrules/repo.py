@@ -371,8 +371,8 @@ def _valued_rows(db) -> list:
 def add_valued(db, domains: dict[str, str]) -> list[str]:
     """domains＝這次（從所有還在信箱的信）學到的 {網域: 主旨樣式}。只新增表裡完全沒有的網域，一律 pending、
     每 VALUED_CARD_SIZE 個一張卡；回傳新開的卡號。
-    沒卡號的 pending 列是舊版規則學的（欄位 migration 補成 pending）：這次還學得到的補上卡，學不到的刪掉
-    （當初是弱字眼學的，從沒生效、也沒給本人看過）。"""
+    沒卡號的 pending 列（欄位 migration 補成 pending）：這次還學得到的補上卡，學不到的刪掉
+    （它們沒發過確認卡、從未生效）。"""
     rows = _valued_rows(db)
     have = {r.domain for r in rows}
     legacy = [r for r in rows if r.card is None and r.status == "pending"]

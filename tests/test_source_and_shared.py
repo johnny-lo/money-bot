@@ -1,8 +1,8 @@
 """來源標記（source）與共同分攤（shared）的寫入契約。
 
 背景：兩個人共用一套帳，主力資料是兩組電子發票載具。載具編號在 einvoice 同步時
-就知道（`for label, phone, password in carriers`），但原本沒被帶進 _save_invoices，
-就這樣丟掉了——接回去之後「這筆是誰花的」對發票資料是**全自動**的。
+就知道（`for label, phone, password in carriers`），帶進 _save_invoices 存起來，
+「這筆是誰花的」對發票資料就是**全自動**的。
 
 shared 的設計：DB 存**全額**（房租 12,000），算「我的份」時才除以 2。
 這樣家庭總支出仍然正確，日後改分攤比例也不必重寫歷史資料。

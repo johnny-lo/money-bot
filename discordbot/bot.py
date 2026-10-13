@@ -33,7 +33,7 @@ class MoneyBot(discord.Client):
                                cardrecon_ui.IgnoreAllButton,  # 刷卡比對清單卡
                                mailrules_ui.ConfirmButton, mailrules_ui.SenderRejectSelect,
                                mailrules_ui.SenderAssignSelect, mailrules_ui.ExecuteButton,  # 信件規則確認卡
-                               mailrules_ui.RejectSelect, mailrules_ui.AssignSelect,  # 已發出的舊版逐條卡
+                               mailrules_ui.RejectSelect, mailrules_ui.AssignSelect,  # 已發出的逐條格式確認卡
                                mailrules_ui.ValuedConfirmButton, mailrules_ui.ValuedRejectSelect)  # 重視公司確認卡
         await self.tree.sync()
         self._autofix_outbox.start()
@@ -86,7 +86,7 @@ class MoneyBot(discord.Client):
             if not images:
                 return
             if not rec_chan:
-                # 退路：未設記帳頻道 → 保留舊的「任意頻道圖片記帳」行為
+                # 退路：未設記帳頻道 → 任意頻道的圖片都記帳
                 await ingest_handlers.do_image_recording(message, images[0])
                 return
             if ch_id == rec_chan:

@@ -1,7 +1,7 @@
 """影像辨識退避鏈的測試（純單元，不出網、不真的跑 codex）。
 
-真實限制（已實測，決定了這條鏈的形狀）：
-- codex CLI 0.148.0 支援 `-i/--image`，一般照片抽欄位沒問題（實測 5.9 秒正確回 JSON）。
+真實限制（決定了這條鏈的形狀）：
+- codex CLI 0.148.0 支援 `-i/--image`，一般照片抽欄位沒問題。
 - 但 codex **政策上拒絕辨識 CAPTCHA**（回「抱歉，我無法協助破解驗證碼。」），
   所以 CAPTCHA 只能靠「換 Gemini 模型」退避，不能退到 codex。
 """
@@ -263,7 +263,7 @@ def test_vision_skips_codex_when_disallowed(monkeypatch):
 def test_vision_treats_unusable_answer_as_failure(monkeypatch):
     """模型「HTTP 200 但回一段拒絕文字」也算失敗，要換下一個模型。
 
-    實測：gemini-3.5-flash 對 CAPTCHA 會回「我無法協助辨識或解密驗證碼（CAPTCHA）圖片」，
+    例如 gemini-3.5-flash 對 CAPTCHA 會回「我無法協助辨識或解密驗證碼（CAPTCHA）圖片」，
     這不是例外、是正常回應。只靠 try/except 退避的話，這段廢話會被當成答案傳回呼叫端，
     退避等於沒作用——CAPTCHA 就是這樣一整串模型都「成功」卻登不進去。
     """
@@ -336,7 +336,7 @@ def test_captcha_solver_disallows_codex(monkeypatch):
 
 
 def test_photo_and_food_use_vision_text():
-    """拍照記帳 / 美食截圖走 vision_text（可退 codex），不再直接呼叫 gemini_image。"""
+    """拍照記帳 / 美食截圖走 vision_text（可退 codex），不直接呼叫 gemini_image。"""
     import inspect
     import core
     import food.extract as fx

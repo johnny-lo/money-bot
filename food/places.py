@@ -1,8 +1,8 @@
 """Google Places API (New) 薄封裝。I/O 邊界。
 
-**失敗要看得見**：2026-09 專案免費試用到期被 Google 停用，這裡每一發都 403，
-但伺服器 log 一行都沒有——故障只出現在 Discord 的補件卡片上，撐了好幾天沒人發現。
-所以現在這一層做兩件事：把 Google 的回應翻成人話印進 log（含連續失敗次數＝壞多久了），
+**失敗要看得見**：Google 停用專案（例如免費試用到期）時每一發都 403，
+若 log 沒有紀錄，故障只會出現在 Discord 的補件卡片上，很久都不會被發現。
+所以這一層做兩件事：把 Google 的回應翻成人話印進 log（含連續失敗次數＝壞多久了），
 並用 `PlacesUnavailable` 讓呼叫端分得出「服務掛了」與「Google 真的查無此店」。
 """
 import os
@@ -35,7 +35,7 @@ class PlacesUnavailable(RuntimeError):
         self.status = status
         self.reason = reason
         # detail＝給維運看的完整診斷（進 log）。訊息本身要短，因為它會出現在
-        # Discord 卡片上給兩個人看——「帳單失效」是我的問題，不是使用者的待辦。
+        # Discord 卡片上給兩個人看——「帳單失效」是維運的問題，不是使用者的待辦。
         self.detail = detail or message
 
 
@@ -56,8 +56,8 @@ def describe_api_error(status: int, body: str) -> tuple[str | None, str]:
     """把 Google 的錯誤回應翻成 (reason, 人話)。純函式，可單測。
 
     最重要的是**沒有 reason 的那一種**：金鑰通過了全部檢查、卻在服務層被拒，
-    Google 只回一句 "The caller does not have permission"。2026-09 就是這個，
-    而它最容易把人騙去翻金鑰設定（我們真的翻了一輪才發現是試用到期）。
+    Google 只回一句 "The caller does not have permission"（例如試用到期），
+    而它最容易把人騙去翻金鑰設定。
     """
     reason = None
     message = ""
@@ -217,7 +217,7 @@ def fetch_reviews(place_id: str) -> list[dict]:
         _note_success()
         return data.get("reviews") or []
     except Exception as ex:
-        # 事後加值失敗不該擋入庫（維持原行為），但不能再靜悄悄
+        # 事後加值失敗不該擋入庫，但不能靜悄悄
         _unavailable("抓評論", ex)
         return []
 

@@ -111,7 +111,7 @@ def test_clear_只刪_counting(monkeypatch, env):
     assert s2.deleted == []
 
 
-# ── 最終審查的修正 ────────────────────────────────────────────
+# ── 鎖與派發失敗 ──────────────────────────────────────────────
 
 class LockingSession(FakeSession):
     def __init__(self, rows=None):

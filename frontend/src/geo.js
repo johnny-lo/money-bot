@@ -6,10 +6,10 @@
 // 使用者看到就永遠不會按那一檔，等於白做。只有五檔，查表比公式誠實也準確。
 export const RANGES = [
   { km: 1, label: '1 km', minutes: 5 },    // 含紅綠燈與停車
-  { km: 3, label: '3 km', minutes: 10 },   // 中壢區內
+  { km: 3, label: '3 km', minutes: 10 },   // 同一區內
   { km: 5, label: '5 km', minutes: 15 },
-  { km: 10, label: '10 km', minutes: 20 }, // 中壢→桃園市區
-  { km: 30, label: '30 km', minutes: 40 }, // 中壢→竹北約 30 分、→台北約 50 分
+  { km: 10, label: '10 km', minutes: 20 }, // 到鄰近市區
+  { km: 30, label: '30 km', minutes: 40 }, // 鄰縣市約 30 分、更遠的都會約 50 分
 ]
 
 export const DEFAULT_RANGE_KM = 5

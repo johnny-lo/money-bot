@@ -309,7 +309,7 @@ class SenderRejectSelect(discord.ui.DynamicItem[discord.ui.Select],
 
 
 class RejectSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"mailrules:reject:(?P<card>[\w-]+)"):
-    """舊版（每 25 條一張）確認卡的逐條拒絕下拉，value＝規則 id；只為了已經發出去的舊卡還按得動，新卡不再用。"""
+    """逐條格式（每 25 條一張）確認卡的拒絕下拉，value＝規則 id；只讓已經發出去的這種卡還按得動，新卡不用。"""
     def __init__(self, card: str, options: list[discord.SelectOption]):
         super().__init__(discord.ui.Select(placeholder="勾選不要照建議的樣式", min_values=1,
                                            max_values=len(options), options=options,
@@ -411,7 +411,7 @@ class SenderAssignSelect(discord.ui.DynamicItem[discord.ui.Select],
 
 
 class AssignSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"mailrules:assign:(?P<rid>\d+)"):
-    """舊版逐條手動指定（value＝規則 id）；只為了已經發出去的舊訊息還按得動，新卡用 SenderAssignSelect。"""
+    """逐條手動指定（value＝規則 id）；只讓已經發出去的這種訊息還按得動，新卡用 SenderAssignSelect。"""
     def __init__(self, rid: int, label: str = ""):
         super().__init__(discord.ui.Select(placeholder=(label or f"規則 {rid}")[:144] + " → 選類別",
                                            min_values=1, max_values=1, options=_assign_options(),

@@ -73,7 +73,7 @@ def from_url(url: str, *, caption: str = "") -> tuple[dict | None, str]:
     流程:
       1) extract.from_url(yt-dlp 主 + og fetch 備援)→ blob
       2) caption + blob 餵 extract.from_text(codex)→ fields
-      3) 若 fields['name'] 為空 → 走深度振查(Task 7B 的 deep_extract_via_codex)
+      3) 若 fields['name'] 為空 → 走深度振查(extract.deep_extract_via_codex)
       4) _from_fields → search_text + upsert + 雷點 best-effort
     """
     platform = classify_platform(url)
@@ -211,8 +211,8 @@ def _resolve_one(fields: dict, status: str, content: str) -> dict:
     try:
         place = search_text(query)
     except PlacesUnavailable:
-        # 原本這裡是 `except Exception: place = None`，於是服務掛掉時
-        # 整批都變成「❌ 找不到（加上地區再重貼）」——照做一百次也不會成功。
+        # 服務掛掉不能跟查無此店混在一起，否則整批都變成「❌ 找不到（加上地區再重貼）」
+        # ——照做一百次也不會成功。
         # search_text 已經印過 log，這裡只負責把「不是使用者的錯」帶出去。
         place = None
         unavailable = True

@@ -116,7 +116,7 @@ try:
             ("mail_messages", "from_name", "ALTER TABLE mail_messages ADD COLUMN from_name VARCHAR"),
             ("mail_state", "plan_posted_card", "ALTER TABLE mail_state ADD COLUMN plan_posted_card VARCHAR"),
             ("mail_rules", "posted_at", "ALTER TABLE mail_rules ADD COLUMN posted_at TIMESTAMP"),
-            # 既有列（舊規則學的）變 pending、沒卡號：repo.add_valued 會把強字眼還學得到的補上卡、其餘刪掉
+            # 加欄位前就有的列變 pending、沒卡號：repo.add_valued 會把強字眼還學得到的補上卡、其餘刪掉
             ("mail_valued_domains", "status", "ALTER TABLE mail_valued_domains ADD COLUMN status VARCHAR DEFAULT 'pending' NOT NULL"),
             ("mail_valued_domains", "card", "ALTER TABLE mail_valued_domains ADD COLUMN card VARCHAR"),
             ("mail_valued_domains", "posted_at", "ALTER TABLE mail_valued_domains ADD COLUMN posted_at TIMESTAMP"),
@@ -311,7 +311,7 @@ async def startup_event():
     discord_token = get_secret("DISCORD_BOT_TOKEN")
     if discord_token:
         # 監管式啟動：暫時性失敗自動重試（見 discordbot/bot.py:run_discord_bot），
-        # 不再像舊版無監管 task 一拋例外就永久離線。
+        # 不會一拋例外就永久離線。
         asyncio.create_task(run_discord_bot(discord_token))
         print("🎮 Discord Bot 啟動中...")
     else:

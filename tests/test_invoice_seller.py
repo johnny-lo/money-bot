@@ -73,7 +73,7 @@ def test_同一張發票的每個品項都帶賣方(fake):
 
 
 def test_抓不到明細的保底路徑也會存下賣方(fake):
-    """保底那筆本來就用賣方當品名，卻沒存進 seller 欄——最不該漏的一條路。"""
+    """保底那筆用賣方當品名，seller 欄也要存——最不該漏的一條路。"""
     einvoice._save_invoices([_inv(items=[])])
     assert len(fake.added) == 1
     assert fake.added[0].seller == SELLER

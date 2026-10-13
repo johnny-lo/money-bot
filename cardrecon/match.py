@@ -49,7 +49,7 @@ def _split(amount: int, at: datetime, grps: list[TxGroup]) -> list[str] | None:
 
 def match(charges: list[tuple[int, Charge]], groups: list[TxGroup]) -> dict[int, str]:
     """有刷卡時間的先用時間對發票（單張同金額 → 多張合計），全部對完才輪到日期差；
-    沒時間的刷卡（中信）、沒時間的群組（手記帳、舊發票）只走日期差，跟原本一樣。"""
+    沒時間的刷卡（中信）、沒時間的群組（手記帳、舊發票）只走日期差。"""
     by_amount: dict[int, list[TxGroup]] = {}
     for grp in groups:
         by_amount.setdefault(grp.amount, []).append(grp)

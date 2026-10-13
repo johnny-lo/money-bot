@@ -1,7 +1,7 @@
 """PWA →報表頁的入口：短效 token 換發，以及「不能自我繁殖」那道不變式。
 
-兩層認證原本的守衛是：只有短效 token 能換長效裝置 token（routes/device.py），
-所以洩漏的裝置 token 無法自我繁殖。現在 PWA 要用裝置 token 去鑄短效 token 開報表頁，
+兩層認證的守衛是：只有短效 token 能換長效裝置 token（routes/device.py），
+所以洩漏的裝置 token 無法自我繁殖。PWA 會用裝置 token 去鑄短效 token 開報表頁，
 若不加限制就形成 device → short → device 的環，那道守衛就白寫了。
 解法是短效 token 帶 can_mint_device 旗標，PWA 鑄的那顆是 False。
 """
