@@ -129,6 +129,25 @@
   分期保留期數：「富邦EC分期03-03」顯示成「富邦EC（分期 3/3）」。
 - **已列過的不會重列**；舊卡的按鈕一直有效。解密失敗或解析 0 筆的信會另發警告卡（銀行改版或密碼變了的訊號）。
 
+### 信件整理（Gmail 歷史整理＋每日整理）
+- **信箱**：`.env` 的 `GMAIL_ADDRESS` 那個 Gmail（定位是正式對外聯絡＋求職）。**只讀信頭、不讀內文**；寫入只有三種：
+  建標籤、加／拿掉標籤（含移出收件匣）、丟垃圾桶（30 天內救得回，**從不永久刪除**）。
+- **分類**：寄件者＋主旨樣式（去掉 Re/Fwd、數字遮成 #、本人姓名遮掉）→ 13 類（安全警示、寄給自己、稅務保單、學校、
+  刷卡扣款、收據訂單、帳單、旅遊、公司系統通知、職缺推薦、LinkedIn 社群、登入驗證碼、推銷電子報），各類有保留期限
+  （例如推銷 14 天後丟、金融三類滾動 2 年、學校只加標籤移出）。
+- **安全網（命中就留收件匣、不自動處理）**：
+  1. 主旨有求職字眼（面試、邀請、錄取、offer…）的那一封，任何規則都蓋不掉；
+  2. **重視的公司**：寄過「面試、面談、錄取、interview、offer letter…」這類**強**字眼的公司網域，先發「🛡 新的重視公司」確認卡，
+     **本人確認才生效**；群發信（有退訂連結）與學校網域不學、也不保護；
+  3. **像真人寄的**：免費信箱（gmail、yahoo…）或「名.姓」形式、且沒有退訂連結的地址；no_reply、系統代號、品牌帳號不算。
+- **確認卡**：新的「寄件者＋樣式」由內建規則或 AI（codex）預填類別，**每類一張整批核可卡**：列封數最多的 25 個寄件者，
+  下拉勾掉不是這類的，按「✅ 整類確認」其餘一起生效；被勾掉的寄件者再用下拉手動指定類別。完整名單看 `/信件名單 層:你的規則`
+  或手機 PWA 📬（搜尋框打類別名稱就能篩）。只有本人能按。
+- **歷史整理**：卡都處理完會發「🗂 歷史信件整理計畫」卡（各類要加標籤／移出／丟幾封＋範例主旨），本人按「🚀 執行歷史整理」才動信；
+  計畫卡發出後又確認了規則或重視公司，舊的執行鈕會回「計畫已過期」。
+- **每日整理（23:30）**：抓新信頭→分類→到期的動作照做（歷史整理完成前只分類不動信）→每日報告卡（含安全網留下的信）、
+  每日職缺摘要、週日推銷摘要；新的寄件者樣式照樣發整批核可卡。頻道：`MAIL_CHANNEL_ID`。
+
 ## 環境變數 (.env) 與機密 (secrets)
 
 設定分兩類：**一般設定**放 `.env`（下表）；**12 個機密**（`LINE_CHANNEL_SECRET`、`LINE_CHANNEL_ACCESS_TOKEN`、`DISCORD_BOT_TOKEN`、`GEMINI_API_KEY`、`GOOGLE_PLACES_SERVER_KEY`、`DATABASE_URL`、`EINVOICE_PHONE_1/2`、`EINVOICE_PASSWORD_1/2`、`GMAIL_APP_PASSWORD`、`NATIONAL_ID`）放 repo 外的 `~/.config/money-bot/secrets/<小寫名>`（目錄 700、檔案 600），由 compose `secrets:` 掛進容器 `/run/secrets/`，程式經 `app_secrets.get_secret()` 讀，不會出現在容器環境變數。選填的機密沒值也要有空檔（搬遷腳本會建）。下表標 🔐 的就是機密。
@@ -164,7 +183,11 @@
 | 🔐 `EINVOICE_PASSWORD_1` | 第一組載具：驗證碼（密碼） |
 | 🔐 `EINVOICE_PHONE_2` | 第二組載具（選填） |
 | 🔐 `EINVOICE_PASSWORD_2` | 第二組載具密碼（選填） |
-| `GMAIL_ADDRESS` | 刷卡比對用的 Gmail 帳號（不是機密；密碼走 🔐 `GMAIL_APP_PASSWORD`、PDF 密碼走 🔐 `NATIONAL_ID`）|
+| `GMAIL_ADDRESS` | 刷卡比對與信件整理用的 Gmail 帳號（不是機密；密碼走 🔐 `GMAIL_APP_PASSWORD`、PDF 密碼走 🔐 `NATIONAL_ID`）|
+| `MAIL_CHANNEL_ID` | 信件整理的 Discord 頻道（確認卡、計畫卡、每日報告）；沒設就什麼都不發 |
+| `MAIL_OWNER_NAME` | 本人姓名（主旨樣式遮掉它，也不送給 AI）；只放 `.env`，不進 repo |
+| `MAIL_SELF_ADDRESSES` | 本人其他信箱（逗號分隔）：從這些地址寄來的歸「寄給自己」 |
+| `MAIL_COMPANY_DOMAINS` | 目前公司的網域（逗號分隔）：不會被學成「重視的公司」，系統通知歸「公司系統通知」 |
 | `HEALTHCHECK_DISCORD_WEBHOOK` | 對外健康檢查的告警 webhook（選填，沒設就只寫 log）。**主機上的 `scripts/healthcheck.sh` 讀，不是容器讀** → 刻意不寫進 `docker-compose.yml` |
 | `HEALTHCHECK_FAIL_THRESHOLD` / `HEALTHCHECK_RESOLVER` / `HEALTHCHECK_FUNNEL_PORT` | 健康檢查微調（選填，預設 `2` / `1.1.1.1` / `8000`）|
 
