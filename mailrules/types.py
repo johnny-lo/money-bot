@@ -28,6 +28,14 @@ class Rule:
 
 
 @dataclass(frozen=True)
+class ValuedDomain:
+    domain: str                   # 重視的公司網域（安全網第 2 條）
+    pattern: str | None           # 當初學到它的主旨樣式
+    status: str                   # 'pending' | 'confirmed' | 'rejected'；只有 confirmed 會保護信
+    card: str | None = None       # 出現在哪張重視公司確認卡（'v<N>'，只增不減）
+
+
+@dataclass(frozen=True)
 class Verdict:
     category: str | None          # None = 未知
     reason: str
@@ -55,6 +63,9 @@ class RunReport:
     protected: list = field(default_factory=list)     # list[MailHeader]
     unknown_patterns: int = 0
     failed: int = 0
+    gone: int = 0                                     # 所有郵件已找不到的信（封數，略過不算失敗）
     job_digest: list = field(default_factory=list)    # list[MailHeader]
     promo_digest: list = field(default_factory=list)  # list[MailHeader]
     applied: bool = False                             # 歷史未完成前每日只分類不寫入 → False
+    new_cards: list = field(default_factory=list)     # 本次新開的確認卡號
+    skipped: bool = False                             # 另一個信件整理正在跑，這次整個略過

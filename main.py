@@ -19,6 +19,7 @@ from routes.device import router as device_router
 from routes.recipes import router as recipes_router
 from routes.videos import router as videos_router
 from routes.health import router as health_router
+from routes.mail import router as mail_router
 from line_handler import register_line_routes
 from discordbot import (
     run_discord_bot,
@@ -107,6 +108,24 @@ try:
                 "CREATE INDEX IF NOT EXISTS ix_food_places_district ON food_places (district)"
             ))
             _conn.commit()
+        # mail_messages / mail_state / mail_rules / mail_valued_domains 補欄位（消失的信、退訂連結、顯示名稱、
+        # 已發的歷史計畫卡、確認卡已發、重視公司的確認狀態與確認卡）
+        for _tbl, _col, _ddl in (
+            ("mail_messages", "gone_at", "ALTER TABLE mail_messages ADD COLUMN gone_at TIMESTAMP"),
+            ("mail_messages", "unsub", "ALTER TABLE mail_messages ADD COLUMN unsub BOOLEAN DEFAULT FALSE NOT NULL"),
+            ("mail_messages", "from_name", "ALTER TABLE mail_messages ADD COLUMN from_name VARCHAR"),
+            ("mail_state", "plan_posted_card", "ALTER TABLE mail_state ADD COLUMN plan_posted_card VARCHAR"),
+            ("mail_rules", "posted_at", "ALTER TABLE mail_rules ADD COLUMN posted_at TIMESTAMP"),
+            # 既有列（舊規則學的）變 pending、沒卡號：repo.add_valued 會把強字眼還學得到的補上卡、其餘刪掉
+            ("mail_valued_domains", "status", "ALTER TABLE mail_valued_domains ADD COLUMN status VARCHAR DEFAULT 'pending' NOT NULL"),
+            ("mail_valued_domains", "card", "ALTER TABLE mail_valued_domains ADD COLUMN card VARCHAR"),
+            ("mail_valued_domains", "posted_at", "ALTER TABLE mail_valued_domains ADD COLUMN posted_at TIMESTAMP"),
+            ("mail_valued_domains", "decided_at", "ALTER TABLE mail_valued_domains ADD COLUMN decided_at TIMESTAMP"),
+        ):
+            if _inspector.has_table(_tbl) and _col not in [c["name"] for c in _inspector.get_columns(_tbl)]:
+                _conn.execute(_text(_ddl))
+                _conn.commit()
+                print(f"✅ 已自動新增 {_tbl}.{_col} 欄位")
 except Exception as e:
     # ⚠️ 這裡吞例外：ALTER 失敗會靜默，然後每次 food 查詢都 SELECT 不存在的欄位而炸。
     #    重啟後務必 `docker logs money-bot | grep -E '✅|⚠️'` 確認。
@@ -124,6 +143,7 @@ app.include_router(food_map_router)
 app.include_router(device_router)
 app.include_router(recipes_router)
 app.include_router(videos_router)
+app.include_router(mail_router)
 app.include_router(health_router)   # /healthz：免 token，給主機上的 healthcheck.sh 從公開路徑打
 register_line_routes(app)
 
@@ -238,6 +258,33 @@ scheduler.add_job(
 scheduler.add_job(_weekly_pipeline, "cron", day_of_week="sun", hour=21, minute=0, id="weekly_pipeline")
 
 
+def _mail_daily():
+    """每日信件整理（時間見 mailrules.config.DAILY_RUN）：同步→分類→（歷史完成後）執行→報告；
+    還沒成功發出過的確認卡（規則確認卡＋重視公司卡）完整發、發過的舊卡一行提醒；歷史未完成、沒有待確認卡、
+    沒有待確認的重視網域、目前已確認規則＋網域的計畫還沒成功發過 → 自動發歷史計畫卡。
+    出錯時也補發還沒發出的確認卡（兩種都補）。"""
+    try:
+        from zoneinfo import ZoneInfo
+        from mailrules.run import run_daily
+        from discordbot.mailrules_ui import notify_daily, after_daily
+        today = datetime.now(ZoneInfo("Asia/Taipei")).date()
+        rep = run_daily(today)
+        notify_daily(rep)
+        after_daily(rep, today)
+    except Exception as e:
+        print(f"⚠️ 每日信件整理失敗：{e}")
+        try:
+            from discordbot.mailrules_ui import notify_failure as mail_notify_failure, post_unposted_cards
+            mail_notify_failure(str(e))
+            post_unposted_cards()          # 出錯前已存進 DB 的新確認卡（含重視公司卡）照發；沒發成功的下次每日再發
+        except Exception:
+            pass
+
+
+from mailrules.config import DAILY_RUN as _MAIL_RUN
+scheduler.add_job(_mail_daily, "cron", hour=_MAIL_RUN[0], minute=_MAIL_RUN[1], id="mail_daily")
+
+
 def _startup_catchup():
     """開機後背景補拓一次（機器關了又開時盡快追上）；開機只在有新發票或失敗才發卡。"""
     result = sync_with_backfill()
@@ -256,6 +303,7 @@ async def startup_event():
         "每日 00:05 固定收支 / "
         "週一~週六 21:00 發票補拓+Discord 通知 / "
         "週日 21:00 補拓→刷卡比對→分類→週報（每月第一個週日多推上月月結）/ "
+        f"每日 {_MAIL_RUN[0]:02d}:{_MAIL_RUN[1]:02d} 信件整理 / "
         "開機後 3 分鐘背景發票補拓"
     )
 

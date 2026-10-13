@@ -56,8 +56,13 @@ RETENTION = {
 JOB_KEYWORDS = re.compile(
     r"面試|面談|應徵|邀請|邀約|錄取|聘任|聘書|到職|報到|二面|複試|評量|測驗|個人資料填寫|"
     r"offer|interview|application status|recruit", re.I)
+# 安全網第 2 條只從「強」字眼學網域（弱字眼只保護那一封，見上面的 JOB_KEYWORDS）：
+# 試跑時「邀請／報到／測驗」讓旅遊網生日邀請函、外送平台邀請朋友、學校報到通知整個網域被留下
+STRONG_JOB_KEYWORDS = re.compile(
+    r"面試|面談|錄取|錄用|複試|二面|到職|聘書|聘任|interview|job offer|offer letter|application status", re.I)
+SCHOOL_SUFFIXES = (".edu", ".edu.tw")
 SYSTEM_LOCALPART = re.compile(
-    r"no-?reply|noreply|do-?not-?reply|service|news|info|notif|edm|mailer|system|support|alert|"
+    r"no[-_.]?reply|do[-_.]?not[-_.]?reply|service|news|info|notif|edm|mailer|system|support|alert|"
     r"marketing|promo|update|account|security|billing|bill|invoice|order|receipt|bounce|admin|team|hello|"
     r"contact|member|customer|cs$|^cs\b|ebill|statement", re.I)
 JOB_BOARD_DOMAINS = ("linkedin.com", "104.com.tw", "1111.com.tw", "cakeresume.com", "yourator.co")

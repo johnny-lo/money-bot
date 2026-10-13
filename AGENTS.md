@@ -626,6 +626,24 @@
 - **退款/繳款是負數**：解析時丟掉，但仍佔 line_no（line_no 跟 message_id 是唯一鍵，重解析要穩定）。
 - 兩家 PDF 密碼都是**身分證字號（英文大寫）**，存在 `national_id` secret。
 
+### 坑：信件規則引擎（mailrules/）寫入的幾個陷阱
+- **只靠「本次同步的信頭」帶 List-Unsubscribe**：DB 原本不存 unsub，舊電子報（寄件地址像個人，例如 jane@）
+  隔天從 DB 讀回時 unsub=False → 被安全網當成「像真人寄的」保護起來。**判斷要用到的信頭欄位一律存 DB**（unsub、from_name）。
+- **信不見了（使用者自己丟掉、刪掉）**：DB 的 uid 對不上 X-GM-MSGID，原本每天算一次失敗、永遠消不掉。
+  現在先唯讀 `UID SEARCH X-GM-MSGID` 找新 uid（找到也要再核對一次才寫），找不到記 `gone_at`、之後不再規劃。
+  **不准只看 UID 存不存在就寫**——UID 可能已指向別封信。
+- **寫到一半斷線**：原本 `apply` 一拋例外，已寫進 Gmail 的那幾批也沒記進 DB（下次又重做、計數也錯）。
+  現在每批各自 try，出事的那批整批算失敗、已完成的照常回傳並記錄。
+- **兩條流程同時寫**：每日排程和「🚀 執行歷史整理」可能同時跑 → `run._LOCK`；每日搶不到就略過、歷史搶不到就拋錯。
+- **「發了」不等於「送出了」**：`bridge.post_sync` 只把 coroutine 排進 bot loop 就回來（bot 沒 ready 直接 return、
+  送失敗只 print）。拿它的「呼叫完成」去記「計畫卡已發」「確認卡已發」，卡沒送出也被記成已發 → 之後只剩一行提醒、
+  永遠看不到卡。**要記已發的一律用 `post_sync_wait`（等 future 結果，True 才記）**，而且「發過沒」逐卡存 DB
+  （`mail_rules.posted_at`），不要從某次執行的回傳值（`rep.new_cards`）推導——那次執行中途拋例外，回傳值就沒了。
+- **核可會過期**：計畫卡發出後又確認卡／手動指定規則，舊執行鈕照新規則寫，範圍大於卡上的封數。執行鈕帶
+  「已確認規則集合的指紋」（`repo.rules_fingerprint`），`execute_history` 對不上就拒絕（同步後用的規則再核對一次）。
+- **「查不到」≠「不存在」**：核對 FETCH 回 NO、`UID SEARCH X-GM-MSGID` 回 NO／BAD／拋例外，都只是這次沒查成，
+  要整批算失敗；只有 SEARCH 回 OK 且空，才算 gone。
+
 ### 🔴 坑：repo 是公開的，測試樣本／spec 範例別抄真實個資
 - **怎麼發生的**：刷卡比對的計畫把實測拿到的刷卡紀錄（卡末四碼、訂閱金額、停車收據 UUID）直接寫成測試樣本，
   審查才發現。`johnny-lo/money-bot` 是 **PUBLIC**。

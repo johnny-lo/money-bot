@@ -210,6 +210,7 @@ class MailRule(Base):
     card = Column(String, nullable=True, index=True)
     created_at = Column(DateTime, default=func.now())
     confirmed_at = Column(DateTime, nullable=True)
+    posted_at = Column(DateTime, nullable=True)        # 這張確認卡真的發到 Discord 的時間（沒發成功＝NULL，下次完整重發）
 
 
 class MailMessage(Base):
@@ -228,15 +229,23 @@ class MailMessage(Base):
     in_inbox = Column(Boolean, nullable=False, default=True)
     labels_applied = Column(JSON, nullable=False, default=list)
     trashed_at = Column(DateTime, nullable=True)
+    gone_at = Column(DateTime, nullable=True)                          # 所有郵件找不到了（不再規劃、不算失敗）
+    unsub = Column(Boolean, nullable=False, default=False)             # 有 List-Unsubscribe
+    from_name = Column(String, nullable=True)                          # 寄件者顯示名稱
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 
 class MailValuedDomain(Base):
-    """重視的公司網域（寄過求職字眼主旨）；安全網第 2 條。屬個資，只存 DB。"""
+    """重視的公司網域（寄過強求職字眼主旨）；安全網第 2 條。屬個資，只存 DB。
+    新學到的一律 pending，本人在重視公司確認卡（v<N>）確認才 confirmed、才保護信；rejected 永遠不再學。"""
     __tablename__ = "mail_valued_domains"
     domain = Column(String, primary_key=True)
     first_seen = Column(DateTime, default=func.now())
     source_subject_pattern = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="pending")   # pending/confirmed/rejected
+    card = Column(String, nullable=True)                   # 重視公司確認卡號 v<N>（只增不減）
+    posted_at = Column(DateTime, nullable=True)            # 這張卡真的發到 Discord 的時間（沒發成功＝NULL，下次完整重發）
+    decided_at = Column(DateTime, nullable=True)           # 本人確認／拒絕的時間
 
 
 class MailState(Base):
@@ -246,3 +255,4 @@ class MailState(Base):
     uidvalidity = Column(Integer, nullable=True)
     last_uid = Column(Integer, nullable=True)
     history_done_at = Column(DateTime, nullable=True)
+    plan_posted_card = Column(String, nullable=True)   # 已成功發出的歷史計畫卡是哪一套已確認規則（規則指紋）
