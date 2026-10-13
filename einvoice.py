@@ -21,7 +21,7 @@ import re
 import base64
 import calendar
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from playwright.async_api import async_playwright, TimeoutError as PWTimeout
 
 import captcha_ocr
@@ -77,6 +77,38 @@ def format_item(line_item_name: str, seller: str) -> str:
         short = simplify_seller(seller)
         return f"{short}-{line_item_name}" if short else line_item_name
     return line_item_name
+
+
+# ─────────────────── 發票開立時間 ───────────────────
+
+def parse_invoice_time(s) -> time | None:
+    """明細 API 的 invoiceTime（"12:38:00"／"12:38"）→ time；空的、格式不對、超出範圍回 None。"""
+    m = re.fullmatch(r"\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\s*", s) if isinstance(s, str) else None
+    if not m:
+        return None
+    try:
+        return time(int(m[1]), int(m[2]), int(m[3] or 0))
+    except ValueError:
+        return None
+
+
+def invoice_datetime(date_str: str, t: time | None) -> datetime:
+    """發票日期 'YYYY-MM-DD' ＋ 開立時間；沒有時間就是當天 00:00（＝原本只存日期的行為）。"""
+    return datetime.combine(datetime.strptime(date_str, "%Y-%m-%d").date(), t or time())
+
+
+def _find_key(data, key: str):
+    """在 JSON（dict／list 任意巢狀）裡找第一個 key 的值；回應格式不是穩定契約，不寫死路徑。"""
+    if isinstance(data, dict):
+        if key in data:
+            return data[key]
+        data = list(data.values())
+    if isinstance(data, list):
+        for v in data:
+            found = _find_key(v, key)
+            if found is not None:
+                return found
+    return None
 
 
 # ─────────────────── 爬蟲（Playwright async）───────────────────
@@ -299,6 +331,33 @@ async def _login_attempt(page, phone: str, password: str, attempt: int) -> tuple
 
 
 _DETAIL_MODAL = ".modal_barcode_detail.show"
+_DETAIL_API = "getCarrierInvoiceData"   # 點明細時網頁打的 API，回傳裡有 invoiceTime
+_DETAIL_TIME_GRACE_S = 0.5              # modal 畫完、品項讀完後，最多再等明細回應多久
+
+
+def _wait_detail_response(page):
+    """點明細前先開始等 getCarrierInvoiceData 的回應（點了才等會漏）。開不起來就回 None——時間是加分項。"""
+    try:
+        waiter = asyncio.ensure_future(page.wait_for_event(
+            "response", predicate=lambda r: _DETAIL_API in r.url, timeout=10000))
+    except Exception:
+        return None
+    waiter.add_done_callback(lambda f: f.cancelled() or f.exception())   # 沒人收的逾時別噴警告
+    return waiter
+
+
+async def _detail_time(waiter) -> time | None:
+    """讀明細回應的 invoiceTime。沒回應、逾時、JSON 壞掉、格式不對一律 None，絕不拋例外。"""
+    if waiter is None:
+        return None
+    try:
+        done, _ = await asyncio.wait({waiter}, timeout=_DETAIL_TIME_GRACE_S)
+        if not done:
+            return None
+        data = await asyncio.wait_for(waiter.result().json(), timeout=_DETAIL_TIME_GRACE_S)
+        return parse_invoice_time(_find_key(data, "invoiceTime"))
+    except Exception:
+        return None
 
 
 async def _fetch_detail_items(page) -> list[dict]:
@@ -417,6 +476,7 @@ async def _parse_current_page(page, since_date: str) -> tuple[list[dict], bool]:
                 "date": inv_date,
                 "seller": seller,
                 "items": [],
+                "time": None,      # 開立時間：點明細時從 getCarrierInvoiceData 讀
             })
             i += 2
         else:
@@ -426,19 +486,25 @@ async def _parse_current_page(page, since_date: str) -> tuple[list[dict], bool]:
     # 流程 = 點號碼 → 等 modal 開 → 讀品項 → 關 modal → 下一筆。
     # 嚴禁 go_back():那會把 SPA 清單整個帶走,只剩第一筆抓得到明細(本次修正的根因)。
     for inv in invoices:
+        waiter = None
         try:
             link = page.locator(f"a:text-is('{inv['invoice_no']}')").first
             if await link.count() == 0:
                 continue
+            waiter = _wait_detail_response(page)
             await link.click()
             # 明細是開 modal,不是換 URL → 等 modal 真的出現
             await page.wait_for_selector(_DETAIL_MODAL, state="visible", timeout=10000)
             await page.wait_for_timeout(400)
             inv["items"] = await _fetch_detail_items(page)
-            print(f"     {inv['invoice_no']} | {inv['seller'][:14]} | {len(inv['items'])} 品項")
+            inv["time"] = await _detail_time(waiter)
+            print(f"     {inv['invoice_no']} | {inv['seller'][:14]} | {len(inv['items'])} 品項"
+                  f" | {inv['time'] or '無時間'}")
         except Exception as e:
             print(f"     ⚠️ {inv['invoice_no']} 抓明細失敗：{type(e).__name__}: {e}")
         finally:
+            if waiter is not None and not waiter.done():
+                waiter.cancel()
             # 不論成功與否都要把 modal 關掉,否則 backdrop 會擋住下一筆的點擊
             await _close_detail_modal(page)
     return invoices, stop
@@ -588,9 +654,10 @@ def _save_invoices(invoices: list[dict], source: str | None = None) -> tuple[int
         for inv in invoices:
             inv_no = inv["invoice_no"]
             if db.query(Transaction).filter(Transaction.invoice_no == inv_no).first():
-                continue  # 已抓過
+                _fill_time(db, inv)   # 已抓過：只補開立時間（舊發票只存了日期）
+                continue
             try:
-                inv_dt = datetime.strptime(inv["date"], "%Y-%m-%d")
+                inv_dt = invoice_datetime(inv["date"], inv.get("time"))
             except ValueError:
                 inv_dt = datetime.now()
 
@@ -635,6 +702,40 @@ def _save_invoices(invoices: list[dict], source: str | None = None) -> tuple[int
             new_inv += 1
         db.commit()
         return new_inv, new_items, added
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _fill_time(db, inv: dict) -> bool:
+    """已存在的發票補開立時間：DB 裡每列都還是「同一天 00:00」、這次又讀到時間才改。
+    日期不動（依日期的報表不受影響）、不新增、不動其他欄位。回有沒有補。"""
+    t = inv.get("time")
+    if t is None:
+        return False
+    try:
+        midnight = invoice_datetime(inv["date"], None)
+    except ValueError:
+        return False
+    rows = db.query(Transaction).filter(Transaction.invoice_no == inv["invoice_no"]).all()
+    if not rows or any(r.created_at != midnight for r in rows):
+        return False
+    for r in rows:
+        r.created_at = invoice_datetime(inv["date"], t)
+    return True
+
+
+def fill_invoice_times(invoices: list[dict]) -> int:
+    """只補時間、不新增發票（一次性補舊發票時間用）。回補了幾張。"""
+    if not invoices:
+        return 0
+    db = SessionLocal()
+    try:
+        n = sum(_fill_time(db, inv) for inv in invoices)
+        db.commit()
+        return n
     except Exception:
         db.rollback()
         raise

@@ -3,6 +3,7 @@
 - get/set_last_covered：單列狀態 repo（id=1）
 - build_month_plan：純函式，缺口 → 逐月查詢計畫
 - sync_with_backfill：orchestrator，複用 einvoice 的 scraper
+- backfill_invoice_times：一次性補舊發票的開立時間（只補時間，不新增、不動高水位）
 """
 from datetime import date, datetime, timedelta
 
@@ -10,11 +11,12 @@ import asyncio
 
 from database import SessionLocal
 from models import InvoiceSyncState
-from einvoice import _scrape_carrier, _save_invoices, _list_carriers, LoginFailed
+from einvoice import _scrape_carrier, _save_invoices, _list_carriers, fill_invoice_times, LoginFailed
 from autofix import sensors
 
 BACKFILL_CAP_DAYS = 60
 BOOTSTRAP_DAYS = 2
+TIME_BACKFILL_FROM = date(2026, 4, 21)   # 開始用載具記帳那天；更早的發票不補時間
 
 
 def build_month_plan(gap_start: date, today: date) -> list[dict]:
@@ -134,3 +136,29 @@ def sync_with_backfill(headless: bool = True, today: date | None = None) -> dict
         "retry_from": gap_start,
         "skipped_days": skipped,
     }
+
+
+def backfill_invoice_times(since: date = TIME_BACKFILL_FROM, today: date | None = None,
+                           headless: bool = True) -> int:
+    """一次性：每個載具從 since 逐月重查到今天，已存在的發票只補開立時間（還是 00:00 的才補）。
+    不新增發票、不動高水位。查不到的月份就算了；登入失敗換下一個載具（別燒登入次數）。回補了幾張。
+
+    在容器裡跑：python -c "import invoice_backfill as b; print(b.backfill_invoice_times())"
+    """
+    today = today or datetime.now().date()
+    plan = build_month_plan(since, today)
+    filled = 0
+    for label, phone, password in _list_carriers():
+        masked = f"{phone[:4]}***{phone[-2:]}"
+        for entry in plan:
+            try:
+                n = fill_invoice_times(_scrape_one(phone, password, entry, headless))
+                filled += n
+                print(f"  載具{label} {masked} {_entry_label(entry)}：補時間 {n} 張", flush=True)
+            except LoginFailed as e:
+                print(f"  載具{label} {masked}：❌ LoginFailed: {e}，跳過這個載具", flush=True)
+                break
+            except Exception as e:
+                print(f"  載具{label} {masked} {_entry_label(entry)}：⚠️ {type(e).__name__}: {e}", flush=True)
+    print(f"🕒 發票補時間：共 {filled} 張", flush=True)
+    return filled

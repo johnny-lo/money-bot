@@ -1,4 +1,5 @@
 """card_charges 的唯一 DB 存取層。upsert 是唯一寫入咽喉點；補記寫 transactions 也在這裡。"""
+import re
 from dataclasses import asdict, replace
 from datetime import date, datetime, time, timedelta
 
@@ -6,7 +7,7 @@ from sqlalchemy import or_
 
 from models import CardCharge, MerchantBrand, Transaction
 
-from . import hints, match as matcher
+from . import config, hints, match as matcher
 from .types import Charge, RecordResult, TxGroup, TxHint
 
 
@@ -107,9 +108,24 @@ def save_brands(db, mapping: dict[str, str]) -> int:
     return len(new)
 
 
+_INSTALLMENT = re.compile(r"\s*分期\s*(\d+)\s*[-－]\s*(\d+)\s*")
+
+
+def display_name(raw: str | None, brands: dict[str, str]) -> str | None:
+    """清單與補記共用的顯示名稱：店名換品牌（沒對照就原名）；原名含「分期NN-MM」就改成
+    「品牌（分期 N/M）」——品牌對照拿不到期數，原名才有。"""
+    name = (brands.get(raw) or raw) if raw else raw
+    m = _INSTALLMENT.search(raw or "")
+    if not m:
+        return name
+    base = _INSTALLMENT.sub("", name).strip()
+    tag = f"分期 {int(m[1])}/{int(m[2])}"
+    return f"{base}（{tag}）" if base else tag
+
+
 def branded(c: Charge, brands: dict[str, str]) -> Charge:
-    """店名換成品牌（沒有對照就維持原名）；原名仍留在 card_charges.merchant。"""
-    return replace(c, merchant=brands.get(c.merchant) or c.merchant)
+    """店名換成顯示名稱（品牌＋分期期數）；原名仍留在 card_charges.merchant。"""
+    return replace(c, merchant=display_name(c.merchant, brands))
 
 
 def mark_matched(db, mapping: dict[int, str]) -> None:
@@ -133,7 +149,9 @@ def unlisted(db, until: date, since: date) -> list[tuple[int, Charge]]:
 
 
 def used_group_keys(db) -> set[str]:
-    return {k for (k,) in db.query(CardCharge.matched_key).filter(CardCharge.matched_key.isnot(None)).all()}
+    """已被配走的群組鍵；一筆刷卡配到多張發票時 matched_key 以 KEY_SEP 串起來，這裡拆開。"""
+    rows = db.query(CardCharge.matched_key).filter(CardCharge.matched_key.isnot(None)).all()
+    return {k for (v,) in rows for k in v.split(config.KEY_SEP) if k}
 
 
 def load_groups(db, since: date) -> list[TxGroup]:
@@ -161,6 +179,28 @@ def load_hints(db, since: date) -> list[TxHint]:
     used = used_group_keys(db)
     return [TxHint(g.key, g.tx_date, g.amount, labels.get(g.key))
             for g in matcher.group_transactions([r[:4] for r in rows]) if g.key not in used]
+
+
+def load_time_hints(db, since: date) -> list[TxHint]:
+    """有開立時間的載具發票（created_at 不是 00:00），供永豐刷卡找時間接近的線索；已被配走的不列。
+    標籤取賣方，沒有就取第一個品名。"""
+    rows = [tuple(r) for r in (db.query(Transaction.id, Transaction.invoice_no, Transaction.created_at,
+                                        Transaction.price, Transaction.item, Transaction.seller)
+                               .filter(Transaction.created_at >= datetime.combine(since, time()),
+                                       Transaction.invoice_no.isnot(None))
+                               .order_by(Transaction.id).all())]
+    rows = [r for r in rows if r[1]]
+    sellers: dict[str, str] = {}
+    items: dict[str, str] = {}
+    for _, inv, _, _, item, seller in rows:
+        if seller:
+            sellers.setdefault(inv, seller)
+        if item:
+            items.setdefault(inv, item)
+    used = used_group_keys(db)
+    return [TxHint(g.key, g.tx_date, g.amount, sellers.get(g.key) or items.get(g.key), g.tx_time)
+            for g in matcher.group_transactions([r[:4] for r in rows])
+            if g.tx_time is not None and g.key not in used]
 
 
 def all_charges(db) -> list[Charge]:
@@ -200,8 +240,8 @@ def batch_view(db, batch: str) -> tuple[str, list[tuple[int, Charge, str, str | 
     status = {r.id: r.status for r in rows}
     brands = brand_map(db)
     items = [(r.id, branded(_to_charge(r), brands)) for r in rows]
-    txs = load_hints(db, min(c.charge_date for _, c in items) - timedelta(days=1))
-    arranged = hints.arrange(items, txs, all_charges(db))
+    since = min(c.charge_date for _, c in items) - timedelta(days=1)
+    arranged = hints.arrange(items, load_hints(db, since), all_charges(db), load_time_hints(db, since))
     best = max(arranged, key=lambda g: len(g[1]))[0]       # max 取第一個最大 → 平手時 GROUPS 順序在前者
     return best, [(i, c, status[i], h) for _, grp in arranged for i, c, h in grp]
 
@@ -218,7 +258,7 @@ def ignore(db, batch: str, ids: list[int]) -> int:
 
 def transaction_fields(c: Charge, brands: dict[str, str] | None = None) -> dict:
     hh, mm = (int(x) for x in c.charge_time.split(":")) if c.charge_time else (12, 0)
-    name = (brands or {}).get(c.merchant) or c.merchant
+    name = display_name(c.merchant, brands or {})
     return {"item": name or f"信用卡消費（{c.region}）", "price": c.amount, "source": "信用卡",
             "created_at": datetime.combine(c.charge_date, time(hh, mm)),
             "invoice_no": None, "seller": None, "category": None}

@@ -21,14 +21,15 @@ def test_can_act(uid, owner, expect):
 
 
 def test_每行格式與狀態標記():
-    assert ui.line(ch(2345)) == "10/03 永豐1234 US $2,345"
-    assert ui.line(ch(690, "ACME *STREAMING", "ctbc_statement", "5678")) == "10/03 中信5678 US $690 ACME *STREAMING"
+    assert ui.line(ch(2345)) == "10/03 永豐 US $2,345"
+    assert ui.line(ch(690, "ACME *STREAMING", "ctbc_statement", "5678")) == "10/03 中信 US $690 ACME *STREAMING"
     assert ui.line(ch(5), "ignored").startswith("~~") and "已忽略" in ui.line(ch(5), "ignored")
-    assert ui.line(ch(1500, time="23:12")) == "10/03 23:12 永豐1234 US $1,500"
+    assert ui.line(ch(1500, time="23:12")) == "10/03 23:12 永豐 US $1,500"
     assert ui.line(ch(1500, time="23:12"), hint="同卡同金額 3 個月都有") == \
-        "10/03 23:12 永豐1234 US $1,500 · 同卡同金額 3 個月都有"
-    assert ui.line(ch(2345), hint="h") == "10/03 永豐1234 US $2,345 · h"
+        "10/03 23:12 永豐 US $1,500 · 同卡同金額 3 個月都有"
+    assert ui.line(ch(2345), hint="h") == "10/03 永豐 US $2,345 · h"
     assert "已有帳" in ui.line(ch(5), "matched") and "已補記" in ui.line(ch(5), "recorded")
+    assert "1234" not in ui.line(ch(2345)) and "5678" not in ui.line(ch(690, src="ctbc_statement", card="5678"))
 
 
 def test_page_embed_標題只算未處理的():
@@ -62,6 +63,7 @@ def test_page_view_只放未處理的選項_全處理完就沒有元件():
         assert ids == ["cardrecon:ignore:b-1", "cardrecon:ignoreall:b-1", "cardrecon:record:b-1"]
         sel = next(c for c in v.children if c.custom_id.startswith("cardrecon:ignore"))
         assert [o.value for o in sel.item.options] == ["1"]
+        assert [o.label for o in sel.item.options] == ["10/03 永豐 US $100"]     # 選項也不標卡號
         assert ui.page_view("b-1", [(2, ch(200), "ignored", None)]) is None
     asyncio.run(go())
 

@@ -18,3 +18,6 @@ RECEIPT_SOURCES = [
 ]
 OCR_BATCH = 25                  # 中信店名格一次讀幾行（codex 讀圖每張超過 25 行會漏行）
 BRAND_BATCH = 40                # 店名換品牌一次問幾個
+TIME_WINDOW_MIN = 10            # 刷卡時間與發票開立時間相差幾分鐘內算同一筆（永豐才有刷卡時間）
+MAX_SPLIT = 4                   # 一筆刷卡最多由幾張發票合計（同一刻分開結帳）
+KEY_SEP = "+"                   # 一筆刷卡配到多張發票時，card_charges.matched_key 用它串起來

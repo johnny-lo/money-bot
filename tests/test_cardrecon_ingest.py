@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import date
+from datetime import date, time
 
 import pytest
 
@@ -84,6 +84,8 @@ class FakeRepo:
             self.rows[i].update(status="matched", key=k)
     hint_txs = ()
     def load_hints(self, db, since): return list(self.hint_txs)
+    time_txs = ()
+    def load_time_hints(self, db, since): return list(self.time_txs)
     def all_charges(self, db): return [r["c"] for r in self.rows.values()]
     def unlist(self, db):
         n = 0
@@ -390,3 +392,14 @@ def test_永豐網路消費通知_卡號不同不補店名(monkeypatch):
     fake._add(ch(date(2026, 10, 1), 10540, card="1234"))            # 同金額同一天，但是別張卡
     ingest.run_weekly(TODAY)
     assert fake.rows[1]["c"].merchant is None
+
+
+def test_清單_永豐刷卡有時間接近的發票_歸可能記過(monkeypatch):
+    fake = FakeRepo()
+    fake.groups = []
+    fake._add(replace(ch(date(2026, 10, 1), 700), charge_time="12:00"))
+    fake.time_txs = [TxHint("AA00000001", date(2026, 10, 1), 120, "某某商店", time(12, 4))]
+    _wire(monkeypatch, fake, {}, {})
+    res = ingest.relist(TODAY)
+    assert [(g, h) for _, g, items in res.pages for _, _, h in items] == \
+        [("near", "≈ 帳上 12:04 某某商店 $120（差 $580）")]

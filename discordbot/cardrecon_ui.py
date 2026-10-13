@@ -35,7 +35,7 @@ _GROUP_LABEL = dict(hints.GROUPS)
 
 def line(c: Charge, status: str = "unmatched", hint: str | None = None) -> str:
     when = f"{c.charge_date:%m/%d} {c.charge_time}" if c.charge_time else f"{c.charge_date:%m/%d}"
-    s = f"{when} {_SRC.get(c.source, c.source)}{c.card_last4} {c.region or ''} ${c.amount:,}"
+    s = f"{when} {_SRC.get(c.source, c.source)} {c.region or ''} ${c.amount:,}"   # 只寫銀行，不標末四碼
     s = f"{s} {c.merchant}" if c.merchant else s
     s = " ".join(s.split())
     s = f"{s} · {hint}" if hint else s
@@ -49,7 +49,7 @@ def _short(hint: str | None) -> str | None:
     if not hint or not hint.startswith("≈ 帳上 "):
         return hint
     head, sep, rest = hint.partition("（差")
-    parts = head.split(" ", 3)            # ['≈', '帳上', 'MM/DD', '{label} ${amount}']
+    parts = head.split(" ", 3)            # ['≈', '帳上', 'MM/DD' 或 'HH:MM', '{label} ${amount}']
     if len(parts) < 4 or " $" not in parts[3]:
         return hint
     label, _, amt = parts[3].rpartition(" $")

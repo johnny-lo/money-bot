@@ -1,6 +1,6 @@
 """cardrecon 各層之間的資料契約（無 I/O）。"""
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, time
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,7 @@ class TxHint:
     tx_date: date
     amount: int
     label: str | None                # 賣家，沒有就取第一個品名
+    tx_time: time | None = None      # 發票開立時間（只有載具發票、且不是 00:00 才有）
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,9 @@ class TxGroup:
     key: str                         # invoice_no，或手記帳 "id<transaction.id>"
     tx_date: date
     amount: int
+    # 發票開立時間：只有載具發票、且 created_at 不是 00:00 才有；手記帳是記帳時間不是消費時間，一律 None。
+    # 群組身分由 key／日期／金額決定，時間只是比對線索，不參與相等比較。
+    tx_time: time | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)

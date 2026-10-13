@@ -90,9 +90,10 @@ def _list(db, today: date, res: WeeklyResult, start_page: int = 0) -> None:
     res.total = sum(c.amount for _, c in listed)
     if not listed:
         return
-    txs = repo.load_hints(db, min(c.charge_date for _, c in listed) - timedelta(days=1))
+    since = min(c.charge_date for _, c in listed) - timedelta(days=1)
+    txs, timed = repo.load_hints(db, since), repo.load_time_hints(db, since)
     n = start_page
-    for key, items in hints.arrange(listed, txs, repo.all_charges(db)):
+    for key, items in hints.arrange(listed, txs, repo.all_charges(db), timed):
         for p in range(0, len(items), config.PAGE_SIZE):
             chunk = items[p:p + config.PAGE_SIZE]
             n += 1
