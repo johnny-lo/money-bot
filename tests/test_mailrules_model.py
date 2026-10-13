@@ -7,7 +7,8 @@ from mailrules.types import Action, MailHeader, Rule, Verdict
 
 def test_tables():
     assert set(MailRule.__table__.columns.keys()) == {
-        "id", "sender", "subject_pattern", "category", "status", "suggested_by", "card", "created_at", "confirmed_at"}
+        "id", "sender", "subject_pattern", "category", "status", "suggested_by", "card", "created_at", "confirmed_at",
+        "posted_at"}
     assert set(MailMessage.__table__.columns.keys()) == {
         "id", "gm_msgid", "uid", "from_addr", "subject_pattern", "subject", "sent_date", "category", "reason",
         "protected", "in_inbox", "labels_applied", "trashed_at", "updated_at", "gone_at", "unsub", "from_name"}

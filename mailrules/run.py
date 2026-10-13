@@ -1,6 +1,6 @@
 """每日／歷史流程編排：同步信頭 → 分類 → 建議 → 規劃 → 執行。歷史整理完成前每日只分類不寫入。
 
-同一時間只跑一個（_LOCK）：每日排程搶不到就整個略過，歷史準備／執行搶不到就拋 RuntimeError。
+同一時間只跑一個（_LOCK）：每日排程搶不到就整個略過，歷史準備／計畫／執行搶不到就拋 Busy（RuntimeError）。
 """
 import threading
 from contextlib import contextmanager
@@ -10,18 +10,23 @@ from . import classify as C
 from . import config, gmail_rw, repo, suggest
 from .patterns import subject_pattern
 from .plan import plan_actions
-from .repo import card_no
+from .repo import card_no, rules_fingerprint
 from .types import MailHeader, MessageState, RunReport
 
 _AI_BY = "ai"
 _BUSY = "另一個信件整理正在跑，請稍後再試"
+_EXPIRED = "計畫已過期，請用 /信件計畫 重發"
 _LOCK = threading.Lock()
+
+
+class Busy(RuntimeError):
+    """另一個信件整理正在跑（搶不到 _LOCK）。"""
 
 
 @contextmanager
 def _exclusive():
     if not _LOCK.acquire(blocking=False):
-        raise RuntimeError(_BUSY)
+        raise Busy(_BUSY)
     try:
         yield
     finally:
@@ -53,13 +58,15 @@ def _sync(db, full: bool = False) -> list[MailHeader]:
     return hs
 
 
-def _classify_all(db, today: date, fresh=()) -> dict:
-    """對每封未丟、還在信箱的信算樣式與判定並存檔。fresh（本次同步的信頭）蓋過 DB 讀回的版本。"""
+def _classify_all(db, today: date, fresh=(), rules=None) -> dict:
+    """對每封未丟、還在信箱的信算樣式與判定並存檔。fresh（本次同步的信頭）蓋過 DB 讀回的版本。
+    rules＝要用的已確認規則（None＝現在 DB 裡的）；歷史執行傳入已核對過指紋的那一份。"""
     over = {h.gm_msgid: h for h in fresh}
     hs = [over.get(h.gm_msgid, h) for h in repo.headers(db)]
     owner, selfs, comp = config.owner_name(), config.self_addresses(), config.company_domains()
     repo.add_valued(db, C.learn_valued_domains(hs, selfs, comp))
-    valued, rules = repo.valued_set(db), repo.confirmed_rules(db)
+    valued = repo.valued_set(db)
+    rules = repo.confirmed_rules(db) if rules is None else rules
     out = {}
     for h in hs:
         out[h.gm_msgid] = (h, C.classify(h, subject_pattern(h.subject, owner), rules, valued, selfs))
@@ -172,9 +179,11 @@ def prepare_history(today: date, db=None) -> int:
 
 def history_plan(today: date, db=None) -> dict:
     """歷史計畫：各（類別, 動作）封數、每類 3 個不重複的範例主旨、待確認卡數、未知樣式數，
-    以及 upto_card（算計畫當下的最大確認卡號；執行鈕只被不大於它的卡擋）。"""
-    with _session(db) as db:
-        verdicts = _classify_all(db, today)
+    upto_card（算計畫當下的最大確認卡號；執行鈕只被不大於它的卡擋），
+    以及 fingerprint（算計畫用的已確認規則集合指紋；執行時規則集合變了就拒絕）。會寫 DB（判定）→ 也走鎖。"""
+    with _exclusive(), _session(db) as db:
+        rules = repo.confirmed_rules(db)
+        verdicts = _classify_all(db, today, rules=rules)
         cats = {g: v.category for g, (_, v) in verdicts.items()}
         subjects = {g: h.subject for g, (h, _) in verdicts.items()}
         counts, samples, sampled = {}, {}, set()
@@ -188,12 +197,16 @@ def history_plan(today: date, db=None) -> dict:
             if subjects[a.gm_msgid] not in subs:
                 subs.append(subjects[a.gm_msgid])
         return {"counts": counts, "samples": samples, "pending_cards": len(repo.pending_cards(db)),
-                "unknown": len(_unknown_groups(db, verdicts)), "upto_card": repo.max_card(db)}
+                "unknown": len(_unknown_groups(db, verdicts)), "upto_card": repo.max_card(db),
+                "fingerprint": rules_fingerprint(rules)}
 
 
-def execute_history(today: date, db=None, upto_card: str | None = None) -> RunReport:
+def execute_history(today: date, db=None, upto_card: str | None = None,
+                    fingerprint: str | None = None) -> RunReport:
     """upto_card＝計畫卡發出當下的最大卡號（'none'＝當時沒有卡）：只有卡號不大於它的卡還沒處理才拒絕，
-    之後才長出的卡不擋（它們的信是未知，本來就不會動）。None＝任何待確認卡都擋（原本行為）。"""
+    之後才長出的卡不擋（它們的信是未知，本來就不會動）。None＝任何待確認卡都擋（原本行為）。
+    fingerprint＝計畫卡上的已確認規則指紋：現在的規則集合不同（之後又確認卡、手動指定）→ 計畫已過期，
+    零寫入拒絕。None＝不比對（程式內部呼叫）。"""
     with _exclusive(), _session(db) as db:
         state = repo.get_state(db)
         if state is not None and state[2] is not None:
@@ -203,8 +216,13 @@ def execute_history(today: date, db=None, upto_card: str | None = None) -> RunRe
             pending = [c for c in pending if card_no(c) <= card_no(upto_card)]
         if pending:
             raise RuntimeError(f"還有 {len(pending)} 張確認卡沒處理")
+        if fingerprint is not None and rules_fingerprint(repo.confirmed_rules(db)) != fingerprint:
+            raise RuntimeError(_EXPIRED)
         fresh = _sync(db, full=True)          # 寫入用的 UID 要是現在的；舊信的 unsub／顯示名稱也一併刷新
-        verdicts = _classify_all(db, today, fresh)
+        rules = repo.confirmed_rules(db)      # 同步期間（不在鎖內的）確認鈕可能又改了規則 → 用的這一份要再核對一次
+        if fingerprint is not None and rules_fingerprint(rules) != fingerprint:
+            raise RuntimeError(_EXPIRED)
+        verdicts = _classify_all(db, today, fresh, rules=rules)
         report = RunReport(unknown_patterns=len(_unknown_groups(db, verdicts)),
                            protected=[h for h, v in verdicts.values() if v.protected])
         actions = _plan_all(db, verdicts, today, "history")

@@ -248,10 +248,11 @@ def _has_move(M) -> bool:
 
 
 def _current_msgids(M, uids: list[int]) -> dict[int, str]:
-    """唯讀核對：這些 UID 現在各是哪封信（只抓 X-GM-MSGID，不碰內文也不改旗標）。"""
+    """唯讀核對：這些 UID 現在各是哪封信（只抓 X-GM-MSGID，不碰內文也不改旗標）。
+    FETCH 不是 OK＝這次查不到（暫時失敗），不能當成「UID 已不對應」→ 拋例外讓整批算失敗、絕不判成 gone。"""
     typ, data = M.uid("FETCH", ",".join(map(str, uids)), "(X-GM-MSGID)")
     if typ != "OK":
-        return {}
+        raise RuntimeError(f"核對 FETCH 失敗：{typ}")
     out = {}
     for item in data:
         line = item[0] if isinstance(item, tuple) else item
@@ -265,7 +266,8 @@ def _current_msgids(M, uids: list[int]) -> dict[int, str]:
 
 
 def _find_uids(M, gm_msgids: set[str]) -> dict[str, int]:
-    """唯讀查詢：用 X-GM-MSGID 在所有郵件找這封信現在的 UID；找不到（已刪、在垃圾桶）就不列。"""
+    """唯讀查詢：用 X-GM-MSGID 在所有郵件找這封信現在的 UID；找不到（已刪、在垃圾桶）就不列。
+    SEARCH 回 NO／BAD 或拋例外＝查詢失敗，不是「找不到」→ 往上拋，整批算失敗。"""
     out = {}
     for g in sorted(gm_msgids):
         typ, data = M.uid("SEARCH", "X-GM-MSGID", str(g))

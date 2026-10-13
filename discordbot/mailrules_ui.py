@@ -1,7 +1,10 @@
 """信件規則引擎的 Discord 端：建議確認卡、每日報告、職缺／推銷摘要、歷史整理計畫卡。
 
 元件用 DynamicItem：custom_id 自帶卡號／規則 id，bot 重啟後不需要記憶體狀態就能接手。只有本人能按。
-執行鈕的 custom_id 帶「計畫卡發出當下的最大卡號」：之後才長出的確認卡不擋執行。
+執行鈕的 custom_id 帶「計畫卡發出當下的最大卡號」與「已確認規則集合的指紋」：之後才長出的確認卡不擋執行，
+但之後又確認卡／手動指定規則 → 計畫過期，要用 /信件計畫 重發。
+確認卡與計畫卡都用 post_sync_wait 發：Discord 真的送出才記成已發（確認卡記在 mail_rules.posted_at、
+計畫卡記在 mail_state.plan_posted_card），沒發出去的下次會完整重發。
 """
 import asyncio
 import os
@@ -14,7 +17,7 @@ from database import SessionLocal
 from mailrules import config, repo
 from mailrules.types import MailHeader, Rule, RunReport
 
-from .bridge import post_sync
+from .bridge import post_sync, post_sync_wait
 
 COLOR = 0x3498DB
 _FAIL_COLOR = 0xE74C3C
@@ -255,36 +258,41 @@ class AssignSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"mailrul
 
 
 class ExecuteButton(discord.ui.DynamicItem[discord.ui.Button],
-                    template=r"mailrules:exec:history(?::(?P<card>s\d+|none))?"):
-    """upto＝計畫卡發出當下的最大卡號（'none'＝當時沒有卡）；舊版不帶卡號的鈕 → None（任何待確認卡都擋）。"""
-    def __init__(self, upto: str | None = None):
-        super().__init__(discord.ui.Button(label="🚀 執行歷史整理", style=discord.ButtonStyle.danger,
-                                           custom_id="mailrules:exec:history" + (f":{upto}" if upto else "")))
-        self.upto = upto
+                    template=r"mailrules:exec:history(?::(?P<card>s\d+|none))?(?::(?P<fp>[0-9a-f]+))?"):
+    """upto＝計畫卡發出當下的最大卡號（'none'＝當時沒有卡）；fp＝當下已確認規則集合的指紋。
+    沒帶指紋的鈕不知道核可的是哪一套規則 → 一律當計畫已過期，不執行。"""
+    def __init__(self, upto: str | None = None, fp: str | None = None):
+        cid = "mailrules:exec:history" + (f":{upto}" if upto else "") + (f":{fp}" if fp else "")
+        super().__init__(discord.ui.Button(label="🚀 執行歷史整理", style=discord.ButtonStyle.danger, custom_id=cid))
+        self.upto, self.fp = upto, fp
 
     @classmethod
     async def from_custom_id(cls, interaction, item, match):
-        return cls(match["card"])
+        return cls(match["card"], match["fp"])
 
     async def callback(self, interaction: discord.Interaction):
         why = _guard_fail(interaction)
         if why:
             await interaction.response.send_message(f"⛔ {why}", ephemeral=True)
             return
+        from mailrules import run
+        if not self.fp:
+            await interaction.response.send_message(f"⛔ {run._EXPIRED}", ephemeral=True)
+            return
         # 歷史約萬封、逐封寫入會超過 15 分鐘：interaction token 屆時已過期，followup 發不出去。
         # 所以開始先把原訊息改成「執行中」，結束（或失敗）再用 bot 自己的權限編輯同一則訊息。
         running = discord.Embed(title="⏳ 歷史整理執行中", color=COLOR,
-                                description="逐封處理中，完成後這則訊息會更新結果。")
+                                description="逐封處理中，完成後這則訊息會更新結果。\n"
+                                            "若停在這裡，可用 /信件計畫 重發計畫卡")
         await interaction.response.edit_message(embed=running, view=None)
-        from mailrules import run
         try:
-            rep = await asyncio.to_thread(run.execute_history, _today(), upto_card=self.upto)
+            rep = await asyncio.to_thread(run.execute_history, _today(), upto_card=self.upto, fingerprint=self.fp)
             emb = daily_embed(rep)
             emb.title = "🗂 歷史整理完成"
             view = None
         except Exception as e:
             emb = discord.Embed(title="❌ 歷史整理失敗", description=str(e)[:4000], color=_FAIL_COLOR)
-            view = _exec_view(self.upto)          # 處理完再按一次：同一顆鈕要留著
+            view = _exec_view(self.upto, self.fp)          # 處理完再按一次：同一顆鈕要留著
         try:
             await interaction.message.edit(embed=emb, view=view)
         except Exception as e:
@@ -311,9 +319,16 @@ def assign_view(rules: list[Rule]) -> discord.ui.View:
 
 
 def _post(embeds, make_view=None) -> None:
+    """射後不理（每日報告、摘要、提醒、失敗卡）：沒送出也不用記。"""
     chan = config.mail_channel_id()
     if chan:
         post_sync(chan, embeds, make_view=make_view)
+
+
+def _post_wait(embeds, make_view=None) -> bool:
+    """等送出結果（確認卡、計畫卡）：真的送出才回 True，呼叫端據此記「已發」。"""
+    chan = config.mail_channel_id()
+    return bool(chan) and post_sync_wait(chan, embeds, make_view=make_view)
 
 
 def notify_daily(rep: RunReport) -> None:
@@ -327,72 +342,113 @@ def notify_daily(rep: RunReport) -> None:
         _post([digest_embed("🛍 本週推銷摘要", rep.promo_digest)])
 
 
-def notify_cards(card_ids: list[str]) -> None:
-    if not config.mail_channel_id() or not card_ids:
-        return
+def _card_payload(card: str):
     db = SessionLocal()
     try:
-        cards = [(c, repo.card_rules(db, c), repo.card_counts(db, c)) for c in card_ids]
+        return repo.card_rules(db, card), _safe_counts(db, card)
     finally:
         db.close()
-    for card, rules, counts in cards:
-        _post([suggest_embed(card, rules, counts)], make_view=lambda c=card, rs=rules: suggest_view(c, rs))
+
+
+def _mark_posted(cards: list[str]) -> None:
+    db = SessionLocal()
+    try:
+        repo.mark_cards_posted(db, cards)
+    finally:
+        db.close()
+
+
+def notify_cards(card_ids: list[str]) -> list[str]:
+    """完整發確認卡；回傳真的送出的卡號，並在 DB 記已發（沒送出的不記，下次再完整發）。"""
+    if not config.mail_channel_id() or not card_ids:
+        return []
+    sent = []
+    for card in card_ids:
+        try:
+            rules, counts = _card_payload(card)
+            ok = _post_wait([suggest_embed(card, rules, counts)],
+                            make_view=lambda c=card, rs=rules: suggest_view(c, rs))
+            if ok:
+                _mark_posted([card])
+                sent.append(card)
+        except Exception as e:                   # 一張卡出事不擋其他卡；沒記已發 → 下次再發
+            print(f"⚠️ 確認卡 {card} 發送或記錄已發失敗：{type(e).__name__}: {e}")
+    return sent
+
+
+def post_unposted_cards() -> list[str]:
+    """還沒成功發出過的待確認卡完整發（每日排程出錯時也呼叫：出錯前已存進 DB 的新卡不會被吞掉）。"""
+    if not config.mail_channel_id():
+        return []
+    db = SessionLocal()
+    try:
+        cards = repo.unposted_cards(db)
+    finally:
+        db.close()
+    return notify_cards(cards)
 
 
 def notify_card_reminder(card_ids: list[str]) -> None:
-    """舊的待確認卡不重發整張，只發一行提醒。"""
+    """已經發過、還沒處理的舊卡不重發整張，只發一行提醒。"""
     if not card_ids:
         return
     _post([discord.Embed(description=f"📝 還有 {len(card_ids)} 張確認卡沒處理：{'、'.join(card_ids)}",
                          color=COLOR)])
 
 
-def notify_history_plan(plan: dict) -> None:
-    upto = plan.get("upto_card") or "none"
-    _post([history_embed(plan)], make_view=lambda: _exec_view(upto))
+def notify_history_plan(plan: dict) -> bool:
+    """發計畫卡；回傳是否真的送出。執行鈕帶發卡當下的最大卡號與已確認規則指紋。"""
+    upto, fp = plan.get("upto_card") or "none", plan.get("fingerprint")
+    return _post_wait([history_embed(plan)], make_view=lambda: _exec_view(upto, fp))
 
 
-def _exec_view(upto: str | None) -> discord.ui.View:
+def _exec_view(upto: str | None, fp: str | None) -> discord.ui.View:
     v = discord.ui.View(timeout=None)
-    v.add_item(ExecuteButton(upto))
+    v.add_item(ExecuteButton(upto, fp))
     return v
 
 
-def _post_plan(today) -> dict:
-    """算目前的歷史計畫、發計畫卡，並記下這份計畫的卡號（每日排程據此判斷發過沒）。"""
-    from mailrules import run
-    plan = run.history_plan(today)
-    notify_history_plan(plan)
+def _send_plan(plan: dict) -> bool:
+    """發計畫卡；真的送出才把這份計畫的規則指紋記進 mail_state.plan_posted_card。"""
+    if not notify_history_plan(plan):
+        return False
     db = SessionLocal()
     try:
-        repo.set_plan_posted(db, plan.get("upto_card") or "none")
+        repo.set_plan_posted(db, plan["fingerprint"])
     finally:
         db.close()
-    return plan
+    return True
 
 
 def after_daily(rep: RunReport, today) -> None:
-    """每日整理後：新卡完整發、舊的待確認卡一行提醒；歷史未完成、沒有待確認卡、
-    且這份計畫（以目前最大卡號為準）還沒發過 → 自動發歷史計畫卡。"""
-    if rep.skipped:
+    """每日整理後：還沒成功發出過的待確認卡完整發、已發過的舊卡一行提醒（看 DB，不靠 rep.new_cards）；
+    歷史未完成、沒有待確認卡、且目前已確認規則集合的計畫還沒成功發過 → 自動發歷史計畫卡。頻道沒設什麼都不發。"""
+    if rep.skipped or not config.mail_channel_id():
         return
     db = SessionLocal()
     try:
-        pending = repo.pending_cards(db)
+        pending, fresh = repo.pending_cards(db), repo.unposted_cards(db)
         state = repo.get_state(db)
-        posted, upto = repo.plan_posted_card(db), repo.max_card(db) or "none"
+        posted, fp = repo.plan_posted_card(db), repo.confirmed_fingerprint(db)
     finally:
         db.close()
-    if rep.new_cards:
-        notify_cards(rep.new_cards)
-    notify_card_reminder([c for c in pending if c not in rep.new_cards])
-    if pending or state is None or state[2] is not None or posted == upto or not config.mail_channel_id():
+    notify_cards(fresh)
+    notify_card_reminder([c for c in pending if c not in fresh])
+    if pending or state is None or state[2] is not None or posted == fp:
         return
-    _post_plan(today)
+    from mailrules import run
+    try:
+        plan = run.history_plan(today)
+    except run.Busy:
+        print("⚠️ 另一個信件整理正在跑，這次不發歷史計畫卡（下次每日再發）")
+        return
+    if not _send_plan(plan):
+        print("⚠️ 歷史計畫卡沒發出去，沒記成已發（下次每日再發）")
 
 
 def post_history_plan(today) -> str:
-    """/信件計畫：隨時把目前的計畫卡發到信件頻道（發過也照發）。回傳給下指令的人看的訊息。"""
+    """/信件計畫：隨時把目前的計畫卡發到信件頻道（發過也照發），並順便完整重發還沒成功發出過的待確認卡。
+    回傳給下指令的人看的訊息；發送失敗如實說、不記已發。"""
     if not config.mail_channel_id():
         return "⚠️ 還沒設定 MAIL_CHANNEL_ID，發不出去"
     db = SessionLocal()
@@ -402,8 +458,27 @@ def post_history_plan(today) -> str:
         db.close()
     if state is not None and state[2] is not None:
         return "歷史整理已完成，不需要計畫卡"
-    plan = _post_plan(today)
-    return f"✅ 已發到信件頻道（待確認卡 {plan.get('pending_cards', 0)} 張）"
+    from mailrules import run
+    try:
+        plan = run.history_plan(today)
+    except run.Busy:
+        return "⏳ 另一個信件整理正在跑，請稍後再試"
+    db = SessionLocal()
+    try:
+        want = repo.unposted_cards(db)
+    finally:
+        db.close()
+    sent = notify_cards(want)
+    lost = [c for c in want if c not in sent]
+    notes = []
+    if sent:
+        notes.append(f"補發確認卡 {'、'.join(sent)}")
+    if lost:
+        notes.append(f"❌ 確認卡 {'、'.join(lost)} 發送失敗，下次再試")
+    tail = ("；" + "；".join(notes)) if notes else ""
+    if not _send_plan(plan):
+        return "❌ 計畫卡發送失敗（Discord 沒回應或 bot 還沒 ready），沒有記成已發，請稍後再試" + tail
+    return f"✅ 已發到信件頻道（待確認卡 {plan.get('pending_cards', 0)} 張）" + tail
 
 
 def notify_failure(err: str) -> None:

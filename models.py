@@ -202,6 +202,7 @@ class MailRule(Base):
     card = Column(String, nullable=True, index=True)
     created_at = Column(DateTime, default=func.now())
     confirmed_at = Column(DateTime, nullable=True)
+    posted_at = Column(DateTime, nullable=True)        # 這張確認卡真的發到 Discord 的時間（沒發成功＝NULL，下次完整重發）
 
 
 class MailMessage(Base):
@@ -241,4 +242,4 @@ class MailState(Base):
     uidvalidity = Column(Integer, nullable=True)
     last_uid = Column(Integer, nullable=True)
     history_done_at = Column(DateTime, nullable=True)
-    plan_posted_card = Column(String, nullable=True)   # 已自動發過的歷史計畫卡（發卡當下最大卡號，沒有卡＝'none'）
+    plan_posted_card = Column(String, nullable=True)   # 已成功發出的歷史計畫卡是哪一套已確認規則（規則指紋）

@@ -108,12 +108,13 @@ try:
                 "CREATE INDEX IF NOT EXISTS ix_food_places_district ON food_places (district)"
             ))
             _conn.commit()
-        # mail_messages / mail_state 補欄位（消失的信、退訂連結、顯示名稱、已發的歷史計畫卡）
+        # mail_messages / mail_state / mail_rules 補欄位（消失的信、退訂連結、顯示名稱、已發的歷史計畫卡、確認卡已發）
         for _tbl, _col, _ddl in (
             ("mail_messages", "gone_at", "ALTER TABLE mail_messages ADD COLUMN gone_at TIMESTAMP"),
             ("mail_messages", "unsub", "ALTER TABLE mail_messages ADD COLUMN unsub BOOLEAN DEFAULT FALSE NOT NULL"),
             ("mail_messages", "from_name", "ALTER TABLE mail_messages ADD COLUMN from_name VARCHAR"),
             ("mail_state", "plan_posted_card", "ALTER TABLE mail_state ADD COLUMN plan_posted_card VARCHAR"),
+            ("mail_rules", "posted_at", "ALTER TABLE mail_rules ADD COLUMN posted_at TIMESTAMP"),
         ):
             if _inspector.has_table(_tbl) and _col not in [c["name"] for c in _inspector.get_columns(_tbl)]:
                 _conn.execute(_text(_ddl))
@@ -253,7 +254,8 @@ scheduler.add_job(_weekly_pipeline, "cron", day_of_week="sun", hour=21, minute=0
 
 def _mail_daily():
     """每日信件整理（時間見 mailrules.config.DAILY_RUN）：同步→分類→（歷史完成後）執行→報告；
-    新確認卡完整發、舊卡一行提醒；歷史未完成且沒有待確認卡、這份計畫沒發過 → 自動發歷史計畫卡。"""
+    還沒成功發出過的確認卡完整發、發過的舊卡一行提醒；歷史未完成、沒有待確認卡、
+    目前已確認規則集合的計畫還沒成功發過 → 自動發歷史計畫卡。出錯時也補發還沒發出的確認卡。"""
     try:
         from zoneinfo import ZoneInfo
         from mailrules.run import run_daily
@@ -265,8 +267,9 @@ def _mail_daily():
     except Exception as e:
         print(f"⚠️ 每日信件整理失敗：{e}")
         try:
-            from discordbot.mailrules_ui import notify_failure as mail_notify_failure
+            from discordbot.mailrules_ui import notify_failure as mail_notify_failure, post_unposted_cards
             mail_notify_failure(str(e))
+            post_unposted_cards()          # 出錯前已存進 DB 的新確認卡照發；沒發成功的下次每日再發
         except Exception:
             pass
 

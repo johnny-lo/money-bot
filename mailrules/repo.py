@@ -1,4 +1,5 @@
 """信件規則引擎的唯一 DB 存取層。JSON 欄位 labels_applied 更新一律指派新 list，SQLAlchemy 才偵測得到。"""
+import hashlib
 import re
 from datetime import datetime
 
@@ -52,17 +53,18 @@ def mark_history_done(db) -> None:
 
 
 def plan_posted_card(db) -> str | None:
-    """上次自動發的歷史計畫卡是在哪個最大卡號下發的（'none'＝當時沒有卡；None＝沒發過）。"""
+    """上次成功發出的歷史計畫卡是哪一套已確認規則（rules_fingerprint）；None＝沒成功發過。"""
     r = _state_row(db)
     return None if r is None else r.plan_posted_card
 
 
-def set_plan_posted(db, card: str) -> None:
+def set_plan_posted(db, fingerprint: str) -> None:
+    """只在計畫卡真的送出（post_sync_wait 回 True）後呼叫。"""
     r = _state_row(db)
     if r is None:
         r = MailState(id=1)
         db.add(r)
-    r.plan_posted_card = card
+    r.plan_posted_card = fingerprint
     db.commit()
 
 
@@ -161,6 +163,18 @@ def mark_gone(db, gm_msgids: list[str]) -> None:
 
 def confirmed_rules(db) -> list[Rule]:
     return [_rule(r) for r in db.query(MailRule).filter(MailRule.status == "confirmed").order_by(MailRule.id).all()]
+
+
+def rules_fingerprint(rules: list[Rule]) -> str:
+    """已確認規則集合的指紋（每條的 id／寄件者／樣式／類別）：計畫卡核可的是哪一套規則。
+    確認一張卡、手動指定一條規則都會讓它變；拒絕、長出新的未確認卡不會。"""
+    key = "\n".join(f"{r.id}|{r.sender}|{r.subject_pattern}|{r.category}"
+                    for r in sorted(rules, key=lambda r: (r.id or 0, r.sender, r.subject_pattern)))
+    return hashlib.sha1(key.encode("utf-8")).hexdigest()[:12]
+
+
+def confirmed_fingerprint(db) -> str:
+    return rules_fingerprint(confirmed_rules(db))
 
 
 def known_keys(db) -> set[tuple[str, str]]:
@@ -279,6 +293,26 @@ def assign(db, rule_id: int, category: str) -> None:
 def pending_cards(db) -> list[str]:
     cards = {r.card for r in db.query(MailRule).filter(MailRule.status == "suggested").all() if r.card}
     return sorted(cards, key=lambda c: int(c[1:]) if c[1:].isdigit() else 0)
+
+
+def unposted_cards(db) -> list[str]:
+    """待確認、而且從沒成功發到 Discord 的卡（頻道沒設、bot 沒 ready、發送失敗）：下次要完整發。"""
+    rows = [r for r in db.query(MailRule).filter(MailRule.status == "suggested").all()
+            if r.status == "suggested" and r.card]
+    posted = {r.card for r in rows if r.posted_at is not None}
+    return sorted({r.card for r in rows} - posted, key=card_no)
+
+
+def mark_cards_posted(db, cards: list[str]) -> None:
+    """只在卡真的送出（post_sync_wait 回 True）後呼叫；整張卡的每一列都記。"""
+    want = set(cards)
+    if not want:
+        return
+    now = _now()
+    for r in db.query(MailRule).filter(MailRule.card.in_(sorted(want))).all():
+        if r.card in want and r.posted_at is None:
+            r.posted_at = now
+    db.commit()
 
 
 # ── 重視網域 ───────────────────────────────────────────────────────
