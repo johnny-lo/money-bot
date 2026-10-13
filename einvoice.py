@@ -331,33 +331,86 @@ async def _login_attempt(page, phone: str, password: str, attempt: int) -> tuple
 
 
 _DETAIL_MODAL = ".modal_barcode_detail.show"
-_DETAIL_API = "getCarrierInvoiceData"   # 點明細時網頁打的 API，回傳裡有 invoiceTime
-_DETAIL_TIME_GRACE_S = 0.5              # modal 畫完、品項讀完後，最多再等明細回應多久
+_LIST_API = "searchCarrierInvoice"      # 清單 API：content[] 每筆有 invoiceNumber 與 token
+_DETAIL_API = "getCarrierInvoiceData"   # 點明細時網頁打的 API：POST body 帶該張 token，回應有 invoiceTime
+_DETAIL_TIME_GRACE_S = 2.0              # 從點號碼起算，最多等「這張」的明細回應多久
 
 
-def _wait_detail_response(page):
-    """點明細前先開始等 getCarrierInvoiceData 的回應（點了才等會漏）。開不起來就回 None——時間是加分項。"""
-    try:
-        waiter = asyncio.ensure_future(page.wait_for_event(
-            "response", predicate=lambda r: _DETAIL_API in r.url, timeout=10000))
-    except Exception:
+def checked_detail_time(inv: dict, data) -> time | None:
+    """明細回應的第二道核對：invoiceDate／totalAmount 要跟清單列的日期與金額一致才採用時間。
+
+    對不上（或欄位缺、JSON 壞）一律 None——錯的時間寫進 created_at 之後補不回來，寧缺勿錯。"""
+    if data is None:
         return None
-    waiter.add_done_callback(lambda f: f.cancelled() or f.exception())   # 沒人收的逾時別噴警告
-    return waiter
-
-
-async def _detail_time(waiter) -> time | None:
-    """讀明細回應的 invoiceTime。沒回應、逾時、JSON 壞掉、格式不對一律 None，絕不拋例外。"""
-    if waiter is None:
+    date = re.sub(r"\D", "", str(_find_key(data, "invoiceDate") or ""))
+    if not date or date != str(inv.get("date", "")).replace("-", ""):
         return None
     try:
-        done, _ = await asyncio.wait({waiter}, timeout=_DETAIL_TIME_GRACE_S)
-        if not done:
+        amount = int(float(str(_find_key(data, "totalAmount")).replace(",", "")))
+    except (TypeError, ValueError):
+        return None
+    if amount != inv.get("amount"):
+        return None
+    return parse_invoice_time(_find_key(data, "invoiceTime"))
+
+
+class _InvoiceTimes:
+    """頁面層級收集明細回應，並把每個回應綁定到「它自己那張」發票。
+
+    明細回應本身沒有發票號碼；只看 URL 的話，上一張晚到的回應會被下一張接走（政府站一慢整串錯一張）。
+    綁定：清單回應建 token→發票號碼，明細請求的 POST body 帶被點那張的 token。
+    要在查詢前就掛上（清單回應在 _parse_current_page 之前就來了）。任何一步失敗都只是「這張沒時間」。
+    """
+
+    def __init__(self, page):
+        self.no_by_token: dict[str, str] = {}
+        self.details: list[tuple[str, object]] = []   # (明細請求 body, 回應 JSON；None＝沒回應或壞掉)
+        page.on("response", self._on_response)
+        page.on("requestfailed", self._on_failed)
+
+    async def _on_response(self, resp) -> None:
+        try:
+            if _LIST_API in resp.url:
+                rows = _find_key(await resp.json(), "content")
+                for row in rows if isinstance(rows, list) else []:
+                    if isinstance(row, dict) and row.get("token") and row.get("invoiceNumber"):
+                        self.no_by_token[str(row["token"])] = str(row["invoiceNumber"])
+            elif _DETAIL_API in resp.url:
+                body = resp.request.post_data or ""
+                try:
+                    data = await resp.json()
+                except Exception:
+                    data = None
+                self.details.append((body, data))
+        except Exception:
+            pass
+
+    def _on_failed(self, req) -> None:
+        try:
+            if _DETAIL_API in req.url:
+                self.details.append((req.post_data or "", None))   # 確定不會有回應了，別空等
+        except Exception:
+            pass
+
+    def _resolve(self, inv: dict) -> tuple[bool, time | None]:
+        """(這張的明細回應到了沒, 時間)。只採用 POST body 帶這張 token 的回應。"""
+        tokens = [t for t, no in self.no_by_token.items() if no == inv["invoice_no"]]
+        for body, data in self.details:
+            if any(t in body for t in tokens):
+                return True, checked_detail_time(inv, data)
+        return False, None
+
+    async def wait_time(self, inv: dict, deadline: float) -> time | None:
+        """等這張的明細回應到 deadline（loop.time()）；等不到、對不上 token 都是 None，絕不拋例外。"""
+        try:
+            loop = asyncio.get_running_loop()
+            while True:
+                arrived, t = self._resolve(inv)
+                if arrived or loop.time() >= deadline:
+                    return t
+                await asyncio.sleep(0.05)
+        except Exception:
             return None
-        data = await asyncio.wait_for(waiter.result().json(), timeout=_DETAIL_TIME_GRACE_S)
-        return parse_invoice_time(_find_key(data, "invoiceTime"))
-    except Exception:
-        return None
 
 
 async def _fetch_detail_items(page) -> list[dict]:
@@ -430,8 +483,11 @@ async def _close_detail_modal(page) -> None:
         pass
 
 
-async def _parse_current_page(page, since_date: str) -> tuple[list[dict], bool]:
-    """回傳 (該頁發票列表, 是否要停止翻頁)。發票按日期 desc 排序，遇到 < since_date 即 stop。"""
+async def _parse_current_page(page, since_date: str,
+                              times: _InvoiceTimes | None = None) -> tuple[list[dict], bool]:
+    """回傳 (該頁發票列表, 是否要停止翻頁)。發票按日期 desc 排序，遇到 < since_date 即 stop。
+
+    times：查詢前就掛在 page 上的 _InvoiceTimes；None 就不抓開立時間（inv["time"] 留 None）。"""
     raw_rows = await page.evaluate(r"""() => {
         const tables = Array.from(document.querySelectorAll('table'));
         const target = tables.find(t => {
@@ -486,25 +542,23 @@ async def _parse_current_page(page, since_date: str) -> tuple[list[dict], bool]:
     # 流程 = 點號碼 → 等 modal 開 → 讀品項 → 關 modal → 下一筆。
     # 嚴禁 go_back():那會把 SPA 清單整個帶走,只剩第一筆抓得到明細(本次修正的根因)。
     for inv in invoices:
-        waiter = None
         try:
             link = page.locator(f"a:text-is('{inv['invoice_no']}')").first
             if await link.count() == 0:
                 continue
-            waiter = _wait_detail_response(page)
+            deadline = asyncio.get_running_loop().time() + _DETAIL_TIME_GRACE_S
             await link.click()
             # 明細是開 modal,不是換 URL → 等 modal 真的出現
             await page.wait_for_selector(_DETAIL_MODAL, state="visible", timeout=10000)
             await page.wait_for_timeout(400)
             inv["items"] = await _fetch_detail_items(page)
-            inv["time"] = await _detail_time(waiter)
+            if times is not None:
+                inv["time"] = await times.wait_time(inv, deadline)
             print(f"     {inv['invoice_no']} | {inv['seller'][:14]} | {len(inv['items'])} 品項"
                   f" | {inv['time'] or '無時間'}")
         except Exception as e:
             print(f"     ⚠️ {inv['invoice_no']} 抓明細失敗：{type(e).__name__}: {e}")
         finally:
-            if waiter is not None and not waiter.done():
-                waiter.cancel()
             # 不論成功與否都要把 modal 關掉,否則 backdrop 會擋住下一筆的點擊
             await _close_detail_modal(page)
     return invoices, stop
@@ -595,6 +649,7 @@ async def _scrape_carrier(phone: str, password: str, days: int, headless: bool =
             viewport={"width": 1366, "height": 900},
         )
         page = await ctx.new_page()
+        times = _InvoiceTimes(page)   # 查詢前就掛上：清單回應的 token 要先收到
         try:
             await _login(page, phone, password)   # 失敗拋 LoginFailed，由呼叫端記失敗
             if month:
@@ -610,7 +665,7 @@ async def _scrape_carrier(phone: str, password: str, days: int, headless: bool =
             all_invoices = []
             page_no = 1
             while True:
-                invs, stop = await _parse_current_page(page, since_date=since)
+                invs, stop = await _parse_current_page(page, since_date=since, times=times)
                 print(f"   📄 第 {page_no} 頁：{len(invs)} 筆")
                 all_invoices.extend(invs)
                 if stop:

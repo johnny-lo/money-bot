@@ -36,6 +36,33 @@ def test_invoice_datetime_日期加時間_沒時間是當天0點():
     assert einvoice.invoice_datetime("2026-08-29", None) == datetime(2026, 8, 29, 0, 0)
 
 
+# ── 明細回應的第二道核對（日期＋金額要跟清單列一致）──────────
+
+_ROW = {"invoice_no": "AA00000001", "date": "2026-06-05", "amount": 1055}
+
+
+@pytest.mark.parametrize("data,want", [
+    ({"invoiceDate": "20260605", "invoiceTime": "12:38:00", "totalAmount": "1055"}, time(12, 38)),
+    ({"data": {"invoiceDate": "20260605", "invoiceTime": "12:38:00", "totalAmount": "1,055"}}, time(12, 38)),
+    ({"invoiceDate": "20260605", "invoiceTime": "12:38:00", "totalAmount": 1055.0}, time(12, 38)),
+])
+def test_明細時間_日期金額都對才採用(data, want):
+    assert einvoice.checked_detail_time(_ROW, data) == want
+
+
+@pytest.mark.parametrize("data", [
+    None,
+    {"invoiceDate": "20260604", "invoiceTime": "12:38:00", "totalAmount": "1055"},   # 別天
+    {"invoiceDate": "20260605", "invoiceTime": "12:38:00", "totalAmount": "43"},     # 別的金額
+    {"invoiceTime": "12:38:00", "totalAmount": "1055"},                              # 沒日期
+    {"invoiceDate": "20260605", "invoiceTime": "12:38:00"},                          # 沒金額
+    {"invoiceDate": "20260605", "invoiceTime": "12:38:00", "totalAmount": "亂碼"},
+    {"invoiceDate": "20260605", "invoiceTime": "25:00:00", "totalAmount": "1055"},
+])
+def test_明細時間_對不上或缺欄位一律None(data):
+    assert einvoice.checked_detail_time(_ROW, data) is None
+
+
 # ── AC3 寫入：新增帶時間、已存在只補時間 ─────────────────
 
 class _Query:
