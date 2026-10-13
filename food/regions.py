@@ -122,7 +122,7 @@ def parse_tw_address(address: str | None) -> tuple[str | None, str | None]:
 
     為什麼錨定而不用 regex 掃：`新竹市東區南市里勝利路` —— 錨在開頭只會比中「東區」，
     永遠碰不到「南市」；任何 `[區鄉鎮市]` 掃描式 regex 都會吃成「東區南市」。
-    里名與行政區同形在真實資料裡是常態（中壢區中壢里、竹北市竹北里），不是特例。
+    里名與行政區同形是常態（中壢區中壢里、竹北市竹北里），不是特例。
     """
     s = fold(address).strip()
     if not s:

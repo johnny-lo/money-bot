@@ -218,7 +218,7 @@ def test_vision_uses_primary_and_stops(monkeypatch):
 
 
 def test_vision_falls_back_to_next_gemini_model(monkeypatch):
-    """8/24~8/29 真實故障：gemini-flash-latest 連續 503，備援模型正常。"""
+    """主模型連續 503、備援模型正常時，要改用備援模型。"""
     monkeypatch.setenv("MODEL_NAME", "primary")
     monkeypatch.setenv("GEMINI_FALLBACK_MODELS", "backup")
     calls = _stub_gemini(monkeypatch, {

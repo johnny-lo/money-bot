@@ -29,7 +29,7 @@ def test_解析_fetch_回應():
     assert "整理/abc" in h.labels and h.sent_date.isoformat() == "2026-10-12"
 
 
-# ── 補強：UIDVALIDITY 守衛、登入後才有的 MOVE、壞 header 不擋同步 ──────────
+# ── UIDVALIDITY 守衛、登入後才有的 MOVE、壞 header 不擋同步 ──────────
 
 import base64
 

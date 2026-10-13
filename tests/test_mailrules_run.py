@@ -87,7 +87,7 @@ def test_還有確認卡沒處理_拒絕執行歷史(monkeypatch):
         raise AssertionError
 
 
-# ── 補強：歷史全量同步、完成後拒絕重跑、UIDVALIDITY 中止不標完成 ───────────────
+# ── 歷史全量同步、完成後拒絕重跑、UIDVALIDITY 中止不標完成 ───────────────
 
 class LossyRepo(FakeRepo):
     """模擬真 DB：不存 List-Unsubscribe / 顯示名稱，headers() 讀回來 unsub 一律 False。"""

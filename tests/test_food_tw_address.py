@@ -19,7 +19,7 @@ _BY_ID = {r["id"]: r["address"] for r in _FIXTURE}
 _TW_ROWS = [r for r in _FIXTURE if r["country"] == "台灣"]
 
 
-# ---------- 逐條陷阱（每一條都是真實資料裡踩到的） ----------
+# ---------- 逐條陷阱 ----------
 
 @pytest.mark.parametrize("place_id, city, district", [
     (79, "新竹市", "東區"),      # 新竹市 vs 新竹縣：不能再糊成「新竹」

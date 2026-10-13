@@ -3,7 +3,7 @@
 // **同一份檔給兩個前端吃**：PWA 走 vite build（import 進 Spend.jsx），
 // 報表頁走 FastAPI 的 /report/ledger_filter.js 直接載入原始碼。
 // 分成兩份複製貼上的下場是兩邊的篩選語意慢慢漂移，使用者在兩個頁面點同一個分類
-// 卻看到不同結果（料理詞彙表也是同一份檔給兩邊用）。
+// 卻看到不同結果。
 //
 // 跑測試：cd frontend && npm test
 //
