@@ -21,6 +21,7 @@ def test_can_act():
 def test_custom_id_重啟後解析得回():
     assert ui.ConfirmButton.__discord_ui_compiled_template__.fullmatch("mailrules:confirm:s12")["card"] == "s12"
     assert ui.RejectSelect.__discord_ui_compiled_template__.fullmatch("mailrules:reject:s12")["card"] == "s12"
+    assert ui.SenderRejectSelect.__discord_ui_compiled_template__.fullmatch("mailrules:rejsender:s12")["card"] == "s12"
     assert ui.AssignSelect.__discord_ui_compiled_template__.fullmatch("mailrules:assign:42")["rid"] == "42"
 
 
@@ -47,7 +48,7 @@ def test_建議卡_view_含拒絕下拉與確認鈕():
     async def go():
         v = ui.suggest_view("s3", [R(1, "a@x.example"), R(2, "b@x.example")])
         ids = sorted(c.custom_id for c in v.children)
-        assert ids == ["mailrules:confirm:s3", "mailrules:reject:s3"]
+        assert ids == ["mailrules:confirm:s3", "mailrules:rejsender:s3"]
     asyncio.run(go())
 
 
@@ -129,7 +130,7 @@ def _patch_card(monkeypatch, rules):
     monkeypatch.setattr(ui.repo, "rejected_rules", lambda db: [r for r in rules if r.status == "rejected"])
 
 
-def test_拒絕卡上全部規則_直接發手動指定卡(monkeypatch):
+def test_舊卡_拒絕卡上全部規則_直接發手動指定卡(monkeypatch):
     rules = [dataclasses.replace(R(1, "a@x.example"), status="rejected"),
              dataclasses.replace(R(2, "b@x.example"), status="rejected")]
     _patch_card(monkeypatch, rules)
@@ -138,12 +139,14 @@ def test_拒絕卡上全部規則_直接發手動指定卡(monkeypatch):
     async def go():
         await ui.RejectSelect("s3", [discord.SelectOption(label="a", value="1")]).callback(it)
         sent = it.followup.send.await_args.kwargs["view"]
-        assert sorted(c.custom_id for c in sent.children) == ["mailrules:assign:1", "mailrules:assign:2"]
+        # 手動指定改成寄件者層：custom_id 帶卡號＋寄件者字母序索引
+        assert sorted(c.custom_id for c in sent.children) == ["mailrules:assignsender:s3:0",
+                                                              "mailrules:assignsender:s3:1"]
     asyncio.run(go())
     it.response.edit_message.assert_awaited_once()
 
 
-def test_只拒絕部分規則_不提前發手動指定卡(monkeypatch):
+def test_舊卡_只拒絕部分規則_不提前發手動指定卡(monkeypatch):
     rules = [dataclasses.replace(R(1, "a@x.example"), status="rejected"), R(2, "b@x.example")]
     _patch_card(monkeypatch, rules)
     it = _fake_interaction(values=["1"])

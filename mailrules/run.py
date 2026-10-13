@@ -24,6 +24,10 @@ class Busy(RuntimeError):
     """另一個信件整理正在跑（搶不到 _LOCK）。"""
 
 
+class PendingCards(RuntimeError):
+    """還有待確認的規則確認卡或重視公司卡，歷史執行零寫入拒絕（執行鈕據此補發還沒發出去的卡）。"""
+
+
 @contextmanager
 def _exclusive():
     if not _LOCK.acquire(blocking=False):
@@ -219,10 +223,10 @@ def execute_history(today: date, db=None, upto_card: str | None = None,
         if upto_card is not None:
             pending = [c for c in pending if card_no(c) <= card_no(upto_card)]
         if pending:
-            raise RuntimeError(f"還有 {len(pending)} 張確認卡沒處理")
+            raise PendingCards(f"還有 {len(pending)} 張確認卡沒處理")
         n = repo.pending_valued_count(db)
         if n:
-            raise RuntimeError(_VALUED_PENDING.format(n))
+            raise PendingCards(_VALUED_PENDING.format(n))
         if fingerprint is not None and plan_fingerprint(repo.confirmed_rules(db), repo.valued_set(db)) != fingerprint:
             raise RuntimeError(_EXPIRED)
         fresh = _sync(db, full=True)          # 寫入用的 UID 要是現在的；舊信的 unsub／顯示名稱也一併刷新
@@ -233,7 +237,7 @@ def execute_history(today: date, db=None, upto_card: str | None = None,
         verdicts = _classify_all(db, today, fresh, rules=rules, valued=valued)
         n = repo.pending_valued_count(db)     # 同步到的新信剛學到的網域：還沒確認 → 仍不寫
         if n:
-            raise RuntimeError(_VALUED_PENDING.format(n))
+            raise PendingCards(_VALUED_PENDING.format(n))
         report = RunReport(unknown_patterns=len(_unknown_groups(db, verdicts)),
                            protected=[h for h, v in verdicts.values() if v.protected])
         actions = _plan_all(db, verdicts, today, "history")

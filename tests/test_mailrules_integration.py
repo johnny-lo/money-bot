@@ -781,14 +781,14 @@ def test_add_suggestions_依類別排序_各類別各自分卡(monkeypatch):
     items = ([(f"p{i}@x.example", "p", "promo", "ai") for i in range(27)]
              + [(f"l{i}@x.example", "p", "login", "builtin") for i in range(3)])
     cards = repo.add_suggestions(db, items)
-    assert cards == ["s8", "s9", "s10"]
+    assert cards == ["s8", "s9"]                     # 每類一張整批核可卡（不再 25 條一張）
     by = {}
     for r in db.added:
         by.setdefault(r.card, set()).add(r.category)
     order = [k for k, _ in config.CATEGORIES]
-    assert by == {"s8": {"login"}, "s9": {"promo"}, "s10": {"promo"}}
+    assert by == {"s8": {"login"}, "s9": {"promo"}}
     assert order.index("login") < order.index("promo")
-    assert sum(1 for r in db.added if r.card == "s9") == 25
+    assert sum(1 for r in db.added if r.card == "s9") == 27
 
 
 def test_card_counts_依寄件者加樣式數封數(monkeypatch):
@@ -817,7 +817,7 @@ def test_notify_cards_卡片顯示封數_帶確認鈕(monkeypatch):
     assert "12 封" in got[0][0].description
 
     async def go():
-        assert sorted(c.custom_id for c in got[0][1]().children) == ["mailrules:confirm:s3", "mailrules:reject:s3"]
+        assert sorted(c.custom_id for c in got[0][1]().children) == ["mailrules:confirm:s3", "mailrules:rejsender:s3"]
     asyncio.run(go())
 
 

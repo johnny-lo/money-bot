@@ -114,16 +114,20 @@ def build_layer(key, msgs, rules, domains, today, q="", offset=0, limit=200) -> 
 def _collect(key, msgs, rules, domains, today, q) -> tuple[str, list]:
     """該層符合條件（含搜尋）的完整、已排序的項目；messages / rules 是原始 dict，其餘已是輸出列。"""
     if key == "rules":
-        items = [r for r in rules if _hit(q, r["sender"], r["subject_pattern"])]
+        # 也比對類別的中文名稱：確認卡尾行叫人來這裡看完整名單，打「推銷」就要篩得出那一類
+        items = [r for r in rules
+                 if _hit(q, r["sender"], r["subject_pattern"], config.LABELS.get(r["category"], r["category"]))]
         items.sort(key=lambda r: (_STATUS_ORDER.get(r["status"], 9), _CAT_ORDER.get(r["category"], 99),
                                   r["sender"], r["subject_pattern"]))
         return "rules", items
     if key == "valued":
-        # 已確認：因重視的公司而留下的信；待確認：確認卡上的數字（含子網域、還在信箱的信）
+        # 已確認：因重視的公司而留下的信；待確認：確認卡上的數字（含子網域、還在信箱的信）。
+        # 兩邊都只算沒有退訂連結的信（群發信不保護）
         out = []
         valued_doms = [addr_domain(m["from_addr"]) for m in msgs
-                       if m.get("reason") == REASON_VALUED and not m.get("gone_at")]
-        live = [m["from_addr"] for m in msgs if not m.get("gone_at") and not m.get("trashed_at")]
+                       if m.get("reason") == REASON_VALUED and not m.get("gone_at") and not m.get("unsub")]
+        live = [m["from_addr"] for m in msgs
+                if not m.get("gone_at") and not m.get("trashed_at") and not m.get("unsub")]
         shown = [d for d in domains if d.get("status") in _VALUED_STATUS and _hit(q, (d["domain"] or "").lower())]
         pending = count_by_domain(live, [d["domain"] for d in shown if d["status"] == "pending"])
         for d in shown:
@@ -166,7 +170,7 @@ def overview_from(msgs, rules, domains, today) -> list[dict]:
 def load(db) -> tuple[list[dict], list[dict], list[dict]]:
     """三張表各讀一次轉成 dict 列（約一萬列，整包讀進來再交給純函式）。"""
     mc = ("from_addr", "subject", "subject_pattern", "sent_date", "category", "reason", "in_inbox",
-          "labels_applied", "trashed_at", "gone_at")
+          "labels_applied", "trashed_at", "gone_at", "unsub")
     msgs = [dict(zip(mc, r)) for r in db.query(*[getattr(MailMessage, c) for c in mc]).all()]
     rc = ("sender", "subject_pattern", "category", "status", "suggested_by")
     rules = [dict(zip(rc, r)) for r in db.query(*[getattr(MailRule, c) for c in rc]).all()]

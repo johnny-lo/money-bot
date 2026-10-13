@@ -8,7 +8,6 @@ from models import MailMessage, MailRule, MailState, MailValuedDomain
 from . import config
 from .types import Action, MailHeader, MessageState, Rule, ValuedDomain, Verdict
 
-CARD_SIZE = 25
 _IN_CHUNK = 500
 
 
@@ -215,7 +214,7 @@ _CAT_ORDER = {k: i for i, (k, _) in enumerate(config.CATEGORIES)}
 
 
 def add_suggestions(db, items: list[tuple[str, str, str, str]]) -> list[str]:
-    """依類別排序、每個類別各自分卡（每張最多 CARD_SIZE 個樣式）；卡號只增不減。"""
+    """每類一張整批核可卡：同一次呼叫裡同一個類別的所有建議放同一張卡（依類別順序開卡）；卡號只增不減、不重用。"""
     seen, uniq = set(), []
     for it in items:
         if (it[0], it[1]) not in seen:
@@ -227,13 +226,12 @@ def add_suggestions(db, items: list[tuple[str, str, str, str]]) -> list[str]:
         groups.setdefault(it[2], []).append(it)
     n, cards = _max_card_no(db), []
     for group in groups.values():
-        for i in range(0, len(group), CARD_SIZE):
-            n += 1
-            card = f"s{n}"
-            cards.append(card)
-            for sender, pattern, category, by in group[i:i + CARD_SIZE]:
-                db.add(MailRule(sender=sender, subject_pattern=pattern, category=category,
-                                status="suggested", suggested_by=by, card=card))
+        n += 1
+        card = f"s{n}"
+        cards.append(card)
+        for sender, pattern, category, by in group:
+            db.add(MailRule(sender=sender, subject_pattern=pattern, category=category,
+                            status="suggested", suggested_by=by, card=card))
     if cards:
         db.commit()
     return cards
@@ -282,6 +280,31 @@ def reject(db, card: str, ids: list[int]) -> int:
     for r in _card_rows(db, card):
         if r.status == "suggested" and r.id in want:
             r.status = "rejected"
+            n += 1
+    db.commit()
+    return n
+
+
+def reject_senders(db, card: str, senders: list[str]) -> int:
+    """整批核可卡的「這些不是」：這些寄件者在這張卡上還在待確認的規則全部拒絕；回傳拒絕了幾條。"""
+    want, n = set(senders), 0
+    for r in _card_rows(db, card):
+        if r.card == card and r.status == "suggested" and r.sender in want:
+            r.status = "rejected"
+            n += 1
+    db.commit()
+    return n
+
+
+def assign_sender(db, card: str, sender: str, category: str) -> int:
+    """被拒絕的寄件者手動指定類別：這個寄件者在這張卡上被拒絕的規則（含先前手動指定過的，選錯可重選）
+    一起改成該類別並確認；回傳改了幾條。"""
+    n, now = 0, _now()
+    for r in _card_rows(db, card):
+        if r.card != card or r.sender != sender:
+            continue
+        if r.status == "rejected" or (r.status == "confirmed" and r.suggested_by == "user"):
+            r.category, r.status, r.suggested_by, r.confirmed_at = category, "confirmed", "user", now
             n += 1
     db.commit()
     return n
@@ -403,14 +426,17 @@ def valued_card(db, card: str) -> list[ValuedDomain]:
 
 
 def valued_card_counts(db, card: str) -> dict[str, int]:
-    """{網域: 封數}：卡上每個網域（含子網域）現在還在信箱（沒丟、沒消失）的信有幾封（確認卡顯示用）。"""
+    """{網域: 封數}：卡上每個網域（含子網域）現在還在信箱（沒丟、沒消失）、沒有退訂連結的信有幾封
+    ＝確認後會被保護的數量（群發信不保護）。確認卡顯示用。"""
     from .patterns import count_by_domain
     doms = [r.domain for r in _valued_card_rows(db, card)]
     if not doms:
         return {}
     rows = (db.query(MailMessage)
-            .filter(MailMessage.gone_at.is_(None), MailMessage.trashed_at.is_(None)).all())
-    return count_by_domain([r.from_addr for r in rows if r.gone_at is None and r.trashed_at is None], doms)
+            .filter(MailMessage.gone_at.is_(None), MailMessage.trashed_at.is_(None), MailMessage.unsub.is_(False))
+            .all())
+    return count_by_domain([r.from_addr for r in rows if r.gone_at is None and r.trashed_at is None and not r.unsub],
+                           doms)
 
 
 def pending_valued_cards(db) -> list[str]:

@@ -40,15 +40,17 @@ def test_重視公司_主旨不明顯也留收件匣():
 
 def test_重視公司_只有完整地址規則能覆蓋_網域規則不行():
     valued = {"corp-a.example"}
-    hh = h("careers@corp-a.example", "this job is a match")
+    hh = h("careers@corp-a.example", "this job is a match", unsub=False)      # 群發信（有退訂連結）不受重視公司保護
     assert C.classify(hh, "p", [rule("@corp-a.example", cat="jobs")], valued, set()).protected
     v = C.classify(hh, "p", [rule("careers@corp-a.example", cat="jobs")], valued, set())
     assert (v.category, v.protected) == ("jobs", False)
 
 
 def test_學習重視網域_排除平台_免費信箱_本人與目前公司():
-    hs = [h("a@corp-a.example", "面試邀請", unsub=False), h("b@mail.104.com.tw", "面試邀約"), h("c@gmail.com", "面試"),
-          h("hr@now-corp.example", "春酒邀請"), h("d@corp-b.example", "一般通知")]
+    # 全部 unsub=False、被排除的都用強字眼：排除只能靠平台／免費信箱／本人／目前公司這幾條，不是被群發信或弱字眼擋掉
+    hs = [h("a@corp-a.example", "面試邀請", unsub=False), h("b@mail.104.com.tw", "面試邀約", unsub=False),
+          h("c@gmail.com", "面試", unsub=False), h("hr@now-corp.example", "面試通知", unsub=False),
+          h("me@other.example", "錄取通知", unsub=False), h("d@corp-b.example", "一般通知", unsub=False)]
     got = C.learn_valued_domains(hs, {"me@other.example"}, {"now-corp.example"})
     assert set(got) == {"corp-a.example"}
 

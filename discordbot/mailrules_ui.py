@@ -1,6 +1,9 @@
 """信件規則引擎的 Discord 端：建議確認卡、重視公司確認卡、每日報告、職缺／推銷摘要、歷史整理計畫卡。
 
-元件用 DynamicItem：custom_id 自帶卡號／規則 id，bot 重啟後不需要記憶體狀態就能接手。只有本人能按。
+元件用 DynamicItem：custom_id 自帶卡號／索引，bot 重啟後不需要記憶體狀態就能接手。只有本人能按。
+建議確認卡是「每類一張整批核可卡」：以寄件者為單位拒絕／手動指定（規則仍是「寄件者＋主旨樣式」一條），
+下拉的 value 是卡上寄件者依字母排序後的索引（card_senders）——卡上規則只改狀態不增減，索引不會變；
+封數排序會變，不能當 value。重視公司卡的 value 同理用網域依字母排序後的索引（網域可能超過 100 字）。
 執行鈕的 custom_id 帶「計畫卡發出當下的最大卡號」與「已確認規則集合的指紋」：之後才長出的確認卡不擋執行，
 但之後又確認卡／手動指定規則 → 計畫過期，要用 /信件計畫 重發。
 確認卡與計畫卡都用 post_sync_wait 發：Discord 真的送出才記成已發（確認卡記在 mail_rules.posted_at、
@@ -22,6 +25,10 @@ from .bridge import post_sync, post_sync_wait
 COLOR = 0x3498DB
 _FAIL_COLOR = 0xE74C3C
 _MORE_RESERVE = 30            # daily_embed 截斷時留給「…還有 N 封」的字數
+CARD_LINES = 25               # 確認卡內文與「這些不是」下拉列幾個寄件者（Discord 下拉上限 25；其餘看名單）
+_SENDER_CHARS = 60            # 卡上寄件者地址最多顯示幾個字
+_ASSIGN_PER_MSG = 4           # 手動指定下拉一則訊息最多幾個（Discord 一則訊息最多 5 列元件）
+_FULL_LIST = "完整名單：/信件名單 層:你的規則，或手機 PWA 📬"
 
 
 def _owner_id() -> int | None:
@@ -45,19 +52,75 @@ def _cat(c: str) -> str:
     return config.LABELS.get(c, c)
 
 
-def suggest_embed(card: str, rules: list[Rule], counts: dict) -> discord.Embed:
-    cats = {r.category for r in rules}
-    if len(cats) == 1:
-        title = f"🤖 建議歸為『{_cat(next(iter(cats)))}』：{len(rules)} 個樣式"
-    else:
-        title = f"🤖 新寄件者分類建議：{len(rules)} 個樣式"
-    lines = []
+def card_senders(rules: list[Rule]) -> list[str]:
+    """卡上所有寄件者依字母排序（不分狀態）：下拉 option 的 value 與手動指定的 custom_id 都用這裡的索引。"""
+    return sorted({r.sender for r in rules})
+
+
+def _sender_rows(rules: list[Rule], counts: dict) -> list[dict]:
+    """每個寄件者一列，依封數由多到少（同封數依字母）。n＝封數（counts 空＝查不到 → None）；
+    state：live＝還有待確認的、confirmed、rejected、assigned＝被拒絕後本人手動指定了類別。"""
+    by: dict[str, list[Rule]] = {}
     for r in rules:
-        n = counts.get((r.sender, r.subject_pattern))
-        s = f"`{r.sender}`｜{r.subject_pattern}｜" + (f"{n} 封｜" if n is not None else "") + f"→ {_cat(r.category)}"
-        lines.append(f"~~{s}~~ 已拒絕" if r.status == "rejected" else s)
-    e = discord.Embed(title=title, description="\n".join(lines)[:4096], color=COLOR)
-    e.set_footer(text=f"信件整理 · {card} · 下拉勾不要的，再按「確認」")
+        by.setdefault(r.sender, []).append(r)
+    out = []
+    for i, sender in enumerate(sorted(by)):
+        rs = by[sender]
+        manual = [r for r in rs if r.status == "confirmed" and r.suggested_by == "user"]
+        if any(r.status == "suggested" for r in rs):
+            state = "live"
+        elif manual:
+            state = "assigned"
+        elif any(r.status == "confirmed" for r in rs):
+            state = "confirmed"
+        else:
+            state = "rejected"
+        n = sum(counts.get((r.sender, r.subject_pattern), 0) for r in rs) if counts else None
+        out.append({"sender": sender, "idx": i, "patterns": len({r.subject_pattern for r in rs}), "n": n,
+                    "state": state, "category": manual[0].category if manual else None})
+    out.sort(key=lambda x: (-(x["n"] or 0), x["sender"]))
+    return out
+
+
+def _sender_text(x: dict) -> str:
+    return (f"`{_one_line(x['sender'], _SENDER_CHARS)}`｜{x['patterns']} 種主旨"
+            + (f"｜{x['n']} 封" if x["n"] is not None else ""))
+
+
+def _sender_line(x: dict) -> str:
+    if x["state"] == "rejected":
+        return f"~~{_sender_text(x)}~~ 已拒絕"
+    if x["state"] == "assigned":
+        return f"~~{_sender_text(x)}~~ → {_cat(x['category'])}"
+    return _sender_text(x)
+
+
+def _card_status(rows: list[dict]) -> str:
+    if any(x["state"] == "live" for x in rows):
+        return "下拉勾不是這類的寄件者，其餘按「✅ 整類確認」"
+    ok, rej, man = (sum(1 for x in rows if x["state"] == st) for st in ("confirmed", "rejected", "assigned"))
+    if not ok:
+        return "全部拒絕" + (f"（手動指定 {man} 個）" if man else "")
+    return f"已確認 {ok} 個寄件者" + (f"、拒絕 {rej} 個" if rej else "") + (f"、手動指定 {man} 個" if man else "")
+
+
+def suggest_embed(card: str, rules: list[Rule], counts: dict) -> discord.Embed:
+    """每類一張：標題「建議歸為『類別』：N 個寄件者、M 封」，內文依封數列前 CARD_LINES 個寄件者，其餘一行指向名單。
+    封數查不到（counts 空）就整張不顯示封數。"""
+    rows = _sender_rows(rules, counts)
+    cats = {r.category for r in rules if r.suggested_by != "user"} or {r.category for r in rules}
+    head = f"🤖 建議歸為『{_cat(next(iter(cats)))}』" if len(cats) == 1 else "🤖 新寄件者分類建議"
+    title = f"{head}：{len(rows)} 個寄件者" + (f"、{sum(x['n'] for x in rows)} 封" if counts else "")
+    lines = [_sender_line(x) for x in rows[:CARD_LINES]]
+    rest = rows[CARD_LINES:]
+    if rest:
+        more = f"（{sum(x['n'] for x in rest)} 封）" if counts else ""
+        lines.append(f"…還有 {len(rest)} 個寄件者{more}，{_FULL_LIST}")
+    desc = "\n".join(lines)
+    if len(desc) > 4096:      # 每行已截長，正常到不了；保險：整行丟掉，不留半行
+        desc = desc[:4096].rsplit("\n", 1)[0]
+    e = discord.Embed(title=title[:256], description=desc, color=COLOR)
+    e.set_footer(text=f"信件整理 · {card} · {_card_status(rows)}")
     return e
 
 
@@ -69,9 +132,13 @@ def valued_embed(card: str, rows: list[ValuedDomain], counts: dict) -> discord.E
         s = f"{r.domain}｜{r.pattern or '—'}" + (f"｜{n} 封" if n is not None else "")
         lines.append(f"~~{s}~~ 已拒絕" if r.status == "rejected" else s)
     e = discord.Embed(title=f"🛡 新的重視公司：{len(rows)} 個網域", description="\n".join(lines)[:4096], color=COLOR)
-    done = not any(r.status == "pending" for r in rows)
-    e.set_footer(text=f"信件整理 · {card} · " + ("已確認" if done else
-                                                  "確認後這些網域寄來的信都留收件匣；下拉勾不是的，再按「確認」"))
+    if any(r.status == "pending" for r in rows):
+        status = "確認後這些網域寄來、沒有退訂連結的信都留收件匣；下拉勾不是的，再按「確認」"
+    else:
+        ok = sum(1 for r in rows if r.status == "confirmed")
+        rej = sum(1 for r in rows if r.status == "rejected")
+        status = (f"已確認 {ok} 個" + (f"、拒絕 {rej} 個" if rej else "")) if ok else "全部拒絕（沒有網域受保護）"
+    e.set_footer(text=f"信件整理 · {card} · {status}")
     return e
 
 
@@ -182,16 +249,67 @@ def _safe_valued_counts(db, card: str) -> dict:
         return {}
 
 
-async def _send_assign_cards(interaction, rejected: list[Rule]) -> None:
-    """被拒絕的規則沒有建議類別可確認，每 4 條發一張手動指定卡（Discord 一則訊息最多 5 列元件）。"""
-    for i in range(0, len(rejected), 4):
-        chunk = rejected[i:i + 4]
-        lines = "\n".join(f"`{r.sender}`｜{r.subject_pattern}" for r in chunk)
-        await interaction.followup.send(f"這些被拒絕的樣式請手動指定類別：\n{lines}"[:2000],
-                                        view=assign_view(chunk))
+def _indices(values) -> list[int]:
+    return [int(v) for v in values if str(v).isdigit()]
+
+
+async def _send_assign_cards(interaction, card: str, rules: list[Rule]) -> None:
+    """被拒絕的寄件者沒有建議類別可確認：每人一個「手動指定類別」下拉（整個寄件者在這張卡上被拒絕的樣式一起指定），
+    每 _ASSIGN_PER_MSG 個一則訊息（Discord 一則訊息最多 5 列元件）。"""
+    senders = card_senders(rules)
+    rej: dict[str, set] = {}
+    for r in rules:
+        if r.status == "rejected":
+            rej.setdefault(r.sender, set()).add(r.subject_pattern)
+    picks = [(senders.index(s), s) for s in sorted(rej)]
+    for i in range(0, len(picks), _ASSIGN_PER_MSG):
+        chunk = picks[i:i + _ASSIGN_PER_MSG]
+        lines = "\n".join(f"`{_one_line(s, _SENDER_CHARS)}`｜{len(rej[s])} 種主旨" for _, s in chunk)
+        await interaction.followup.send(f"這些被拒絕的寄件者請手動指定類別（{card} 上這個寄件者的樣式一起指定）：\n{lines}"[:2000],
+                                        view=assign_view(card, chunk))
+
+
+async def _rerender_card(interaction, card: str, rules: list[Rule], counts: dict) -> None:
+    view = suggest_view(card, rules, counts)
+    await interaction.response.edit_message(embed=suggest_embed(card, rules, counts), view=view)
+    if view is None:      # 卡上全被拒絕：沒有確認鈕了，直接發手動指定卡
+        await _send_assign_cards(interaction, card, rules)
+
+
+class SenderRejectSelect(discord.ui.DynamicItem[discord.ui.Select],
+                         template=r"mailrules:rejsender:(?P<card>s\d+)"):
+    """整批核可卡的「這些不是」：value＝寄件者在卡上的字母序索引；勾一個＝這個寄件者在卡上還待確認的樣式全部拒絕。"""
+    def __init__(self, card: str, options: list[discord.SelectOption]):
+        options = options or [discord.SelectOption(label="-", value="-")]
+        super().__init__(discord.ui.Select(placeholder="勾選不是這類的寄件者", min_values=1,
+                                           max_values=len(options), options=options,
+                                           custom_id=f"mailrules:rejsender:{card}"))
+        self.card = card
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        opts = [discord.SelectOption(label=o.label, value=o.value) for o in getattr(item, "options", [])]
+        return cls(match["card"], opts)
+
+    async def callback(self, interaction: discord.Interaction):
+        why = _guard_fail(interaction)
+        if why:
+            await interaction.response.send_message(f"⛔ {why}", ephemeral=True)
+            return
+        idxs = _indices((interaction.data or {}).get("values", []))
+        db = SessionLocal()
+        try:
+            senders = card_senders(repo.card_rules(db, self.card))
+            repo.reject_senders(db, self.card, [senders[i] for i in idxs if i < len(senders)])
+            rules = repo.card_rules(db, self.card)
+            counts = _safe_counts(db, self.card)
+        finally:
+            db.close()
+        await _rerender_card(interaction, self.card, rules, counts)
 
 
 class RejectSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"mailrules:reject:(?P<card>[\w-]+)"):
+    """舊版（每 25 條一張）確認卡的逐條拒絕下拉，value＝規則 id；只為了已經發出去的舊卡還按得動，新卡不再用。"""
     def __init__(self, card: str, options: list[discord.SelectOption]):
         super().__init__(discord.ui.Select(placeholder="勾選不要照建議的樣式", min_values=1,
                                            max_values=len(options), options=options,
@@ -208,7 +326,7 @@ class RejectSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"mailrul
         if why:
             await interaction.response.send_message(f"⛔ {why}", ephemeral=True)
             return
-        ids = [int(v) for v in (interaction.data or {}).get("values", [])]
+        ids = _indices((interaction.data or {}).get("values", []))
         db = SessionLocal()
         try:
             repo.reject(db, self.card, ids)
@@ -216,15 +334,13 @@ class RejectSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"mailrul
             counts = _safe_counts(db, self.card)
         finally:
             db.close()
-        view = suggest_view(self.card, rules)
-        await interaction.response.edit_message(embed=suggest_embed(self.card, rules, counts), view=view)
-        if view is None:      # 卡上規則全被拒絕：沒有確認鈕了，直接發手動指定卡
-            await _send_assign_cards(interaction, [r for r in rules if r.status == "rejected"])
+        await _rerender_card(interaction, self.card, rules, counts)
 
 
 class ConfirmButton(discord.ui.DynamicItem[discord.ui.Button], template=r"mailrules:confirm:(?P<card>[\w-]+)"):
+    """整類確認：卡上其餘還待確認的規則全部確認（新舊卡共用）。"""
     def __init__(self, card: str):
-        super().__init__(discord.ui.Button(label="✅ 確認", style=discord.ButtonStyle.success,
+        super().__init__(discord.ui.Button(label="✅ 整類確認", style=discord.ButtonStyle.success,
                                            custom_id=f"mailrules:confirm:{card}"))
         self.card = card
 
@@ -241,21 +357,64 @@ class ConfirmButton(discord.ui.DynamicItem[discord.ui.Button], template=r"mailru
         try:
             repo.confirm_card(db, self.card, [])
             rules = repo.card_rules(db, self.card)
-            rejected = [r for r in repo.rejected_rules(db) if r.card == self.card]
             counts = _safe_counts(db, self.card)
         finally:
             db.close()
         await interaction.response.edit_message(embed=suggest_embed(self.card, rules, counts), view=None)
         await interaction.followup.send(f"已確認（by {interaction.user.display_name}）")
-        await _send_assign_cards(interaction, rejected)
+        await _send_assign_cards(interaction, self.card, rules)
+
+
+def _assign_options() -> list[discord.SelectOption]:
+    # 不提供「重要」：保護的信不走規則（安全網），手動指定只給會整理的類別
+    return [discord.SelectOption(label=name, value=key) for key, name in config.CATEGORIES if key != "keep_inbox"]
+
+
+def _valid_category(vals) -> str | None:
+    return vals[0] if vals and vals[0] in config.LABELS and vals[0] != "keep_inbox" else None
+
+
+class SenderAssignSelect(discord.ui.DynamicItem[discord.ui.Select],
+                         template=r"mailrules:assignsender:(?P<card>s\d+):(?P<idx>\d+)"):
+    """被拒絕的寄件者手動指定類別；idx＝寄件者在卡上的字母序索引（同 SenderRejectSelect）。"""
+    def __init__(self, card: str, idx: int, label: str = ""):
+        super().__init__(discord.ui.Select(placeholder=_one_line(label or f"寄件者 {idx}", 120) + " → 選類別",
+                                           min_values=1, max_values=1, options=_assign_options(),
+                                           custom_id=f"mailrules:assignsender:{card}:{idx}"))
+        self.card, self.idx = card, idx
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match["card"], int(match["idx"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        why = _guard_fail(interaction)
+        if why:
+            await interaction.response.send_message(f"⛔ {why}", ephemeral=True)
+            return
+        cat = _valid_category((interaction.data or {}).get("values", []))
+        if cat is None:
+            await interaction.response.send_message("⛔ 類別無效", ephemeral=True)
+            return
+        db = SessionLocal()
+        try:
+            senders = card_senders(repo.card_rules(db, self.card))
+            sender = senders[self.idx] if self.idx < len(senders) else None
+            n = repo.assign_sender(db, self.card, sender, cat) if sender else 0
+        finally:
+            db.close()
+        if sender is None:
+            await interaction.response.send_message(f"⛔ {self.card} 上找不到這個寄件者", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            f"`{_one_line(sender, _SENDER_CHARS)}` 在 {self.card} 上的 {n} 個樣式已歸為『{_cat(cat)}』")
 
 
 class AssignSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"mailrules:assign:(?P<rid>\d+)"):
+    """舊版逐條手動指定（value＝規則 id）；只為了已經發出去的舊訊息還按得動，新卡用 SenderAssignSelect。"""
     def __init__(self, rid: int, label: str = ""):
-        # 不提供「重要」：保護的信不走規則（安全網），手動指定只給會整理的類別
-        opts = [discord.SelectOption(label=name, value=key) for key, name in config.CATEGORIES if key != "keep_inbox"]
         super().__init__(discord.ui.Select(placeholder=(label or f"規則 {rid}")[:144] + " → 選類別",
-                                           min_values=1, max_values=1, options=opts,
+                                           min_values=1, max_values=1, options=_assign_options(),
                                            custom_id=f"mailrules:assign:{rid}"))
         self.rid = rid
 
@@ -268,16 +427,16 @@ class AssignSelect(discord.ui.DynamicItem[discord.ui.Select], template=r"mailrul
         if why:
             await interaction.response.send_message(f"⛔ {why}", ephemeral=True)
             return
-        vals = (interaction.data or {}).get("values", [])
-        if not vals or vals[0] not in config.LABELS or vals[0] == "keep_inbox":
+        cat = _valid_category((interaction.data or {}).get("values", []))
+        if cat is None:
             await interaction.response.send_message("⛔ 類別無效", ephemeral=True)
             return
         db = SessionLocal()
         try:
-            repo.assign(db, self.rid, vals[0])
+            repo.assign(db, self.rid, cat)
         finally:
             db.close()
-        await interaction.response.send_message(f"規則 {self.rid} 已歸為『{_cat(vals[0])}』")
+        await interaction.response.send_message(f"規則 {self.rid} 已歸為『{_cat(cat)}』")
 
 
 class ExecuteButton(discord.ui.DynamicItem[discord.ui.Button],
@@ -313,6 +472,19 @@ class ExecuteButton(discord.ui.DynamicItem[discord.ui.Button],
             emb = daily_embed(rep)
             emb.title = "🗂 歷史整理完成"
             view = None
+        except run.PendingCards as e:
+            # 擋下來的卡可能根本沒發出去過（頻道沒設、bot 沒 ready）：當場補發。post_sync_wait 會等 event loop，
+            # 不能在 loop 上直接呼叫
+            try:
+                sent = await asyncio.to_thread(post_unposted_cards)
+            except Exception as err:
+                print(f"⚠️ 執行鈕補發確認卡失敗：{err}")
+                sent = []
+            tail = (f"已補發還沒發出去的確認卡：{'、'.join(sent)}；處理完再用 /信件計畫 重發計畫卡" if sent
+                    else "待確認的卡都發過了，請先到信件頻道處理；找不到卡可用 /信件計畫 重發")
+            emb = discord.Embed(title="⏸ 還有待確認的卡，歷史整理沒有執行", description=f"{e}\n{tail}"[:4000],
+                                color=_FAIL_COLOR)
+            view = _exec_view(self.upto, self.fp)
         except Exception as e:
             emb = discord.Embed(title="❌ 歷史整理失敗", description=str(e)[:4000], color=_FAIL_COLOR)
             view = _exec_view(self.upto, self.fp)          # 處理完再按一次：同一顆鈕要留著
@@ -324,7 +496,7 @@ class ExecuteButton(discord.ui.DynamicItem[discord.ui.Button],
 
 class ValuedRejectSelect(discord.ui.DynamicItem[discord.ui.Select],
                          template=r"mailrules:vreject:(?P<card>v\d+)"):
-    """重視公司卡：下拉多選「這些不是重視的公司」（值＝網域）。"""
+    """重視公司卡：下拉多選「這些不是重視的公司」（value＝網域在卡上依字母排序的索引；舊卡的 value 是網域本身，照收）。"""
     def __init__(self, card: str, options: list[discord.SelectOption]):
         options = options or [discord.SelectOption(label="-", value="-")]
         super().__init__(discord.ui.Select(placeholder="這些不是重視的公司", min_values=1,
@@ -342,10 +514,12 @@ class ValuedRejectSelect(discord.ui.DynamicItem[discord.ui.Select],
         if why:
             await interaction.response.send_message(f"⛔ {why}", ephemeral=True)
             return
-        domains = [v for v in (interaction.data or {}).get("values", []) if v != "-"]
+        vals = [v for v in (interaction.data or {}).get("values", []) if v != "-"]
         db = SessionLocal()
         try:
-            repo.reject_valued(db, self.card, domains)
+            doms = _valued_domains(repo.valued_card(db, self.card))
+            picked = [doms[int(v)] if v.isdigit() else v for v in vals if not v.isdigit() or int(v) < len(doms)]
+            repo.reject_valued(db, self.card, picked)
             rows = repo.valued_card(db, self.card)
             counts = _safe_valued_counts(db, self.card)
         finally:
@@ -382,33 +556,43 @@ class ValuedConfirmButton(discord.ui.DynamicItem[discord.ui.Button],
         await interaction.followup.send(f"已確認 {n} 個重視公司（by {interaction.user.display_name}）")
 
 
+def _valued_domains(rows: list[ValuedDomain]) -> list[str]:
+    """卡上所有網域依字母排序（不分狀態）：下拉 option 的 value 用這裡的索引。"""
+    return sorted(r.domain for r in rows)
+
+
 def valued_view(card: str, rows: list[ValuedDomain]) -> discord.ui.View | None:
     live = [r for r in rows if r.status == "pending"]
     if not live:
         return None
+    idx = {d: i for i, d in enumerate(_valued_domains(rows))}
     v = discord.ui.View(timeout=None)
-    opts = [discord.SelectOption(label=r.domain[:100], value=r.domain) for r in live[:25]]
+    opts = [discord.SelectOption(label=_one_line(r.domain, 100), value=str(idx[r.domain])) for r in live[:25]]
     v.add_item(ValuedRejectSelect(card, opts))
     v.add_item(ValuedConfirmButton(card))
     return v
 
 
-def suggest_view(card: str, rules: list[Rule]) -> discord.ui.View | None:
-    live = [r for r in rules if r.status == "suggested"]
+def suggest_view(card: str, rules: list[Rule], counts: dict | None = None) -> discord.ui.View | None:
+    """「這些不是」下拉只列封數最多的 CARD_LINES 個還待確認的寄件者；value＝字母序索引。"""
+    live = [x for x in _sender_rows(rules, counts or {}) if x["state"] == "live"]
     if not live:
         return None
     v = discord.ui.View(timeout=None)
-    opts = [discord.SelectOption(label=f"{r.sender}｜{r.subject_pattern}"[:100], value=str(r.id))
-            for r in live[:25]]
-    v.add_item(RejectSelect(card, opts))
+    opts = [discord.SelectOption(label=_one_line(x["sender"], 100), value=str(x["idx"]),
+                                 description=_one_line(f"{x['patterns']} 種主旨"
+                                                       + (f"｜{x['n']} 封" if x["n"] is not None else ""), 100))
+            for x in live[:CARD_LINES]]
+    v.add_item(SenderRejectSelect(card, opts))
     v.add_item(ConfirmButton(card))
     return v
 
 
-def assign_view(rules: list[Rule]) -> discord.ui.View:
+def assign_view(card: str, picks: list[tuple[int, str]]) -> discord.ui.View:
+    """picks＝[(寄件者字母序索引, 寄件者)]，最多 _ASSIGN_PER_MSG 個。"""
     v = discord.ui.View(timeout=None)
-    for r in rules[:4]:
-        v.add_item(AssignSelect(r.id, f"{r.sender}｜{r.subject_pattern}"))
+    for idx, sender in picks[:_ASSIGN_PER_MSG]:
+        v.add_item(SenderAssignSelect(card, idx, sender))
     return v
 
 
@@ -461,7 +645,7 @@ def notify_cards(card_ids: list[str]) -> list[str]:
         try:
             rules, counts = _card_payload(card)
             ok = _post_wait([suggest_embed(card, rules, counts)],
-                            make_view=lambda c=card, rs=rules: suggest_view(c, rs))
+                            make_view=lambda c=card, rs=rules, cn=counts: suggest_view(c, rs, cn))
             if ok:
                 _mark_posted([card])
                 sent.append(card)

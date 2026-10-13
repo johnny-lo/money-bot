@@ -40,12 +40,12 @@ def test_record_actions_冪等欄位():
     assert db.commits == 2
 
 
-def test_add_suggestions_每25筆一張卡_卡號只增不減(monkeypatch):
+def test_add_suggestions_同類一張卡_卡號只增不減(monkeypatch):
     monkeypatch.setattr(repo, "_max_card_no", lambda db: 7)
     db = FakeSession()
     cards = repo.add_suggestions(db, [(f"a{i}@x.example", "p", "promo", "ai") for i in range(30)])
-    assert cards == ["s8", "s9"]
-    assert [r.card for r in db.added].count("s8") == 25 and db.commits == 1
+    assert cards == ["s8"]
+    assert [r.card for r in db.added].count("s8") == 30 and db.commits == 1
 
 
 def test_confirm_card_只動該卡的_suggested(monkeypatch):

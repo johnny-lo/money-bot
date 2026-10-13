@@ -66,7 +66,7 @@ def classify(h: MailHeader, pattern: str, rules: list[Rule], valued: set[str], s
     if has_job_keyword(h.subject):
         return Verdict("keep_inbox", REASON_JOB, True)
     r = match_rule(h, pattern, rules)
-    if _domain_in(addr_domain(h.from_addr), valued):
+    if not h.unsub and _domain_in(addr_domain(h.from_addr), valued):    # 重視公司的群發信不保護，照一般規則走
         if r and r.sender.lower() == h.from_addr.lower():
             return Verdict(r.category, f"規則 #{r.id}", False)
         return Verdict("keep_inbox", REASON_VALUED, True)

@@ -145,8 +145,8 @@ def dom(domain, status="pending", card=None, posted=None, pattern="面試 #"):
                            source_subject_pattern=pattern, first_seen=datetime(2026, 10, 1))
 
 
-def mrow(addr, gone=None, trashed=None):
-    return SimpleNamespace(from_addr=addr, gone_at=gone, trashed_at=trashed)
+def mrow(addr, gone=None, trashed=None, unsub=False):
+    return SimpleNamespace(from_addr=addr, gone_at=gone, trashed_at=trashed, unsub=unsub)
 
 
 # ── AC4／AC5：狀態、只認確認、卡號 ─────────────────────────────────────
@@ -372,7 +372,7 @@ def test_重視公司卡_custom_id_解析():
         v = ui.valued_view("v3", [V("a.example"), V("b.example", "rejected")])
         assert sorted(c.custom_id for c in v.children) == ["mailrules:vconfirm:v3", "mailrules:vreject:v3"]
         sel = next(c for c in v.children if c.custom_id.startswith("mailrules:vreject"))
-        assert [o.value for o in sel.item.options] == ["a.example"]
+        assert [o.value for o in sel.item.options] == ["0"]          # value＝網域依字母排序的索引，不是網域本身
         assert ui.valued_view("v3", [V("a.example", "confirmed")]) is None
     asyncio.run(go())
 
@@ -425,7 +425,7 @@ def test_非本人按不動(monkeypatch):
 def test_拒絕網域_卡上劃掉_還有待確認的留元件(monkeypatch):
     fake = _card_wire(monkeypatch, [V("a.example"), V("b.example")])
     it = _ix()
-    it.data = {"values": ["b.example"]}
+    it.data = {"values": ["1"]}                                      # b.example 的字母序索引
 
     async def go():
         await ui.ValuedRejectSelect("v3", []).callback(it)
