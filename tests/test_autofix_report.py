@@ -48,7 +48,7 @@ def test_forbidden():
         "scripts/systemd/x.service"]
 
 
-# ── 最終審查的修正 ────────────────────────────────────────────
+# ── 測試結果來源與禁區 ────────────────────────────────────────
 from autofix.report import parse_test_log, deleted_tests
 
 

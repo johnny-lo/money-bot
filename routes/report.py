@@ -8,8 +8,7 @@ from models import Transaction, Income
 from auth import validate_report_token, require_token, generate_report_token
 
 # 流水帳篩選的純函式。PWA 走 vite build 吃 frontend/src/ledgerFilter.js，
-# 報表頁走這個路由拿**同一個檔案**——複製第二份 predicate 的下場是兩份慢慢漂移，
-# 這個 repo 在料理詞彙表上已經記取過這個教訓（見 food/cuisine.py）。
+# 報表頁走這個路由拿**同一個檔案**——複製第二份 predicate 的下場是兩份慢慢漂移。
 LEDGER_FILTER_JS = "frontend/src/ledgerFilter.js"
 
 router = APIRouter()

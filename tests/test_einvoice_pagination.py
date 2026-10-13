@@ -1,7 +1,7 @@
 """einvoice 翻頁選擇器的回歸測試(hermetic,不連網)。
 
-守住的 bug:政府站分頁是 Bootstrap `<a class="page-link">下一頁</a>`,舊版用
-button[aria-label="下一頁"]/a[rel=next] 從來沒中過 → 多頁查詢只抓得到第 1 頁。
+守住:政府站分頁是 Bootstrap `<a class="page-link">下一頁</a>`,
+button[aria-label="下一頁"]/a[rel=next] 這類選擇器不會中 → 多頁查詢只抓得到第 1 頁。
 也守「最後一頁(li.disabled)時要回 False」讓翻頁迴圈正確結束。
 
 需要 Playwright(僅容器內有);主機無則整檔 skip。
@@ -41,7 +41,7 @@ async def _probe(html):
 
 def test_next_page_found_and_clicked_when_enabled():
     found, clicked = asyncio.run(_probe(FIXTURE))
-    assert found is True       # 舊 selector 在這裡會是 False(就是 bug)
+    assert found is True       # button[aria-label]/rel=next 選擇器在這裡會是 False
     assert clicked is True
 
 

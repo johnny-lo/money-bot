@@ -122,7 +122,7 @@ def parse_tw_address(address: str | None) -> tuple[str | None, str | None]:
 
     為什麼錨定而不用 regex 掃：`新竹市東區南市里勝利路` —— 錨在開頭只會比中「東區」，
     永遠碰不到「南市」；任何 `[區鄉鎮市]` 掃描式 regex 都會吃成「東區南市」。
-    里名與行政區同形在真實資料裡是常態（中壢區中壢里、竹北市竹北里），不是特例。
+    里名與行政區同形是常態（中壢區中壢里、竹北市竹北里），不是特例。
     """
     s = fold(address).strip()
     if not s:
@@ -160,12 +160,12 @@ def region_matches(query: str, country: str | None, city: str | None,
 
     三條規則，由嚴到寬：
     1. 折字後與任一欄位**全名相等** → 中。
-    2. 查詢自帶「市/縣」後綴＝使用者明確指定 → 只認全名，不再模糊比
+    2. 查詢自帶「市/縣」後綴＝使用者明確指定 → 只認全名，不模糊比
        （`新竹市` 不該撈到新竹縣的店）。
-    3. 否則 canon 後互相包含（沿用舊行為，只是多比一個 district）
+    3. 否則 canon 後互相包含（國家、縣市、district 都比）
        → `中壢` 命中 `中壢區`、`竹北` 命中 `竹北市`。
 
-    `district` 給預設值，舊呼叫端不改也不會壞。
+    `district` 給預設值，只傳縣市的呼叫端也照常運作。
     """
     q_raw = fold(query).strip()
     if not q_raw:
@@ -233,8 +233,8 @@ def parse_address_components(components: list[dict] | None) -> dict:
 def resolve_region(address: str | None, components: list[dict] | None) -> dict:
     """地址文字 + addressComponents → {country, city, district}。**唯一入口。**
 
-    台灣以**地址文字為單一真相**：實測同樣兩個縣市，Google 對某些店給得出行政區、
-    對另一些給 NULL，竹北市/竹東鎮更是從沒給過 —— components 的行政區不可靠。
+    台灣以**地址文字為單一真相**：同樣兩個縣市，Google 對某些店給得出行政區、
+    對另一些給 NULL，竹北市/竹東鎮則一律不給 —— components 的行政區不可靠。
     地址文字解不出才退回 components。國外完全走 components（那條路徑一字不動）。
     """
     base = parse_address_components(components)

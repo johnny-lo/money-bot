@@ -1,7 +1,7 @@
 """_wait_landing 回歸測試(hermetic,不連網)。
 
-守住的 bug:登入其實成功、已落在 /portal/btc/ 頁，但 SPA 還沒畫完(body 沒有「登出」
-也沒有查詢關鍵字)，舊邏輯只讀一次就判 unknown → 多燒一次登入。
+守住:登入其實成功、已落在 /portal/btc/ 頁，但 SPA 還沒畫完(body 沒有「登出」
+也沒有查詢關鍵字)時要輪詢；只讀一次就判 unknown 會多燒一次登入。
 需要 Playwright(僅容器內有);主機無則整檔 skip。
 """
 import asyncio

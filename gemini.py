@@ -76,8 +76,8 @@ def _fallback_models() -> list[str]:
     """影像辨識要試的 Gemini 模型順序：主模型（MODEL_NAME）在前，備援在後。
 
     備援清單放 GEMINI_FALLBACK_MODELS（逗號分隔）。之所以要有這層：MODEL_NAME 設的
-    是 `gemini-flash-latest` 這種 alias，Google 端一忙就整串回 503——2026/08/24~08/29
-    就是這樣連續多天辨識不出 CAPTCHA，發票同步全空轉。單一模型 = 單點故障。
+    是 `gemini-flash-latest` 這種 alias，Google 端一忙就整串回 503，可能連續多天
+    辨識不出 CAPTCHA、發票同步全空轉。單一模型 = 單點故障。
     """
     models = [os.getenv("MODEL_NAME")]
     models += [m.strip() for m in os.getenv("GEMINI_FALLBACK_MODELS", "").split(",")]
@@ -101,14 +101,14 @@ def vision_text(prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg",
 
     validate：可選的「這個答案能不能用」檢查。**沒有它退避會有一半是假的**——
     模型拒絕作答時是 HTTP 200 回一段「我無法協助辨識驗證碼」，不是例外；只 try/except
-    的話那段廢話會被當答案傳回去，後面的備援模型永遠輪不到。實測 gemini-3.5-flash
+    的話那段廢話會被當答案傳回去，後面的備援模型永遠輪不到。例如 gemini-3.5-flash
     對 CAPTCHA 就是這種反應，而 gemini-3.6-flash 認得出來。
 
     schema：要結構化輸出時給 JSON Schema，每一層（Gemini 各模型、codex）都帶同一份，
     所以不論哪層接手，回來的都是同一個形狀的 JSON。
 
     全掛才丟例外，訊息帶上每一層的失敗原因——否則 log 只剩一句「辨識失敗」，
-    根本分不出是模型忙、金鑰過期、還是模型名被 Google 下架（實測 gemini-2.5-flash 已 404）。
+    根本分不出是模型忙、金鑰過期、還是模型名被 Google 下架（下架的模型回 404，例如 gemini-2.5-flash）。
     """
     errors: list[str] = []
 
@@ -155,7 +155,7 @@ def generate_persona_comment(transaction_summary: str, context: str | None = Non
 
     **算不出來就傳 None，不要傳空字串或編造的數字。** persona.md 對「沒有水位
     資訊」定義了保守模式（預設沒超支、禁止告誡）；餵假資料會讓那條防線失效，
-    退回舊版「只看單筆金額 → 每筆稍大的都被唸」的行為。
+    變成「只看單筆金額 → 每筆稍大的都被唸」。
     """
     try:
         parts = [f"{PERSONA_TEXT}\n\n---\n"]
@@ -173,7 +173,7 @@ def generate_persona_comment(transaction_summary: str, context: str | None = Non
         return gemini_text(prompt).strip()
     except Exception as e:
         # 免費額度用完會回 429，那時 Gemini 這條路整天都不通。退到 codex（吃 ChatGPT
-        # 訂閱、無計費配額）雖然慢很多（實測 ~7 秒），但總比整天沒有角色回應好。
+        # 訂閱、無計費配額）雖然慢很多（約 7 秒），但總比整天沒有角色回應好。
         print(f"⚠️ Gemini 角色回應失敗，改用 codex：{e}")
     try:
         return codex_text(prompt).strip()

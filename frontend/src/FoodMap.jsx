@@ -3,7 +3,7 @@ import { loadMaps } from './maps'
 
 const LOCATE_ZOOM = 11 // 📍後縮放層級：11≈一個縣市（數字越大越近）
 
-// 重構後：純呈現。收 places + selected + onSelect，自己不抓資料、不管篩選。
+// 純呈現。收 places + selected + onSelect，自己不抓資料、不管篩選。
 export default function FoodMap({ places, selected, onSelect }) {
   const mapElRef = useRef(null)
   const mapRef = useRef(null)

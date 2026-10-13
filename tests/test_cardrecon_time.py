@@ -162,7 +162,7 @@ def test_時間線索_取時間差最小():
 
 def test_時間線索文字_與優先於日期近似():
     c = ch(500, t="12:00")
-    manual = TxHint("id2", D, 510, "手記午餐")                               # 原本會被當近似紀錄
+    manual = TxHint("id2", D, 510, "手記午餐")                               # 只看日期金額會被當近似紀錄
     out = hints.arrange([(1, c)], [manual], [c], [th("INV", 1234)])
     assert [k for k, _ in out] == ["near"]
     assert out[0][1][0][2] == "≈ 帳上 12:05 某某商店 $1,234（差 $734）"

@@ -62,7 +62,7 @@ _NAME_LOCAL = re.compile(r"[a-z]{2,}(?:[._-][a-z]{2,}){1,2}\d*", re.I)
 
 def is_human(h: MailHeader) -> bool:
     """免費信箱（不像系統代號）→ 真人；其他網域只認「名.姓」，而且沒有任何一段就是網域裡的品牌。
-    試跑時郵局、券商、銀行、公司系統帳號都被當成真人，所以收緊。"""
+    郵局、券商、銀行、公司系統帳號的 local part 常常像人名，所以其他網域要求這麼嚴。"""
     addr = (h.from_addr or "").strip().lower()
     local, _, dom = addr.rpartition("@")
     if not local or not dom:

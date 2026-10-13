@@ -107,7 +107,7 @@ def test_新店會分類(fake_db):
 
 
 def test_退化回應不會把好資料抹成空(fake_db):
-    """Places 偶爾回傳缺 addressComponents 的結果 → 舊版會直接把 city/district 寫成 None。"""
+    """Places 偶爾回傳缺 addressComponents 的結果 → 不能因此把 city/district 寫成 None。"""
     old = FakeRec(place_id="p1", name="舊名", city="桃園市", district="中壢區",
                   address="舊地址", lat=24.9, lng=121.2)
     fake_db["session"] = FakeSession(existing=old)

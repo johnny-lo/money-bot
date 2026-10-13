@@ -143,7 +143,7 @@ def parse_og(html_body: str) -> dict:
     }
 
 
-_FETCH_UA = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"  # Meta 平台對爬蟲 UA 才回 og meta;一般網站也接受。實測 Threads 用瀏覽器 UA 拿不到、用 facebookexternalhit 拿得到 og:description
+_FETCH_UA = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"  # Meta 平台對爬蟲 UA 才回 og meta;一般網站也接受。Threads 對瀏覽器 UA 不給 og:description、對 facebookexternalhit 才給
 _FETCH_TIMEOUT = 12
 _FETCH_MAX_BYTES = 400_000
 
@@ -278,7 +278,7 @@ _DEEP_PROMPT = """任務:從這個美食社群連結抽出店家資訊。
 
 
 def deep_extract_via_codex(url: str, *, hint: str = "") -> dict | None:
-    """注意:這是 blocking subprocess(120s timeout);從 async 路徑呼叫請用 asyncio.to_thread 包(Task 8 已正確包了)。
+    """注意:這是 blocking subprocess(120s timeout);從 async 路徑呼叫請用 asyncio.to_thread 包。
 
     codex full-access 看圖 + 搜尋深度振查。失敗回 None。"""
     if not url:
@@ -301,7 +301,7 @@ def deep_extract_via_codex(url: str, *, hint: str = "") -> dict | None:
             # 以及 rw 掛載的 ~/.codex(ChatGPT 憑證,還會影響主機自己的 codex 設定)。
             # read-only 下 shell 指令 fail-closed(bwrap 起不了 namespace → 直接失敗),
             # 而抽取需要的網路能力由原生 web_search 工具提供,不經過 shell。
-            # 實測:同一個頁面兩種模式都抽得到,read-only 反而少用 ~18% token。
+            # read-only 不影響抽取結果,token 用量也較少。
             "-s", "read-only",
             "-c", "tools.web_search=true",
             "-C", "/tmp",

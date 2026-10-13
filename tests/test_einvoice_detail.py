@@ -1,9 +1,9 @@
 """einvoice 明細抓取的回歸測試(hermetic,不連網)。
 
-守住的 bug:發票明細開在 Bootstrap modal(同一 SPA URL),舊版用 go_back() 退出
-→ 把清單帶走 → 只有第一筆抓得到品項,其餘退化成「賣方+總額」一筆。
+守住:發票明細開在 Bootstrap modal(同一 SPA URL),用 go_back() 退出
+會把清單帶走 → 只有第一筆抓得到品項,其餘退化成「賣方+總額」一筆。
 此測試用靜態 HTML 重現「點號碼→開 modal+backdrop→關 modal」的互動:
-舊行為下第二筆會是空的;修正後每筆都拿到自己的品項。
+用 go_back() 的話第二筆會是空的;關 modal 則每筆都拿到自己的品項。
 
 需要 Playwright(僅容器內有);主機無則整檔 skip。
 """
@@ -71,8 +71,8 @@ def test_every_invoice_gets_its_own_line_items():
     by_no = {inv["invoice_no"]: inv for inv in invoices}
     assert set(by_no) == {"AA00000001", "BB00000002"}
 
-    # 第一筆有明細(舊版也過)
+    # 第一筆有明細
     assert [it["name"] for it in by_no["AA00000001"]["items"]] == ["大-冰拿鐵"]
-    # 第二筆也要有自己的明細 —— 舊版 go_back() 會讓這筆變空(回歸守點)
+    # 第二筆也要有自己的明細 —— go_back() 會讓這筆變空(回歸守點)
     assert [it["name"] for it in by_no["BB00000002"]["items"]] == ["禦飯糰", "茶葉蛋"]
     assert by_no["BB00000002"]["items"][0]["amount"] == 30

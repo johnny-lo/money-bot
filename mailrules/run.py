@@ -211,7 +211,7 @@ def history_plan(today: date, db=None) -> dict:
 def execute_history(today: date, db=None, upto_card: str | None = None,
                     fingerprint: str | None = None) -> RunReport:
     """upto_card＝計畫卡發出當下的最大卡號（'none'＝當時沒有卡）：只有卡號不大於它的卡還沒處理才拒絕，
-    之後才長出的卡不擋（它們的信是未知，本來就不會動）。None＝任何待確認卡都擋（原本行為）。
+    之後才長出的卡不擋（它們的信是未知，本來就不會動）。None＝任何待確認卡都擋。
     還有任何待確認的重視網域（含這次同步才學到的）→ 零寫入拒絕：確認前它們不保護信。
     fingerprint＝計畫卡上的已確認規則＋已確認網域指紋：現在的集合不同（之後又確認卡、手動指定、確認網域）
     → 計畫已過期，零寫入拒絕。None＝不比對（程式內部呼叫）。"""

@@ -134,7 +134,7 @@ def test_新增發票_沒時間是0點_等於原本行為(db):
     inv = _inv(t=None)
     einvoice._save_invoices([inv])
     assert [t.created_at for t in db.added] == [datetime(2026, 8, 29)] * 2
-    inv.pop("time")                                     # 舊爬蟲產出的 dict 沒有 time 鍵也照舊
+    inv.pop("time")                                     # 沒有 time 鍵的 dict 也照常寫入
     inv["invoice_no"] = "BB00000002"
     einvoice._save_invoices([inv])
     assert db.added[-1].created_at == datetime(2026, 8, 29)

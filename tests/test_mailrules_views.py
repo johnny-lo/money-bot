@@ -161,7 +161,7 @@ def test_下一步_兩個期限都過了_每日模式直接丟_和plan_actions�
     st = MessageState(in_inbox=True)
     assert next_step("company", d, st, today=T) == ("trash", date(2026, 10, 1))
     assert next_step("company", d, st, today=date(2026, 9, 20)) == ("archive", d)   # 還沒到丟的期限：仍先移出
-    assert next_step("company", d, st) == ("archive", d)                            # 不帶 today：舊行為
+    assert next_step("company", d, st) == ("archive", d)                            # 不帶 today：不看丟的期限
     assert next_step("company", d, MessageState(in_inbox=False, trashed=True), today=T) is None
 
 

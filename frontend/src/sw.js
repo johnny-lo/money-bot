@@ -34,8 +34,7 @@ registerRoute(
 registerRoute(
   ({ url }) => url.pathname.startsWith('/media/'),
   new CacheFirst({
-    cacheName: 'media-v2',   // v1 曾被 ngrok 攔截頁毒過（回 200+HTML 還被當圖片快取住），
-                             // 當時換名整鍋拋棄。已改用 Tailscale Funnel、沒有攔截頁，名字沿用即可。
+    cacheName: 'media-v2',   // 改快取名＝整鍋拋棄舊快取；沒有要作廢的內容就維持這個名字。
     plugins: [
       new ExpirationPlugin({ maxEntries: 200, maxAgeSeconds: 30 * 24 * 60 * 60 }),
     ],

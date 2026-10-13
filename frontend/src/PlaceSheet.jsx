@@ -80,7 +80,7 @@ export default function PlaceSheet({ place, onClose, onChanged }) {
                 ))}
               </div>
             )}
-            {/* {place.name} 會被 React 自動跳脫 —— 不用像舊版那樣手動 esc() */}
+            {/* {place.name} 會被 React 自動跳脫 —— 不用手動 esc() */}
             <h3>{place.name}</h3>
             <div className="sheet-meta">
               {place.status && <span className="badge">{place.status}</span>}

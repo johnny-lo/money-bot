@@ -85,14 +85,14 @@ def test_parse_address_components_folds_district():
     ]
     out = parse_address_components(comps)
     assert out["country"] == "台灣"
-    assert out["city"] == "桃園市"      # D1：儲存格式是全名，不再去後綴
+    assert out["city"] == "桃園市"      # D1：儲存格式是全名，不去後綴
     assert out["district"] == "中壢區"
 
 
 # ── 台灣列拒收里/村（D3）────────────────────────────────────────
 
 def test_parse_address_components_台灣拒收里():
-    """Google 常把 sublocality 給成里名（實測 105/112 筆）。里比 None 更糟。"""
+    """Google 常把 sublocality 給成里名。里比 None 更糟。"""
     comps = [
         {"longText": "台灣", "types": ["country"]},
         {"longText": "桃園市", "types": ["administrative_area_level_1"]},
@@ -152,9 +152,9 @@ def test_resolve_region_國外走components不碰台灣邏輯():
     assert out == {"country": "日本", "city": "東京", "district": "新宿區"}
 
 
-# ── D2 釘樁：city 改成全名後，/美食推薦 必須照常運作 ──────────────
+# ── D2 釘樁：city 存全名時，/美食推薦 必須照常運作 ──────────────
 # region_matches 是靠 canon() 的 _strip_suffix「剛好」成立的，
-# 不釘住的話未來有人改 canon 就會無聲弄壞既有查詢。
+# 不釘住的話改 canon 就會無聲弄壞既有查詢。
 
 def test_region_matches_全名縣市仍然命中():
     assert region_matches("桃園", country="台灣", city="桃園市") is True
@@ -164,7 +164,7 @@ def test_region_matches_全名縣市仍然命中():
 
 
 def test_region_matches_修好台東():
-    """既有 bug：canon("臺東")="臺東" vs canon("台東")="台東" 比不中 → 查台東永遠回空。"""
+    """canon 要把臺/台折成同一字：不折的話 "臺東" vs "台東" 比不中 → 查台東永遠回空。"""
     assert region_matches("台東", country="台灣", city="台東縣") is True
     assert region_matches("臺東", country="台灣", city="台東縣") is True
 

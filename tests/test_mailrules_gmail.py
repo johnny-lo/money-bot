@@ -29,7 +29,7 @@ def test_解析_fetch_回應():
     assert "整理/abc" in h.labels and h.sent_date.isoformat() == "2026-10-12"
 
 
-# ── 補強：UIDVALIDITY 守衛、登入後才有的 MOVE、壞 header 不擋同步 ──────────
+# ── UIDVALIDITY 守衛、登入後才有的 MOVE、壞 header 不擋同步 ──────────
 
 import base64
 
@@ -177,7 +177,7 @@ def test_read_headers_單封解析失敗_記錄並跳過(monkeypatch, capsys):
     assert "跳過" in capsys.readouterr().out
 
 
-# ── 補強：epoch 換了以後 DB 舊列的 uid 不能拿來寫；8-bit / Big5 header 不變 U+FFFD ──
+# ── epoch 換了以後 DB 舊列的 uid 不能拿來寫；8-bit / Big5 header 不變 U+FFFD ──
 
 def test_apply_epoch改變後_未重讀到的舊列_零寫入(monkeypatch):
     # 新 epoch 已存進 mail_state（42 相符），但這三筆是舊 epoch 留下的 uid：

@@ -1,8 +1,8 @@
 """LINE 憑證是可選的：缺設定時整個停用，而不是在 import 期炸掉全站。
 
-背景：舊寫法 `LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))` 在 token 為 None 時
+背景：無條件 `LineBotApi(os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))` 在 token 為 None 時
 會 TypeError（SDK 把 token 直接串進 Authorization header）→ **import 崩潰 = 全站掛**，
-webhook、Discord Bot、PWA 一起沒。Discord 早就有 `if discord_token:` 守著，這裡補齊。
+webhook、Discord Bot、PWA 一起沒。Discord 那邊同樣用 `if discord_token:` 守著。
 """
 import importlib
 
@@ -26,7 +26,7 @@ def _reload_without_line(monkeypatch):
 
 
 def test_缺憑證時_import_不崩潰(monkeypatch):
-    """這行在舊版會直接 TypeError。"""
+    """token 為 None 時直接建 LineBotApi 會 TypeError。"""
     m = _reload_without_line(monkeypatch)
     assert m.LINE_ENABLED is False
     assert m.line_bot_api is None

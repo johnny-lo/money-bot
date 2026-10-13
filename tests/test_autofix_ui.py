@@ -89,7 +89,7 @@ def test_process_outbox_壞檔不卡住整個佇列(monkeypatch, tmp_path, capsy
     assert (tmp_path / "outbox" / "1-report.json.bad").exists()
 
 
-# ── 最終審查的修正：任何失敗都不能讓事件卡在 dispatched/deploying ──
+# ── 任何失敗都不能讓事件卡在 dispatched/deploying ──
 
 def test_核可檔寫不出去_不改狀態_回錯誤(monkeypatch, tmp_path):
     monkeypatch.setenv("AUTOFIX_DIR", str(tmp_path))          # 沒有 approved/ 目錄

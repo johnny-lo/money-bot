@@ -50,7 +50,7 @@ def test_parse_place_list_json_bad_json_returns_all_empty():
 
 
 def test_parse_place_list_json_bare_array_is_not_the_contract():
-    """schema 的根是 {"places": [...]}；舊的裸陣列形狀不再被當成合法回覆。"""
+    """schema 的根是 {"places": [...]}；裸陣列形狀不算合法回覆。"""
     out = parse_place_list_json('[{"name":"A"}]', 1)
     assert out[0]["name"] == ""
 
@@ -225,7 +225,7 @@ def test_dedupe_keeps_first_fields():
 
 def test_place_list_prompt_format_survives_literal_json_braces():
     # 回歸測試：_PLACE_LIST_PROMPT 用 .format(lines=...) 組裝,JSON 範例的大括號必須是 {{ }}
-    # 否則 str.format 會把 {"name":...} 當成格式欄位 → KeyError: '"name"'（曾發生的 bug）。
+    # 否則 str.format 會把 {"name":...} 當成格式欄位 → KeyError: '"name"'。
     from food.extract import _PLACE_LIST_PROMPT
     out = _PLACE_LIST_PROMPT.format(lines="鼎泰豐\n映客")   # 不可拋例外
     assert '{"name":' in out          # 字面 JSON 大括號 format 後還原成單括號

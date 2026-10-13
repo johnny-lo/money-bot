@@ -4,9 +4,9 @@ import re
 from dataclasses import dataclass
 
 LABEL_ROOT = "整理"
-FINANCE_KEEP_DAYS = 730          # 刷卡扣款、收據訂單、帳單：滾動保留天數（plan board 卡片決定）
+FINANCE_KEEP_DAYS = 730          # 刷卡扣款、收據訂單、帳單：滾動保留天數（2 年）
 BATCH_SIZE = 500                 # 歷史執行每批封數
-DAILY_RUN = (23, 30)             # 每日執行時間（台北；本人指定 23:30）
+DAILY_RUN = (23, 30)             # 每日執行時間（台北；在發票同步 21:00 之後）
 PROMO_DIGEST_DOW = 6             # 週日（date.weekday()）
 
 CATEGORIES = [
@@ -57,7 +57,7 @@ JOB_KEYWORDS = re.compile(
     r"面試|面談|應徵|邀請|邀約|錄取|聘任|聘書|到職|報到|二面|複試|評量|測驗|個人資料填寫|"
     r"offer|interview|application status|recruit", re.I)
 # 安全網第 2 條只從「強」字眼學網域（弱字眼只保護那一封，見上面的 JOB_KEYWORDS）：
-# 試跑時「邀請／報到／測驗」讓旅遊網生日邀請函、外送平台邀請朋友、學校報到通知整個網域被留下
+# 「邀請／報到／測驗」也常見於行銷信（生日邀請函、邀請朋友、報到通知），拿來學網域會把整個網域留下
 STRONG_JOB_KEYWORDS = re.compile(
     r"面試|面談|錄取|錄用|複試|二面|到職|聘書|聘任|interview|job offer|offer letter|application status", re.I)
 SCHOOL_SUFFIXES = (".edu", ".edu.tw")

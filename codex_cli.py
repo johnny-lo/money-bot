@@ -4,7 +4,7 @@
 - codex_text：文字生成（分類、週/月報評語，以及角色即時評論的**備援**——
   記帳當下的角色回應優先走 Gemini 求即時，Gemini 失敗/429 才退到這裡）。
 - codex_image：影像辨識的**最後一層備援**（`codex exec -i`），給拍照記帳 / 美食截圖用。
-  ⚠️ **CAPTCHA 不能用這條**——codex 政策上拒絕辨識驗證碼（實測回「抱歉，我無法協助
+  ⚠️ **CAPTCHA 不能用這條**——codex 政策上拒絕辨識驗證碼（會回「抱歉，我無法協助
   破解驗證碼。」），所以 einvoice 的 CAPTCHA 走 gemini.vision_text(allow_codex=False)，
   只在 Gemini 的多個模型之間退避。
 """

@@ -1,15 +1,12 @@
 """本地 CAPTCHA 辨識（ddddocr）+ 樣本收集。
 
-**為什麼要有這一層**：財政部的驗證碼原本只靠 Gemini Vision 辨識，而那條路有兩個
-致命弱點——模型會 503（2026/08/24~08/29 連續多天，發票同步整週空轉、抓 0 張），
-以及模型會**政策拒答**（實測 gemini-3.5-flash 回「我無法協助辨識驗證碼」）。
+**為什麼要有這一層**：只靠 Gemini Vision 辨識財政部驗證碼有兩個致命弱點——
+模型會 503（連續多天時發票同步整段空轉、抓 0 張），以及模型會**政策拒答**
+（例如 gemini-3.5-flash 回「我無法協助辨識驗證碼」）。
 本地 OCR 沒有這兩種故障，而且快 300~700 倍。
 
-實測（30 張財政部真圖，人工判讀當 ground truth）：
-- ddddocr 官方通用模型：27/30 = 90%，4.9 ms/張
-- 加相似字修正：**30/30 = 100%**，4.4 ms/張
-- TicketsHunter 自訓的 universal / tixcraft_tm 模型：**0%**——它們是拓元那種
-  英文字母驗證碼訓出來的（tixcraft_tm 的字元集根本沒有數字）。**自訓模型不通用。**
+用 ddddocr 官方通用模型再加相似字修正（_CONFUSABLE）。別人針對英文字母驗證碼
+自訓的模型（如 TicketsHunter 的 tixcraft_tm，字元集沒有數字）不適用，見 AGENTS.md。
 
 所以策略是：**ddddocr 本地第一層 → 失敗才退 gemini.vision_text 的模型退避鏈**。
 
@@ -32,7 +29,7 @@ SAMPLE_DIR = os.getenv("CAPTCHA_SAMPLE_DIR") or os.path.join(_BASE_DIR, "data", 
 SAMPLE_MAX_BYTES = int(os.getenv("CAPTCHA_SAMPLE_MAX_BYTES", str(1024 ** 3)))
 
 # 驗證碼保證是 5 位純數字，所以模型吐出字母**一定**是誤認。
-# 對照表來自實測錯誤：7 會被認成 t/z/Z（那條干擾線讓 7 多一撇），其餘是通用相似字。
+# 7 會被認成 t/z/Z（那條干擾線讓 7 多一撇），其餘是通用相似字。
 _CONFUSABLE = str.maketrans({
     "t": "7", "T": "7", "z": "7", "Z": "7",
     "o": "0", "O": "0", "D": "0", "Q": "0",
@@ -53,7 +50,7 @@ def _get_ocr():
     """取全域 OCR 引擎（只初始化一次——每次重建都要重載模型，會拖垮效能）。
 
     ddddocr 是**可選依賴**：沒裝就安靜回 None 退回 AI 那條路。
-    可選功能寫成 import 期硬依賴會讓缺套件時整個站起不來（AGENTS.md §2 踩過）。
+    可選功能寫成 import 期硬依賴會讓缺套件時整個站起不來（見 AGENTS.md §2）。
     """
     global _ocr, _ocr_unavailable
     if _ocr is None and not _ocr_unavailable:
