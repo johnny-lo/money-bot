@@ -44,26 +44,12 @@ def line(c: Charge, status: str = "unmatched", hint: str | None = None) -> str:
     return f"{s} {_MARK[status]}" if status in _MARK else s
 
 
-def _short(hint: str | None) -> str | None:
-    """線索裡的店名截到 20 字，免得 25 行撐破 Discord description 4096 上限。"""
-    if not hint or not hint.startswith("≈ 帳上 "):
-        return hint
-    head, sep, rest = hint.partition("（差")
-    parts = head.split(" ", 3)            # ['≈', '帳上', 'MM/DD' 或 'HH:MM', '{label} ${amount}']
-    if len(parts) < 4 or " $" not in parts[3]:
-        return hint
-    label, _, amt = parts[3].rpartition(" $")
-    if len(label) > 20:
-        label = label[:20] + "…"
-    return f"{' '.join(parts[:3])} {label} ${amt}{sep}{rest}"
-
-
 def page_embed(batch: str, items: list[tuple[int, Charge, str, str | None]], page: str = "",
                group: str | None = None) -> discord.Embed:
     todo = [c for _, c, s, _ in items if s == "unmatched"]
     head = f"第 {page} 頁：" if page else ""
     name = _GROUP_LABEL.get(group, "疑似漏記") if group else "疑似漏記"
-    body = "\n".join(line(c, s, _short(h)) for _, c, s, h in items)
+    body = "\n".join(line(c, s, h) for _, c, s, h in items)
     e = discord.Embed(title=f"💳 {name} {head}{len(todo)} 筆，共 ${sum(c.amount for c in todo):,}",
                       description=body[:4096], color=COLOR)
     e.set_footer(text=f"刷卡比對 · {batch} · 下拉勾要忽略的，再按「全部補記」")

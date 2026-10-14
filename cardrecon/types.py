@@ -18,15 +18,6 @@ class Charge:
 
 
 @dataclass(frozen=True)
-class TxHint:
-    key: str                         # 同 TxGroup.key
-    tx_date: date
-    amount: int
-    label: str | None                # 賣家，沒有就取第一個品名
-    tx_time: time | None = None      # 發票開立時間（只有載具發票、且不是 00:00 才有）
-
-
-@dataclass(frozen=True)
 class Receipt:
     paid_date: date
     amount: int

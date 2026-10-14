@@ -21,7 +21,7 @@ def charge_at(c: Charge) -> datetime | None:
 
 
 def minutes_apart(at: datetime, grp) -> float | None:
-    """刷卡時刻與群組（TxGroup／TxHint）開立時刻差幾分鐘（含跨午夜）；群組沒時間回 None。"""
+    """刷卡時刻與群組（TxGroup）開立時刻差幾分鐘（含跨午夜）；群組沒時間回 None。"""
     if grp.tx_time is None:
         return None
     return abs((datetime.combine(grp.tx_date, grp.tx_time) - at).total_seconds()) / 60

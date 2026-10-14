@@ -5,7 +5,7 @@ import pytest
 
 import codex_cli
 from cardrecon import ingest
-from cardrecon.types import Bitmap, Charge, RawMail, Receipt, TxGroup, TxHint
+from cardrecon.types import Bitmap, Charge, RawMail, Receipt, TxGroup
 
 TODAY = date(2026, 10, 18)
 
@@ -82,10 +82,6 @@ class FakeRepo:
     def mark_matched(self, db, m):
         for i, k in m.items():
             self.rows[i].update(status="matched", key=k)
-    hint_txs = ()
-    def load_hints(self, db, since): return list(self.hint_txs)
-    time_txs = ()
-    def load_time_hints(self, db, since): return list(self.time_txs)
     def all_charges(self, db): return [r["c"] for r in self.rows.values()]
     def unlist(self, db):
         n = 0
@@ -215,7 +211,6 @@ def test_缺身分證_丟RuntimeError(monkeypatch):
 def test_分組各自分頁_批次號跨組連續(monkeypatch):
     fake = FakeRepo()
     fake.groups = []
-    fake.hint_txs = [TxHint("t1", date(2026, 10, 2), 1040, "某店")]
     _wire(monkeypatch, fake, {"spendservice@sinopac.com": [mail("<a>", b"A")]}, {b"A": "a"})
     monkeypatch.setattr(ingest.config, "PAGE_SIZE", 2)
     charges = [ch(date(2026, 10, 2), 1000, 0), ch(date(2026, 10, 2), 50, 1), ch(date(2026, 10, 2), 60, 2),
@@ -223,9 +218,9 @@ def test_分組各自分頁_批次號跨組連續(monkeypatch):
     monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: charges, "ctbc_statement": lambda t: []})
     res = ingest.run_weekly(TODAY)
     assert [(b, g, [i for i, _, _ in items]) for b, g, items in res.pages] == [
-        ("2026-10-18-1", "near", [1]), ("2026-10-18-2", "small", [2, 3]),
-        ("2026-10-18-3", "small", [4]), ("2026-10-18-4", "other", [5])]
-    assert res.pages[0][2][0][2].startswith("≈ 帳上 10/02 某店")
+        ("2026-10-18-1", "small", [2, 3]), ("2026-10-18-2", "small", [4]),
+        ("2026-10-18-3", "other", [1, 5])]
+    assert all(h is None for _, _, items in res.pages for _, _, h in items)
     assert res.total == sum(c.amount for c in charges)
 
 
@@ -394,12 +389,10 @@ def test_永豐網路消費通知_卡號不同不補店名(monkeypatch):
     assert fake.rows[1]["c"].merchant is None
 
 
-def test_清單_永豐刷卡有時間接近的發票_歸可能記過(monkeypatch):
+def test_清單_永豐刷卡有時間接近但金額不同的發票_照原規則分組(monkeypatch):
     fake = FakeRepo()
-    fake.groups = []
+    fake.groups = [TxGroup("AA00000001", date(2026, 10, 1), 120, time(12, 4))]
     fake._add(replace(ch(date(2026, 10, 1), 700), charge_time="12:00"))
-    fake.time_txs = [TxHint("AA00000001", date(2026, 10, 1), 120, "某某商店", time(12, 4))]
     _wire(monkeypatch, fake, {}, {})
     res = ingest.relist(TODAY)
-    assert [(g, h) for _, g, items in res.pages for _, _, h in items] == \
-        [("near", "≈ 帳上 12:04 某某商店 $120（差 $580）")]
+    assert [(g, h) for _, g, items in res.pages for _, _, h in items] == [("other", None)]

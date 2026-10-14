@@ -2,7 +2,7 @@ from datetime import date, datetime
 from types import SimpleNamespace
 
 from cardrecon import repo
-from cardrecon.types import Charge, TxGroup, TxHint
+from cardrecon.types import Charge, TxGroup
 
 D = date(2026, 9, 10)
 
@@ -20,14 +20,6 @@ class FakeQuery:
     def distinct(self, *a): return self
 
 
-class HintQuery(FakeQuery):
-    """只模擬 load_hints 需要的 invoice_no IS NULL SQL 篩選。"""
-    def filter(self, *criteria, **kwargs):
-        if any(str(c).endswith("transactions.invoice_no IS NULL") for c in criteria):
-            self.rows = [r for r in self.rows if r[1] is None]
-        return self
-
-
 class FakeSession:
     def __init__(self, rows=()):
         self.rows, self.added, self.commits, self._next = list(rows), [], 0, 900
@@ -39,10 +31,6 @@ class FakeSession:
                 o.id = self._next; self._next += 1
     def commit(self): self.commits += 1
     def rollback(self): pass
-
-
-class HintSession(FakeSession):
-    def query(self, *a, **k): return HintQuery(self.rows)
 
 
 def test_upsert_已存在的行不重寫_也不蓋狀態():
@@ -123,25 +111,6 @@ def test_max_page_取同日最大頁碼():
     assert repo.max_page(FakeSession(), "2026-10-18") == 0
 
 
-def test_load_hints_只回手記帳且排除已佔用(monkeypatch):
-    t = datetime(2026, 9, 10, 12, 0)
-    rows = [(1, "INV1", t, 101, "載具發票近似金額", "發票店家"),
-            (2, None, t, 102, "手記近似金額", None),
-            (3, None, t, 103, "已配走手記帳", None)]
-    monkeypatch.setattr(repo, "used_group_keys", lambda db: {"id3"})
-    got = repo.load_hints(HintSession(rows), D)
-    assert got == [TxHint("id2", D, 102, "手記近似金額")]
-
-
-def test_load_hints_手記帳標籤取賣家優先於品名_排除已佔用(monkeypatch):
-    t = datetime(2026, 9, 10, 12, 0)
-    rows = [(1, None, t, 80, "手記豆漿", "某早餐店"), (2, None, t, 300, "手記午餐", None),
-            (3, None, t, 50, "手記咖啡", None)]
-    monkeypatch.setattr(repo, "used_group_keys", lambda db: {"id3"})
-    got = repo.load_hints(HintSession(rows), D)
-    assert sorted(got, key=lambda h: h.key) == [TxHint("id1", D, 80, "某早餐店"), TxHint("id2", D, 300, "手記午餐")]
-
-
 def test_all_charges轉成Charge():
     got = repo.all_charges(FakeSession([_row(1, 100), _row(2, 250)]))
     assert [c.amount for c in got] == [100, 250] and all(isinstance(c, Charge) for c in got)
@@ -158,13 +127,26 @@ def test_unlist_只清未配對且有批次的_其餘不動_一次commit():
 
 
 def test_batch_view_重算線索_保留各列狀態_回傳多數組別(monkeypatch):
+    # 這批在帳上有金額相近的紀錄也一樣：沒有 near 組，依重複月份、地區、金額回報多數組別
     rows = [_row(1, 1000, region="TW"), _row(2, 1000, status="ignored", region="TW", card_last4="5678"),
             _row(3, 60, region="TW")]
     monkeypatch.setattr(repo, "_batch_rows", lambda db, b: rows)
-    monkeypatch.setattr(repo, "load_hints", lambda db, since: [TxHint("t", D, 1040, "某店")])
+    monkeypatch.setattr(repo, "brand_map", lambda db: {})
     monkeypatch.setattr(repo, "all_charges", lambda db: [repo._to_charge(r) for r in rows])
     gk, items = repo.batch_view(FakeSession(), "b")
-    assert gk == "near"
+    assert gk == "other"
     assert {(i, s) for i, _, s, _ in items} == {(1, "unmatched"), (2, "ignored"), (3, "unmatched")}
-    by = {i: h for i, _, _, h in items}
-    assert by[1].startswith("≈ 帳上 09/10 某店") and by[3] is None
+    assert all(h is None for _, _, _, h in items)
+
+
+def test_batch_view_同卡同金額多月_回報訂閱組(monkeypatch):
+    rows = [_row(1, 690, region="TW"), _row(2, 690, region="TW")]
+    past = [repo._to_charge(r) for r in rows] + [
+        Charge(source="sinopac_daily", card_last4="1234", charge_date=date(2026, m, 10), amount=690, line_no=m)
+        for m in (7, 8)]
+    monkeypatch.setattr(repo, "_batch_rows", lambda db, b: rows)
+    monkeypatch.setattr(repo, "brand_map", lambda db: {})
+    monkeypatch.setattr(repo, "all_charges", lambda db: past)
+    gk, items = repo.batch_view(FakeSession(), "b")
+    assert gk == "subscription"
+    assert [h for _, _, _, h in items] == ["同卡同金額 3 個月都有"] * 2

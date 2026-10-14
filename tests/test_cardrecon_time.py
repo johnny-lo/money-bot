@@ -1,10 +1,9 @@
-"""刷卡有時間（永豐 HH:MM）時用發票開立時間對帳；時間接近但金額不同的發票當線索；分期顯示期數。"""
+"""刷卡有時間（永豐 HH:MM）時用發票開立時間對帳；分期顯示期數。"""
 from datetime import date, datetime, time
 from types import SimpleNamespace
 
-from cardrecon import config, hints, match, repo
-from cardrecon.types import Charge, TxGroup, TxHint
-from discordbot import cardrecon_ui as ui
+from cardrecon import config, match, repo
+from cardrecon.types import Charge, TxGroup
 
 D = date(2026, 9, 10)
 D1 = date(2026, 9, 11)
@@ -138,76 +137,17 @@ def test_repo已用鍵拆開多鍵():
     assert repo.used_group_keys(db) == {"A", "B", "id3", "C"}
 
 
-# ── AC7 時間線索 ─────────────────────────────────────────
+# ── 時間接近、金額不同的發票不是線索 ─────────────────────
 
-def th(key, amount, d=D, t=time(12, 5), label="某某商店"):
-    return TxHint(key=key, tx_date=d, amount=amount, label=label, tx_time=t)
-
-
-def test_時間線索_差10分鐘內_金額不同():
-    c = ch(500, t="12:00")
-    assert hints.time_near(c, [th("a", 120)]).key == "a"
-    assert hints.time_near(c, [th("a", 120, t=time(12, 11))]) is None
-    assert hints.time_near(c, [th("a", 500)]) is None                       # 同金額不是線索
-    assert hints.time_near(c, [th("a", 0), th("b", -20)]) is None
-    assert hints.time_near(ch(500), [th("a", 120)]) is None                 # 刷卡沒時間
-    assert hints.time_near(c, [th("a", 120, t=None)]) is None               # 發票沒時間
-    assert hints.time_near(ch(500, D1, "00:03"), [th("a", 120, D, time(23, 58))]).key == "a"   # 跨午夜
-
-
-def test_時間線索_取時間差最小():
-    c = ch(500, t="12:00")
-    assert hints.time_near(c, [th("a", 120, t=time(12, 6)), th("b", 999, t=time(11, 57))]).key == "b"
-
-
-def test_時間線索文字_與優先於日期近似():
-    c = ch(500, t="12:00")
-    manual = TxHint("id2", D, 510, "手記午餐")                               # 只看日期金額會被當近似紀錄
-    out = hints.arrange([(1, c)], [manual], [c], [th("INV", 1234)])
-    assert [k for k, _ in out] == ["near"]
-    assert out[0][1][0][2] == "≈ 帳上 12:05 某某商店 $1,234（差 $734）"
-    nolabel = hints.arrange([(1, c)], [], [c], [th("INV", 80, label=None)])
-    assert nolabel[0][1][0][2] == "≈ 帳上 12:05 （無品名） $80（差 $420）"
-
-
-def test_沒有時間接近的發票_日期近似邏輯不變():
-    c = ch(500, t="12:00")
-    manual = TxHint("id2", D, 510, "手記午餐")
-    out = hints.arrange([(1, c)], [manual], [c], [th("INV", 1234, t=time(13, 0))])
-    assert out[0][1][0][2] == "≈ 帳上 09/10 手記午餐 $510（差 $10）"
-    assert hints.arrange([(1, c)], [manual], [c]) == out                     # 不給時間線索也一樣
-
-
-def test_short_對時間格式照樣截店名():
-    long = "很長的店名" * 10
-    got = ui._short(f"≈ 帳上 12:05 {long} $1,234（差 $734）")
-    assert got == f"≈ 帳上 12:05 {long[:20]}… $1,234（差 $734）"
-
-
-def test_load_time_hints_只回有時間的發票_標籤賣方優先_排除已配走(monkeypatch):
-    t = datetime(2026, 9, 10, 12, 5)
-    rows = [(1, "AA00000001", t, 30, "禦飯糰", "某某商店"), (2, "AA00000001", t, 13, "茶葉蛋", "某某商店"),
-            (3, "BB00000002", t, 55, "大-冰拿鐵", None),
-            (4, "CC00000003", datetime(2026, 9, 10), 20, "紅茶", None),     # 00:00 → 沒時間
-            (5, "DD00000004", t, 99, "已配走", None),
-            (6, None, t, 70, "手記帳", None)]
-    monkeypatch.setattr(repo, "used_group_keys", lambda db: {"DD00000004"})
-    got = sorted(repo.load_time_hints(_S(rows), D), key=lambda h: h.key)
-    assert got == [TxHint("AA00000001", D, 43, "某某商店", time(12, 5)),
-                   TxHint("BB00000002", D, 55, "大-冰拿鐵", time(12, 5))]
-
-
-def test_batch_view_帶時間線索(monkeypatch):
+def test_batch_view_永豐刷卡_時間接近金額不同的發票_不成線索(monkeypatch):
     row = SimpleNamespace(id=1, source="sinopac_daily", card_last4="1234", charge_date=D, amount=500, line_no=0,
                           charge_time="12:00", post_date=None, region="TW", merchant=None, pay_method=None,
                           status="unmatched", matched_key=None, batch="b")
     monkeypatch.setattr(repo, "_batch_rows", lambda db, b: [row])
     monkeypatch.setattr(repo, "brand_map", lambda db: {})
-    monkeypatch.setattr(repo, "load_hints", lambda db, since: [])
-    monkeypatch.setattr(repo, "load_time_hints", lambda db, since: [th("INV", 120)])
     monkeypatch.setattr(repo, "all_charges", lambda db: [])
     gk, items = repo.batch_view(None, "b")
-    assert gk == "near" and items[0][3] == "≈ 帳上 12:05 某某商店 $120（差 $380）"
+    assert gk == "other" and items[0][3] is None
 
 
 # ── AC9 分期 ─────────────────────────────────────────────

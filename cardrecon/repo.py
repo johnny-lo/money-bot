@@ -8,7 +8,7 @@ from sqlalchemy import or_
 from models import CardCharge, MerchantBrand, Transaction
 
 from . import config, hints, match as matcher
-from .types import Charge, RecordResult, TxGroup, TxHint
+from .types import Charge, RecordResult, TxGroup
 
 
 def _to_charge(r) -> Charge:
@@ -160,49 +160,6 @@ def load_groups(db, since: date) -> list[TxGroup]:
     return matcher.group_transactions([tuple(r) for r in rows])
 
 
-def load_hints(db, since: date) -> list[TxHint]:
-    """手記帳附上標籤，供找近似紀錄；載具發票與已被配走的紀錄不列。"""
-    rows = [tuple(r) for r in (db.query(Transaction.id, Transaction.invoice_no, Transaction.created_at,
-                                        Transaction.price, Transaction.item, Transaction.seller)
-                               .filter(Transaction.created_at >= datetime.combine(since, time()),
-                                       Transaction.invoice_no.is_(None))
-                               .order_by(Transaction.id).all())]
-    sellers: dict[str, str] = {}
-    items: dict[str, str] = {}
-    for tid, _, _, _, item, seller in rows:     # 只有手記帳（invoice_no 為 NULL），key 一律 id<id>
-        key = f"id{tid}"
-        if seller:
-            sellers.setdefault(key, seller)
-        if item:
-            items.setdefault(key, item)
-    labels = {k: sellers.get(k) or items.get(k) for k in items.keys() | sellers.keys()}
-    used = used_group_keys(db)
-    return [TxHint(g.key, g.tx_date, g.amount, labels.get(g.key))
-            for g in matcher.group_transactions([r[:4] for r in rows]) if g.key not in used]
-
-
-def load_time_hints(db, since: date) -> list[TxHint]:
-    """有開立時間的載具發票（created_at 不是 00:00），供永豐刷卡找時間接近的線索；已被配走的不列。
-    標籤取賣方，沒有就取第一個品名。"""
-    rows = [tuple(r) for r in (db.query(Transaction.id, Transaction.invoice_no, Transaction.created_at,
-                                        Transaction.price, Transaction.item, Transaction.seller)
-                               .filter(Transaction.created_at >= datetime.combine(since, time()),
-                                       Transaction.invoice_no.isnot(None))
-                               .order_by(Transaction.id).all())]
-    rows = [r for r in rows if r[1]]
-    sellers: dict[str, str] = {}
-    items: dict[str, str] = {}
-    for _, inv, _, _, item, seller in rows:
-        if seller:
-            sellers.setdefault(inv, seller)
-        if item:
-            items.setdefault(inv, item)
-    used = used_group_keys(db)
-    return [TxHint(g.key, g.tx_date, g.amount, sellers.get(g.key) or items.get(g.key), g.tx_time)
-            for g in matcher.group_transactions([r[:4] for r in rows])
-            if g.tx_time is not None and g.key not in used]
-
-
 def all_charges(db) -> list[Charge]:
     return [_to_charge(r) for r in db.query(CardCharge).all()]
 
@@ -240,8 +197,7 @@ def batch_view(db, batch: str) -> tuple[str, list[tuple[int, Charge, str, str | 
     status = {r.id: r.status for r in rows}
     brands = brand_map(db)
     items = [(r.id, branded(_to_charge(r), brands)) for r in rows]
-    since = min(c.charge_date for _, c in items) - timedelta(days=1)
-    arranged = hints.arrange(items, load_hints(db, since), all_charges(db), load_time_hints(db, since))
+    arranged = hints.arrange(items, all_charges(db))
     best = max(arranged, key=lambda g: len(g[1]))[0]       # max 取第一個最大 → 平手時 GROUPS 順序在前者
     return best, [(i, c, status[i], h) for _, grp in arranged for i, c, h in grp]
 

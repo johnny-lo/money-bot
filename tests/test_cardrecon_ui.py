@@ -84,10 +84,10 @@ def test_notify_weekly_頁碼按組別各自編(monkeypatch):
     sent = []
     monkeypatch.setenv("DISCORD_INVOICE_CHANNEL_ID", "42")
     monkeypatch.setattr(ui, "post_sync", lambda cid, embeds, make_view=None: sent.append(embeds[0].title))
-    r = WeeklyResult(pages=[("x-1", "near", [(1, ch(100), "h")]), ("x-2", "small", [(2, ch(50), None)]),
+    r = WeeklyResult(pages=[("x-1", "subscription", [(1, ch(100), "h")]), ("x-2", "small", [(2, ch(50), None)]),
                             ("x-3", "small", [(3, ch(60), None)])])
     ui.notify_weekly(r)
-    assert "可能記過" in sent[0] and "1/1" in sent[0]
+    assert "疑似訂閱" in sent[0] and "1/1" in sent[0]
     assert "小額" in sent[1] and "1/2" in sent[1] and "2/2" in sent[2]
 
 
@@ -99,9 +99,8 @@ def test_notify_weekly_零筆但有失敗信件_發警告(monkeypatch):
     assert len(sent) == 1 and "2" in sent[0][0].description
 
 
-def test_page_embed_description不超過4096_線索標籤截短():
-    long = "很長的店名" * 20
-    items = [(i, ch(100 + i), "unmatched", f"≈ 帳上 10/03 {long} $1,000（差 $10）") for i in range(25)]
+def test_page_embed_description不超過4096():
+    items = [(i, ch(100 + i), "unmatched", "同卡同金額 12 個月都有") for i in range(25)]
     e = ui.page_embed("b-1", items)
     assert len(e.description) <= 4096
-    assert long not in e.description
+    assert "同卡同金額 12 個月都有" in e.description
