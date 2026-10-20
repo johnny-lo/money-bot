@@ -1,4 +1,5 @@
-"""career（求職）：只由安全網產生、留收件匣、只加「整理/求職」標籤。全部合成值。"""
+"""career（求職）：由安全網或本人指定的規則判定（AI 建議、Discord 手動指定不提供）；留收件匣、只加「整理/求職」標籤。
+全部合成值。"""
 import asyncio
 import json
 from datetime import date
@@ -154,7 +155,7 @@ def test_沒保護的類別照舊():
         ("label", "整理/刷卡扣款"), ("trash", None)]
 
 
-# ── AC4：career 只由安全網產生 ────────────────────────────────────
+# ── AC4：AI 建議與 Discord 手動指定不提供 career ──────────────────
 
 def test_AI建議_enum與prompt都不含career(monkeypatch):
     seen = {}

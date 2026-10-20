@@ -1,4 +1,5 @@
-"""推銷寄件者的「任何主旨」規則、出國旅遊的內建建議、每日報告安全網那行（歷史整理完成前）、規則判 career。全部合成值。"""
+"""推銷寄件者的「任何主旨」規則（補與移除）、出國旅遊的內建建議、每日報告安全網那行（歷史整理完成前）、
+規則判 career。全部合成值。"""
 from datetime import date, timedelta
 
 import pytest
@@ -12,17 +13,28 @@ from models import MailRule
 from tests.test_mailrules_repo import FakeSession
 from tests.test_mailrules_run import FakeRepo, T
 
+NEWS = "news@shop.example"
 
-def R(rid, sender, pattern, cat="promo", status="confirmed", by="user"):
-    return MailRule(id=rid, sender=sender, subject_pattern=pattern, category=cat, status=status, suggested_by=by)
+
+def R(rid, sender, pattern, cat="promo", status="confirmed", by="user", card=None):
+    return MailRule(id=rid, sender=sender, subject_pattern=pattern, category=cat, status=status, suggested_by=by,
+                    card=card)
 
 
 class RuleDb(FakeSession):
-    """add 進來的規則下一次查詢就看得到（真 DB flush 之後的行為）。"""
+    """add／delete 之後下一次查詢就反映出來（真 DB flush 之後的行為）。"""
+    def __init__(self, rows=()):
+        super().__init__(rows)
+        self.deleted = []
+
     def add(self, o):
         super().add(o)
         o.id = len(self.rows) + 1
         self.rows.append(o)
+
+    def delete(self, o):
+        self.deleted.append(o)
+        self.rows.remove(o)
 
 
 # ---------- ensure_promo_wildcards ----------
@@ -88,10 +100,71 @@ def test_已有任何主旨規則不重複():
     assert db.added == []
 
 
+# ---------- ensure_promo_wildcards：不再是純推銷 → 移除自動補的規則 ----------
+@pytest.mark.parametrize("other", [{"cat": "receipt"}, {"status": "rejected"}, {"status": "suggested"},
+                                   {"cat": "receipt", "status": "suggested"}])
+def test_寄件者不再是純推銷_自動補的任何主旨規則移除(other):
+    wild = R(3, NEWS, "*")
+    db = RuleDb([R(1, NEWS, "電子報 #"), R(2, NEWS, "別的", **other), wild])
+    assert repo.ensure_promo_wildcards(db, set()) == 1                  # 回傳反映移除了一條
+    assert db.deleted == [wild] and wild not in db.rows
+    assert db.added == [] and db.commits == 1
+    assert repo.ensure_promo_wildcards(db, set()) == 0                  # 冪等
+    assert db.deleted == [wild] and db.commits == 1
+
+
+def test_重選別的類別後_下一次呼叫移除自動補的任何主旨規則():
+    db = RuleDb([R(1, NEWS, "電子報 #", status="rejected", by="ai", card="s3")])
+    assert repo.assign_sender(db, "s3", NEWS, "promo") == 1             # 手動指定成推銷
+    assert repo.ensure_promo_wildcards(db, set()) == 1                  # 每日整理補了任何主旨
+    (wild,) = db.added
+    assert (wild.sender, wild.subject_pattern, wild.category, wild.card) == (NEWS, "*", "promo", None)
+    assert repo.ensure_promo_wildcards(db, set()) == 0                  # 還是純推銷：不動
+    assert repo.assign_sender(db, "s3", NEWS, "receipt") == 1           # 重選別的類別
+    assert repo.ensure_promo_wildcards(db, set()) == 1                  # 下一次呼叫移除
+    assert db.deleted == [wild] and [(r.id, r.category) for r in db.rows] == [(1, "receipt")]
+    assert repo.ensure_promo_wildcards(db, set()) == 0
+
+
+@pytest.mark.parametrize("kw", [{"card": "s4"}, {"by": "ai"}, {"by": "builtin"}, {"cat": "receipt"}])
+def test_不是自動補的任何主旨規則_寄件者混寄也不移除(kw):
+    keep = R(3, NEWS, "*", **kw)             # 掛在確認卡上、AI／內建建議的、或不是推銷類：不是每日整理補的
+    db = RuleDb([R(1, NEWS, "電子報 #"), R(2, NEWS, "訂單 #", cat="receipt"), keep])
+    assert repo.ensure_promo_wildcards(db, set()) == 0
+    assert db.deleted == [] and keep in db.rows and db.commits == 0
+
+
+def test_只有任何主旨規則_沒有別的規則_留著():
+    wild = R(1, NEWS, "*")
+    db = RuleDb([wild])
+    assert repo.ensure_promo_wildcards(db, set()) == 0
+    assert db.deleted == [] and wild in db.rows and db.commits == 0
+
+
+def test_網域規則不影響完整地址自動補的任何主旨規則():
+    wild = R(3, NEWS, "*")
+    db = RuleDb([R(1, NEWS, "電子報 #"), R(2, "@shop.example", "訂單 #", cat="receipt"), wild])
+    assert repo.ensure_promo_wildcards(db, set()) == 0
+    assert db.deleted == [] and wild in db.rows
+
+
+def test_寄件者大小寫不同視為同一個地址():
+    wild = R(3, "News@Shop.example", "*")
+    db = RuleDb([R(1, NEWS, "x"), R(2, "NEWS@shop.example", "y", cat="receipt"), wild])
+    assert repo.ensure_promo_wildcards(db, set()) == 1
+    assert db.deleted == [wild]
+
+
+def test_同一次呼叫有補有移除_回傳合計():
+    stale = R(4, "old@shop.example", "*")
+    db = RuleDb([R(1, "new@shop.example", "x"), R(2, "old@shop.example", "x"),
+                 R(3, "old@shop.example", "y", cat="receipt"), stale])
+    assert repo.ensure_promo_wildcards(db, set()) == 2
+    assert [w.sender for w in db.added] == ["new@shop.example"] and db.deleted == [stale]
+    assert db.commits == 1
+
+
 # ---------- 每日整理 ----------
-NEWS = "news@shop.example"
-
-
 def wire_real(monkeypatch, fake, headers):
     for k in ("MAIL_OWNER_NAME", "MAIL_SELF_ADDRESSES", "MAIL_COMPANY_DOMAINS"):
         monkeypatch.setenv(k, "")
@@ -168,6 +241,17 @@ def test_每日整理_混寄地址換主旨_仍是未知_不補(monkeypatch):
     assert rep.unknown_patterns == 1 and fake.db.added == []
 
 
+def test_每日整理_寄件者不再是純推銷_先移除自動補的規則再分類(monkeypatch):
+    stale = R(3, NEWS, "*")
+    fake = WildRepo([R(1, NEWS, "電子報 #"), R(2, NEWS, "訂單 #", cat="receipt"), stale])
+    wire_real(monkeypatch, fake, [mail()])
+    rep = run.run_daily(T, db=object())
+    assert fake.db.deleted == [stale] and fake.db.added == []
+    assert fake.calls.index("ensure") < fake.calls.index("verdicts")
+    assert fake.verdicts["m1"].category is None                         # 不再被任何主旨規則歸推銷
+    assert rep.unknown_patterns == 1
+
+
 def test_每日整理_補了任何主旨規則_求職字眼的信仍被安全網留下(monkeypatch):
     fake = WildRepo([R(1, NEWS, "電子報 #")])
     wire_real(monkeypatch, fake, [mail(subject="面試通知")])
@@ -218,6 +302,19 @@ def test_內建建議_航班機票登機_是出國旅遊(subject):
 @pytest.mark.parametrize("subject", ["訂房確認", "Booking confirmed", "Hotel itinerary", "明日行程提醒"])
 def test_內建建議_訂房與行程_照舊是國內旅遊(subject):
     assert sug(subject) == "travel"
+
+
+@pytest.mark.parametrize("subject", ["Your onboarding checklist", "Onboarding: step 1", "Inflight entertainment guide",
+                                     "Preflight checks", "Flighty app update"])
+def test_內建建議_英文字眼有字界_onboarding這類字不是出國旅遊(subject):
+    assert sug(subject) != "travel_abroad"
+    assert sug(subject, unsub=True) != "travel_abroad"
+
+
+@pytest.mark.parametrize("subject", ["FLIGHT UA-123 delayed", "[Boarding] gate changed", "Boarding-pass ready",
+                                     "Your flights are confirmed", "flight123 rescheduled"])
+def test_內建建議_英文字眼被標點數字大小寫或複數包著_仍是出國旅遊(subject):
+    assert sug(subject) == "travel_abroad"
 
 
 # ---------- daily_embed 安全網那行 ----------

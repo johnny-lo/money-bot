@@ -156,7 +156,7 @@ def run_daily(today: date, db=None) -> RunReport:
 def _run_daily(today: date, db=None) -> RunReport:
     with _session(db) as db:
         fresh = _sync(db)
-        repo.ensure_promo_wildcards(db, repo.valued_set(db))      # 先補再分類：電子報換主旨不再開新卡
+        repo.ensure_promo_wildcards(db, repo.valued_set(db))      # 分類前先補或移除，這次的判定就用最新的規則
         verdicts = _classify_all(db, today, fresh)
         new_cards = _suggest_unknown(db, verdicts)
         fresh_ids = {h.gm_msgid for h in fresh}

@@ -95,7 +95,8 @@ _TAX = _rx(r"薪資|扣繳|所得稅|保單|保費|保險契約|稅|健保|勞�
 _CARD = _rx(r"消費通知|交易.*通知|扣款|轉帳|繳款|繳費|入帳")
 _BILL = _rx(r"帳單|對帳單|statement")
 _RECEIPT = _rx(r"收據|receipt|訂單|order|出貨|配送|已送達|發票|invoice")
-_TRAVEL_ABROAD = _rx(r"航班|班機|機票|登機|flight|boarding")
+# 英文字眼要整字（前後不是英文字母），不吃 onboarding、inflight 這類字
+_TRAVEL_ABROAD = _rx(r"航班|班機|機票|登機|(?<![a-z])flights?(?![a-z])|(?<![a-z])boarding(?![a-z])")
 _TRAVEL = _rx(r"訂房|booking|itinerary|行程")
 _PROMO = _rx(r"電子報|優惠|折扣|抽獎|限時|週年慶|回饋|newsletter")
 
