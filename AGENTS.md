@@ -646,6 +646,10 @@
   要整批算失敗；只有 SEARCH 回 OK 且空，才算 gone。
 - **從垃圾桶救回來的信會換 UID**（2026-10-14 垃圾桶實測：41957 → 41958），X-GM-MSGID 不變。
   所以 DB 存的 uid 只是快取，寫入前一律用 X-GM-MSGID 核對／重找（上面那條就是為此）。
+- **`career`（求職）、`keep_inbox` 只由安全網判定**：類別清單給 AI／手動指定下拉時一律用 `config.SAFETY_NET_ONLY` 排除，
+  別各處自己寫 `!= "keep_inbox"`（新增第二個安全網類別時漏改一處，就等於讓 AI 或手動規則把求職信分去整理／丟掉）。
+  `plan_actions` 對 `protected` 判定最多只出 label 動作；`STRONG_JOB_KEYWORDS` 的每個字眼也要在 `JOB_KEYWORDS` 裡
+  （classify 只對有求職字眼的主旨再看強字眼，否則像「錄用通知」這類主旨既不保護也不歸 career；`tests/test_mailrules_career.py` 釘住）。
 
 ### 🔴 坑：保護網用合成資料測都對，套到真信箱卻吃掉四成——上線前一定要對真信箱唯讀試跑
 - **實例**：單元測試全綠的「重視的公司」與「真人地址」兩條安全網，唯讀試跑真信箱（9,854 封）時：

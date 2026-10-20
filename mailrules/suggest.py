@@ -2,10 +2,10 @@
 import json
 
 from codex_cli import codex_text
-from mailrules.config import CATEGORIES
+from mailrules.config import CATEGORIES, SAFETY_NET_ONLY
 
 BATCH = 40
-_ENUM = [k for k, _ in CATEGORIES if k != "keep_inbox"]
+_ENUM = [k for k, _ in CATEGORIES if k not in SAFETY_NET_ONLY]
 SCHEMA = {
     "type": "object",
     "properties": {"items": {"type": "array", "items": {
@@ -21,7 +21,7 @@ SCHEMA = {
 
 
 def _prompt(batch: list[dict]) -> str:
-    cats = "\n".join(f"- {k}：{d}" for k, d in CATEGORIES if k != "keep_inbox")
+    cats = "\n".join(f"- {k}：{d}" for k, d in CATEGORIES if k not in SAFETY_NET_ONLY)
     lines = [
         f"{i}｜{g['sender']}｜{g['name']}｜{g['pattern']}｜{g['count']}｜"
         + "；".join(g["subjects"][:5])

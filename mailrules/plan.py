@@ -18,7 +18,7 @@ def school_label(from_addr: str) -> str:
 
 def plan_actions(h: MailHeader, v: Verdict, st: MessageState, today: date, mode: str) -> list[Action]:
     cat = v.category
-    if cat is None or v.protected or st.trashed or cat not in config.RETENTION:
+    if cat is None or st.trashed or cat not in config.RETENTION:
         return []
     r = config.RETENTION[cat]
     age = (today - h.sent_date).days if h.sent_date else 0
@@ -26,6 +26,8 @@ def plan_actions(h: MailHeader, v: Verdict, st: MessageState, today: date, mode:
     lab = school_label(h.from_addr) if cat == "school" else r.label
     if lab and lab not in st.labels_applied:
         out.append(Action(h.gm_msgid, h.uid, "label", lab))
+    if v.protected:                       # 安全網命中：最多加標籤，任何模式都不移出、不丟
+        return out
     trash_days = 0 if (mode == "history" and cat == "promo") else r.trash_after_days
     if trash_days is not None and age >= trash_days:
         out.append(Action(h.gm_msgid, h.uid, "trash"))

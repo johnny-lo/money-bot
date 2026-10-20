@@ -11,6 +11,7 @@ PROMO_DIGEST_DOW = 6             # 週日（date.weekday()）
 
 CATEGORIES = [
     ("keep_inbox", "重要（真人／求職）"),
+    ("career", "求職"),
     ("security", "安全警示"),
     ("self", "寄給自己"),
     ("tax", "稅務／保單／薪資"),
@@ -26,6 +27,8 @@ CATEGORIES = [
     ("promo", "推銷／電子報"),
 ]
 LABELS = dict(CATEGORIES)
+# 只由安全網（classify）判定的類別：AI 建議與手動指定都不提供
+SAFETY_NET_ONLY = ("keep_inbox", "career")
 
 
 @dataclass(frozen=True)
@@ -38,6 +41,7 @@ class Retention:
 
 RETENTION = {
     "keep_inbox": Retention(),
+    "career": Retention(label=f"{LABEL_ROOT}/求職"),
     "security": Retention(label=f"{LABEL_ROOT}/安全警示", archive_after_days=7),
     "self": Retention(label=f"{LABEL_ROOT}/寄給自己", archive_after_days=0),
     "tax": Retention(label=f"{LABEL_ROOT}/稅務保單", archive_after_days=0),
@@ -53,8 +57,9 @@ RETENTION = {
     "promo": Retention(archive_after_days=0, trash_after_days=14, digest="weekly"),
 }
 
+# 第 1 條安全網；STRONG_JOB_KEYWORDS 的每個字眼也要在這裡（classify 只對有求職字眼的主旨再看強字眼）
 JOB_KEYWORDS = re.compile(
-    r"面試|面談|應徵|邀請|邀約|錄取|聘任|聘書|到職|報到|二面|複試|評量|測驗|個人資料填寫|"
+    r"面試|面談|應徵|邀請|邀約|錄取|錄用|聘任|聘書|到職|報到|二面|複試|評量|測驗|個人資料填寫|"
     r"offer|interview|application status|recruit", re.I)
 # 安全網第 2 條只從「強」字眼學網域（弱字眼只保護那一封，見上面的 JOB_KEYWORDS）：
 # 「邀請／報到／測驗」也常見於行銷信（生日邀請函、邀請朋友、報到通知），拿來學網域會把整個網域留下

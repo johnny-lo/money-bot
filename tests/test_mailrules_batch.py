@@ -372,7 +372,7 @@ def test_同一個已確認網域_有退訂連結的不保護_沒有的保護():
     valued = {"corp-a.example"}
     rules = [Rule(7, "@corp-a.example", "*", "promo", "confirmed", "user")]
     assert C.classify(hd("hr@corp-a.example"), "一般通知", rules, valued, set()) == \
-        Verdict("keep_inbox", C.REASON_VALUED, True)
+        Verdict("career", C.REASON_VALUED, True)
     assert C.classify(hd("news@corp-a.example", unsub=True), "一般通知", rules, valued, set()) == \
         Verdict("promo", "規則 #7", False)
     # 沒有規則的群發信：照原順序往下走 → 未知（不是重視的公司）

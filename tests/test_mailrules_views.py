@@ -17,9 +17,9 @@ def M(sender="a@shop.example", subject="s", d=date(2026, 10, 1), cat=None, reaso
             "trashed_at": trashed}
 
 
-def test_共19層_順序固定_下拉放得下():
+def test_共20層_順序固定_下拉放得下():
     keys = [k for k, _ in views.LAYERS]
-    assert len(keys) == 19 and keys[:6] == ["job", "valued", "human", "self", "rules", "unknown"]
+    assert len(keys) == 20 and keys[:6] == ["job", "valued", "human", "self", "rules", "unknown"]
     assert keys[-1] == "trash" and "keep_inbox" not in keys
 
 
@@ -128,7 +128,7 @@ def test_未知的層_KeyError():
 
 def test_總覽每層一筆():
     ov = views.overview_from([M(cat="login", reason="規則 #2")], [], [], T)
-    assert len(ov) == 19 and {o["key"]: o["count"] for o in ov}["login"] == 1
+    assert len(ov) == 20 and {o["key"]: o["count"] for o in ov}["login"] == 1
 
 
 def test_信件API都要token():

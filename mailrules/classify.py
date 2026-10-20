@@ -63,13 +63,17 @@ def match_rule(h: MailHeader, pattern: str, rules: list[Rule]) -> Rule | None:
 
 
 def classify(h: MailHeader, pattern: str, rules: list[Rule], valued: set[str], self_addrs: set[str]) -> Verdict:
+    """安全網命中的信留收件匣；沒有退訂連結的求職往來判 career（plan 另加「整理/求職」標籤），其餘判 keep_inbox。"""
+    from_valued = _domain_in(addr_domain(h.from_addr), valued)
     if has_job_keyword(h.subject):
+        if not h.unsub and (has_strong_job_keyword(h.subject) or from_valued):
+            return Verdict("career", REASON_JOB, True)
         return Verdict("keep_inbox", REASON_JOB, True)
     r = match_rule(h, pattern, rules)
-    if not h.unsub and _domain_in(addr_domain(h.from_addr), valued):    # 重視公司的群發信不保護，照一般規則走
+    if not h.unsub and from_valued:                                     # 重視公司的群發信不保護，照一般規則走
         if r and r.sender.lower() == h.from_addr.lower():
             return Verdict(r.category, f"規則 #{r.id}", False)
-        return Verdict("keep_inbox", REASON_VALUED, True)
+        return Verdict("career", REASON_VALUED, True)
     if h.from_addr in self_addrs:
         return Verdict(r.category if r else "self", REASON_SELF, False)
     if r:

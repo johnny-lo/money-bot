@@ -86,6 +86,8 @@ def _match_msg(m: dict, key: str, today: date) -> bool:
     if key == "trash":
         t = _day(m.get("trashed_at"))
         return t is not None and t >= today - timedelta(days=TRASH_RECOVER_DAYS)
+    if key == "career":                  # 求職往來的信理由是求職字眼或重視的公司，但在這一層也要列
+        return live and m.get("category") == key
     return live and m.get("category") == key and reason not in _PROTECT_REASONS
 
 

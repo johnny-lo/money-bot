@@ -35,7 +35,7 @@ def test_求職字眼_任何規則都蓋不掉():
 def test_重視公司_主旨不明顯也留收件匣():
     valued = {"corp-a.example"}
     v = C.classify(h("hr@corp-a.example", "個人資料提醒", unsub=False), "個人資料提醒", [], valued, set())
-    assert v.category == "keep_inbox" and v.protected and v.reason == "重視的公司"
+    assert v.category == "career" and v.protected and v.reason == "重視的公司"
 
 
 def test_重視公司_只有完整地址規則能覆蓋_網域規則不行():
