@@ -635,11 +635,14 @@
   **不准只看 UID 存不存在就寫**——UID 可能已指向別封信。
 - **寫到一半斷線**：原本 `apply` 一拋例外，已寫進 Gmail 的那幾批也沒記進 DB（下次又重做、計數也錯）。
   現在每批各自 try，出事的那批整批算失敗、已完成的照常回傳並記錄。
-- **寫入一個指令一次 50 封**（`gmail_rw.WRITE_GROUP`）：逐封送一個來回約 0.5 秒，13,000 個動作要約 2.5 小時。
-  `_write` 把核對過的動作依（種類, 標籤）分組、每組每 50 個 UID 送一個 `UID STORE`／`UID MOVE`；同一批順序固定
-  label → archive → trash——**MOVE 會讓 UID 失效，必須最後**，否則同一封信的標籤／移出會對著失效的 UID 送。
+- **寫入一個指令一次 50 封**（`gmail_rw.WRITE_GROUP`）：一個 IMAP 來回約 0.5 秒，逐封送 13,000 個動作要約 2.5 小時，
+  所以一個指令帶一整組 UID。`_write` 把核對過的動作依（種類, 標籤）分組、每組每 50 個 UID 送一個 `UID STORE`／`UID MOVE`；
+  同一批順序固定 label → archive → trash——**MOVE 會讓 UID 失效，必須最後**，否則同一封信的標籤／移出會對著失效的 UID 送。
   整組回非 OK 或拋例外 → 只有那一組退回逐封重送（不能整組算失敗：會把同組正常的信一起記成失敗，也不知道是哪封）。
-  新增寫入種類時要放進 `_WRITE_ORDER` 並想清楚它和 MOVE 的先後；`tests/test_mailrules_write_group.py` 釘住分組、順序、退回逐封。
+  `_send` 只認 label／archive／trash，**丟垃圾桶要明確比對 `kind == "trash"`**：種類不認得就回 False、不送任何指令，
+  別讓最後一個 `else` 變成丟垃圾桶（種類打錯或將來新增種類時，信會被默默丟掉）。
+  新增寫入種類時要放進 `_WRITE_ORDER`、在 `_send` 加明確分支，並想清楚它和 MOVE 的先後；
+  `tests/test_mailrules_write_group.py` 釘住分組、順序、退回逐封、未知種類不送。
 - **兩條流程同時寫**：每日排程和「🚀 執行歷史整理」可能同時跑 → `run._LOCK`；每日搶不到就略過、歷史搶不到就拋錯。
 - **「發了」不等於「送出了」**：`bridge.post_sync` 只把 coroutine 排進 bot loop 就回來（bot 沒 ready 直接 return、
   送失敗只 print）。拿它的「呼叫完成」去記「計畫卡已發」「確認卡已發」，卡沒送出也被記成已發 → 之後只剩一行提醒、

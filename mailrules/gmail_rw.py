@@ -349,17 +349,20 @@ def apply(actions: list[Action], expected_uidvalidity: int | None = None
 
 
 def _send(M, kind: str, label: str | None, uids: list[int], trash: str, use_move: bool) -> bool:
-    """送一個寫入指令（一組 UID 共用）；回應不是 OK 或拋例外都算失敗。"""
+    """送一個寫入指令（一組 UID 共用）；回應不是 OK 或拋例外都算失敗。
+    只有 label／archive／trash 三種；丟垃圾桶只認 kind == "trash"，其他種類回 False、不送任何指令。"""
     ids = ",".join(map(str, dict.fromkeys(uids)))
     try:
         if kind == "label":
             typ, _ = M.uid("STORE", ids, "+X-GM-LABELS", '("' + imap_utf7_encode(label) + '")')
         elif kind == "archive":
             typ, _ = M.uid("STORE", ids, "-X-GM-LABELS", "(\\Inbox)")
-        elif use_move:
+        elif kind == "trash" and use_move:
             typ, _ = M.uid("MOVE", ids, '"' + trash + '"')
-        else:
+        elif kind == "trash":
             typ, _ = M.uid("STORE", ids, "+X-GM-LABELS", "(\\Trash)")
+        else:
+            return False
     except Exception:
         return False
     return typ == "OK"

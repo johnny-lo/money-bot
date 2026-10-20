@@ -192,6 +192,43 @@ def test_未知種類算_failed_不送任何指令(monkeypatch):
     assert done == [] and failed == acts and M.cmds() == []
 
 
+@pytest.mark.parametrize("use_move", [True, False])
+@pytest.mark.parametrize("kind", ["expunge", "delete", "TRASH", "", None])
+def test_send_未知種類回_False_不送任何指令(kind, use_move):
+    M = WriteM()
+    assert gmail_rw._send(M, kind, None, [1, 2], "[Gmail]/Trash", use_move) is False
+    assert M.calls == []
+
+
+def test_send_只有_trash_才丟垃圾桶_有_MOVE_用_UID_MOVE():
+    M = WriteM()
+    assert gmail_rw._send(M, "trash", None, [1, 2], "[Gmail]/Trash", True) is True
+    assert M.calls == [("uid", "MOVE", "1,2", TRASH)]
+
+
+def test_send_只有_trash_才丟垃圾桶_沒有_MOVE_用_X_GM_LABELS_Trash():
+    M = WriteM()
+    assert gmail_rw._send(M, "trash", None, [1, 2], "[Gmail]/Trash", False) is True
+    assert M.calls == [("uid", "STORE", "1,2", "+X-GM-LABELS", "(\\Trash)")]
+
+
+@pytest.mark.parametrize("use_move", [True, False])
+def test_send_label_與_archive_不管有沒有_MOVE_都只送_STORE(use_move):
+    M = WriteM()
+    assert gmail_rw._send(M, "label", "整理/收據", [1, 2], "[Gmail]/Trash", use_move) is True
+    assert gmail_rw._send(M, "archive", None, [3], "[Gmail]/Trash", use_move) is True
+    assert M.calls == [("uid", "STORE", "1,2", "+X-GM-LABELS", _lab("整理/收據")),
+                       ("uid", "STORE", "3", "-X-GM-LABELS", "(\\Inbox)")]
+
+
+@pytest.mark.parametrize("kind,label", [("label", "整理/收據"), ("archive", None), ("trash", None)])
+def test_send_回應不是_OK_或拋例外都回_False(kind, label):
+    for verdict in ("NO", "boom"):
+        M = WriteM(rule=lambda cmd, uids, v=verdict: v)
+        assert gmail_rw._send(M, kind, label, [1], "[Gmail]/Trash", True) is False
+        assert len(M.cmds()) == 1
+
+
 def test_寫入種類仍只有_CREATE_STORE_MOVE(monkeypatch):
     acts = (_acts("label", range(1, 4), "整理/收據") + _acts("archive", range(1, 4)) + _acts("trash", range(1, 4)))
     M = _setup(monkeypatch, acts)
