@@ -164,7 +164,7 @@ def daily_embed(rep: RunReport) -> discord.Embed:
     if rep.gone:
         lines.append(f"📭 已不在信箱 {rep.gone} 封（略過）")
     if rep.protected:
-        lines.append(f"🛡 安全網留在收件匣（看起來重要，我沒動）：{len(rep.protected)} 封")
+        lines.append(f"🛡 安全網的信都留在收件匣（沒移出、沒丟；求職往來另加「整理/求職」標籤）：{len(rep.protected)} 封")
         room = 4096 - len("\n".join(lines)) - 1
         shown = 0
         for h in rep.protected:

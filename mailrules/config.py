@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 
 LABEL_ROOT = "整理"
-FINANCE_KEEP_DAYS = 730          # 刷卡扣款、收據訂單、帳單：滾動保留天數（2 年）
+FINANCE_KEEP_DAYS = 730          # 刷卡扣款、收據訂單：滾動保留天數（2 年）
 BATCH_SIZE = 500                 # 歷史執行每批封數
 DAILY_RUN = (23, 30)             # 每日執行時間（台北；在發票同步 21:00 之後）
 PROMO_DIGEST_DOW = 6             # 週日（date.weekday()）
@@ -19,7 +19,8 @@ CATEGORIES = [
     ("card", "刷卡／扣款／轉帳通知"),
     ("receipt", "收據／訂單／出貨"),
     ("bill", "帳單／對帳單"),
-    ("travel", "旅遊／交通"),
+    ("travel", "國內旅遊／交通"),
+    ("travel_abroad", "出國旅遊"),
     ("company", "公司系統通知"),
     ("jobs", "職缺推薦"),
     ("social", "LinkedIn 社群通知"),
@@ -48,8 +49,9 @@ RETENTION = {
     "school": Retention(label=f"{LABEL_ROOT}/學校", archive_after_days=0),
     "card": Retention(label=f"{LABEL_ROOT}/刷卡扣款", archive_after_days=0, trash_after_days=FINANCE_KEEP_DAYS),
     "receipt": Retention(label=f"{LABEL_ROOT}/收據", archive_after_days=0, trash_after_days=FINANCE_KEEP_DAYS),
-    "bill": Retention(label=f"{LABEL_ROOT}/帳單", archive_after_days=0, trash_after_days=FINANCE_KEEP_DAYS),
+    "bill": Retention(label=f"{LABEL_ROOT}/帳單", archive_after_days=0),
     "travel": Retention(label=f"{LABEL_ROOT}/旅遊", archive_after_days=0, trash_after_days=180),
+    "travel_abroad": Retention(label=f"{LABEL_ROOT}/出國旅遊", archive_after_days=0),
     "company": Retention(archive_after_days=0, trash_after_days=30),
     "jobs": Retention(archive_after_days=0, trash_after_days=14, digest="daily"),
     "social": Retention(trash_after_days=0),
