@@ -184,6 +184,33 @@ class _FakeResp:
         return self._raw[:n] if n and n > 0 else self._raw
 
 
+def serve_by_ua(monkeypatch, *, browser=None, crawler=None, uas=None):
+    """urlopen 換成依 User-Agent 回不同網頁，網址守門放行。
+
+    browser／crawler 是該種 UA 拿到的頁面：str 以 UTF-8 回（header 宣告 utf-8）、bytes 原樣回
+    （header 不宣告編碼）、None 是連線失敗。回傳 UA 種類的使用順序（"browser" / "crawler"）；
+    傳 uas=[] 的話，實際送出的 User-Agent 字串也會依序放進去。
+    """
+    monkeypatch.setattr(ext, "_is_safe_fetch_url", lambda u: True)
+    used = []
+
+    def fake_urlopen(req, timeout=None):
+        ua = req.get_header("User-agent")
+        if uas is not None:
+            uas.append(ua)
+        kind = "crawler" if "facebookexternalhit" in ua else "browser"
+        used.append(kind)
+        page = crawler if kind == "crawler" else browser
+        if page is None:
+            raise OSError("連不上")
+        if isinstance(page, str):
+            return _FakeResp(page.encode("utf-8"), charset="utf-8")
+        return _FakeResp(page)
+
+    monkeypatch.setattr(ext.urllib.request, "urlopen", fake_urlopen)
+    return used
+
+
 def test_fetch_html_refuses_unsafe_url(monkeypatch):
     monkeypatch.setattr(ext, "_is_safe_fetch_url", lambda u: False)
 
@@ -215,6 +242,61 @@ def test_fetch_html_defaults_to_utf8_and_survives_bad_charset(monkeypatch):
     assert ext.fetch_html("https://example.com/a") == "歷史"
 
 
+def _fetch_bytes(monkeypatch, raw: bytes, charset=None):
+    """urlopen 回這串位元組（header 的 charset 可指定，預設不宣告）→ fetch_html 的結果。"""
+    monkeypatch.setattr(ext, "_is_safe_fetch_url", lambda u: True)
+    monkeypatch.setattr(ext.urllib.request, "urlopen",
+                        lambda req, timeout=None: _FakeResp(raw, charset=charset))
+    return ext.fetch_html("https://example.com/a")
+
+
+def _big5_page(head: str) -> bytes:
+    return (f"<html><head>{head}<title>唐朝的經濟</title></head>"
+            "<body><p>兩稅法取代租庸調。</p></body></html>").encode("big5")
+
+
+def test_fetch_html_reads_meta_charset_when_header_has_none(monkeypatch):
+    html = _fetch_bytes(monkeypatch, _big5_page('<meta charset="big5">'))
+    assert article_fields(html)["title"] == "唐朝的經濟"
+    assert "兩稅法取代租庸調。" in html
+
+
+def test_fetch_html_reads_http_equiv_charset_when_header_has_none(monkeypatch):
+    head = '<meta http-equiv="Content-Type" content="text/html; charset=Big5">'
+    assert article_fields(_fetch_bytes(monkeypatch, _big5_page(head)))["title"] == "唐朝的經濟"
+
+
+def test_fetch_html_header_charset_beats_meta(monkeypatch):
+    raw = '<html><head><meta charset="big5"><title>唐朝的經濟</title></head></html>'.encode("utf-8")
+    assert article_fields(_fetch_bytes(monkeypatch, raw, charset="utf-8"))["title"] == "唐朝的經濟"
+
+
+def test_fetch_html_unknown_header_charset_falls_through_to_meta(monkeypatch):
+    html = _fetch_bytes(monkeypatch, _big5_page('<meta charset="big5">'), charset="no-such-charset")
+    assert article_fields(html)["title"] == "唐朝的經濟"
+
+
+def test_fetch_html_unknown_meta_charset_falls_back_to_utf8(monkeypatch):
+    raw = '<html><head><meta charset="no-such-charset"><title>唐朝的經濟</title></head></html>'.encode("utf-8")
+    assert article_fields(_fetch_bytes(monkeypatch, raw))["title"] == "唐朝的經濟"
+
+
+def test_fetch_html_meta_declaring_a_non_text_codec_is_not_fatal(monkeypatch):
+    raw = '<html><head><meta charset="base64"><title>唐朝的經濟</title></head></html>'.encode("utf-8")
+    assert article_fields(_fetch_bytes(monkeypatch, raw))["title"] == "唐朝的經濟"
+
+
+def test_fetch_html_meta_charset_inside_first_2kb_is_found(monkeypatch):
+    pad = "<!-- " + "x" * 1500 + " -->"
+    assert article_fields(_fetch_bytes(monkeypatch, _big5_page(pad + '<meta charset="big5">')))["title"] == "唐朝的經濟"
+
+
+def test_fetch_html_ignores_meta_charset_after_the_first_2kb(monkeypatch):
+    raw = ('<html><head><title>唐朝的經濟</title></head><body>' + "<p>內文</p>" * 400
+           + '<meta charset="big5"></body></html>').encode("utf-8")
+    assert article_fields(_fetch_bytes(monkeypatch, raw))["title"] == "唐朝的經濟"
+
+
 def test_fetch_html_network_error_returns_none(monkeypatch):
     monkeypatch.setattr(ext, "_is_safe_fetch_url", lambda u: True)
 
@@ -223,3 +305,80 @@ def test_fetch_html_network_error_returns_none(monkeypatch):
 
     monkeypatch.setattr(ext.urllib.request, "urlopen", boom)
     assert ext.fetch_html("https://example.com/a") is None
+
+
+# ── fetch_article：UA 的挑選與重抓 ─────────────────────────────
+
+_OG_HEAD = ('<meta property="og:title" content="某作者的貼文">'
+            '<meta property="og:description" content="兩稅法其實是財政改革">')
+_OG_FIELDS = {"title": "某作者的貼文", "description": "兩稅法其實是財政改革", "text": ""}
+_EMPTY_FIELDS = {"title": "", "description": "", "text": ""}
+
+
+def test_fetch_article_retries_with_crawler_ua_when_browser_page_has_no_title(monkeypatch):
+    used = serve_by_ua(monkeypatch, browser=_page(body="<div>請先登入</div>"), crawler=_page(_OG_HEAD))
+    assert ext.fetch_article("https://example.com/a") == _OG_FIELDS
+    assert used == ["browser", "crawler"]
+
+
+def test_fetch_article_retries_when_browser_page_has_title_only(monkeypatch):
+    used = serve_by_ua(monkeypatch, browser=_page("<title>網站名</title>"), crawler=_page(_OG_HEAD))
+    assert ext.fetch_article("https://example.com/a") == _OG_FIELDS   # 整份換成爬蟲 UA 拿到的，標題不是「網站名」
+    assert used == ["browser", "crawler"]
+
+
+def test_fetch_article_retries_after_the_browser_fetch_failed(monkeypatch):
+    used = serve_by_ua(monkeypatch, browser=None, crawler=_page(_OG_HEAD))
+    assert ext.fetch_article("https://example.com/a") == _OG_FIELDS
+    assert used == ["browser", "crawler"]
+
+
+def test_fetch_article_does_not_retry_when_browser_page_has_title_and_description(monkeypatch):
+    used = serve_by_ua(monkeypatch, browser=_page(_OG_HEAD), crawler=_page("<title>不該被用到</title>"))
+    assert ext.fetch_article("https://example.com/a") == _OG_FIELDS
+    assert used == ["browser"]
+
+
+def test_fetch_article_does_not_retry_when_browser_page_has_title_and_body(monkeypatch):
+    used = serve_by_ua(monkeypatch, browser=_page("<title>T</title>", "<p>內文</p>"), crawler=None)
+    assert ext.fetch_article("https://example.com/a") == {"title": "T", "description": "", "text": "內文"}
+    assert used == ["browser"]
+
+
+def test_fetch_article_threads_asks_with_crawler_ua_first(monkeypatch):
+    used = serve_by_ua(monkeypatch, browser=None, crawler=_page(_OG_HEAD))
+    assert ext.fetch_article("https://www.threads.net/@a/post/1", "threads") == _OG_FIELDS
+    assert used == ["crawler"]
+
+
+def test_fetch_article_threads_falls_back_to_browser_ua(monkeypatch):
+    used = serve_by_ua(monkeypatch, browser=_page(_OG_HEAD), crawler=None)
+    assert ext.fetch_article("https://www.threads.net/@a/post/1", "threads") == _OG_FIELDS
+    assert used == ["crawler", "browser"]
+
+
+def test_fetch_article_keeps_what_first_ua_found_when_retry_finds_nothing(monkeypatch):
+    used = serve_by_ua(monkeypatch, browser=_page("<title>只有標題</title>"), crawler=None)
+    assert ext.fetch_article("https://example.com/a") == {"title": "只有標題", "description": "", "text": ""}
+    assert used == ["browser", "crawler"]
+
+
+def test_fetch_article_merges_fields_when_neither_page_is_enough(monkeypatch):
+    serve_by_ua(monkeypatch, browser=_page("<title>X</title>"),
+                crawler=_page('<meta name="description" content="D">'))
+    assert ext.fetch_article("https://example.com/a") == {"title": "X", "description": "D", "text": ""}
+
+
+def test_fetch_article_nothing_from_either_ua_is_all_empty(monkeypatch):
+    used = serve_by_ua(monkeypatch, browser=None, crawler=None)
+    assert ext.fetch_article("https://example.com/a") == _EMPTY_FIELDS
+    assert used == ["browser", "crawler"]
+
+
+def test_fetch_article_sends_a_browser_ua_then_the_crawler_ua_food_extract_uses(monkeypatch):
+    import food.extract as fx
+    uas = []
+    serve_by_ua(monkeypatch, browser=_page(), crawler=_page(_OG_HEAD), uas=uas)
+    ext.fetch_article("https://example.com/a")
+    assert uas[0].startswith("Mozilla/5.0") and "facebookexternalhit" not in uas[0]
+    assert uas[1] == fx._FETCH_UA

@@ -1,4 +1,6 @@
 import video.ingest as ing
+from tests.test_video_article import serve_by_ua
+from video.extract import article_fields
 
 
 def test_from_url_happy_path(monkeypatch):
@@ -62,11 +64,9 @@ _ARTICLE_HTML = (
 )
 
 
-def _stub_article(monkeypatch, html, *, platform="other"):
-    """文章路徑的外部依賴全換掉：抓網頁、AI、入庫。回傳 (呼叫紀錄, 已入庫標籤)。"""
+def _stub_ai_and_repo(monkeypatch):
+    """文章路徑的 AI 與入庫換成記帳用替身，並擋住 yt-dlp 那條路。回傳 (呼叫紀錄, 已入庫標籤)。"""
     calls = {"meta": [], "video": []}
-    monkeypatch.setattr(ing, "classify_platform", lambda u: platform)
-    monkeypatch.setattr(ing, "fetch_html", lambda u: html)
 
     def no_ytdlp(u, p):
         raise AssertionError("文章不該走 food.extract.from_url")
@@ -84,6 +84,13 @@ def _stub_article(monkeypatch, html, *, platform="other"):
     added = []
     monkeypatch.setattr(ing.repo, "add_tag", lambda vid, tag: added.append((vid, tag)) or True)
     return calls, added
+
+
+def _stub_article(monkeypatch, html, *, platform="other"):
+    """文章路徑的外部依賴全換掉：抓網頁（HTML 照真的解析）、AI、入庫。回傳 (呼叫紀錄, 已入庫標籤)。"""
+    monkeypatch.setattr(ing, "classify_platform", lambda u: platform)
+    monkeypatch.setattr(ing, "fetch_article", lambda u, p=None: article_fields(html))
+    return _stub_ai_and_repo(monkeypatch)
 
 
 def test_article_success_uses_og_title_and_feeds_ai_title_desc_body(monkeypatch):
@@ -159,9 +166,9 @@ def test_article_unexpected_error_reported_as_extract_failure(monkeypatch):
     failed = []
     monkeypatch.setattr(ing.sensors, "extract_failed", lambda *a: failed.append(a))
 
-    def boom(html):
+    def boom(u, p=None):
         raise RuntimeError("解析炸了")
-    monkeypatch.setattr(ing, "article_fields", boom)
+    monkeypatch.setattr(ing, "fetch_article", boom)
     rec, reason = ing.from_url("https://example.com/tang")
     assert rec is None and "解析炸了" in reason
     assert len(failed) == 1 and failed[0][:2] == ("video", "other")
@@ -178,9 +185,9 @@ def test_video_platforms_keep_the_ytdlp_route(monkeypatch):
     for platform in ("youtube", "instagram", "tiktok", "facebook"):
         monkeypatch.setattr(ing, "classify_platform", lambda u, p=platform: p)
 
-        def no_fetch(u):
+        def no_fetch(u, p=None):
             raise AssertionError("影片不該走文章抓網頁")
-        monkeypatch.setattr(ing, "fetch_html", no_fetch)
+        monkeypatch.setattr(ing, "fetch_article", no_fetch)
         seen = {}
         monkeypatch.setattr(ing, "_extract_from_url",
                             lambda u, p, seen=seen: seen.update(platform=p) or "某支影片\n頻道")
@@ -194,3 +201,61 @@ def test_video_platforms_keep_the_ytdlp_route(monkeypatch):
         rec, reason = ing.from_url("https://example.com/v")
         assert reason == "" and rec["title"] == "某支影片"
         assert seen["platform"] == platform and kinds == ["video"]
+
+
+# ── 文章網頁的 UA：瀏覽器 UA 拿不到就換爬蟲 UA（不經 fetch_article 替身，直接換掉 urlopen）─────────
+
+_THREADS_OG_PAGE = (
+    "<html><head>"
+    '<meta property="og:title" content="某作者 (@author) on Threads">'
+    '<meta property="og:description" content="兩稅法其實是財政改革，不是單純加稅。">'
+    "</head><body></body></html>"
+)
+
+
+def test_article_page_without_og_for_browser_ua_is_fetched_again_as_crawler(monkeypatch):
+    calls, added = _stub_ai_and_repo(monkeypatch)
+    used = serve_by_ua(monkeypatch, browser="<html><body><div>請先登入</div></body></html>",
+                       crawler=_ARTICLE_HTML)
+    rec, reason = ing.from_url("https://example.com/needs-crawler")
+    assert reason == "" and rec is not None
+    assert used == ["browser", "crawler"]
+    assert calls["video"][0]["title"] == "唐朝的經濟"
+    (text, kind), = calls["meta"]
+    assert kind == "article" and "安史之亂前後的財政" in text and "兩稅法取代租庸調。" in text
+    assert added == [(5, "經濟"), (5, "制度")]
+
+
+def test_threads_link_is_fetched_with_crawler_ua_first(monkeypatch):
+    calls, _ = _stub_ai_and_repo(monkeypatch)
+    used = serve_by_ua(monkeypatch, browser="<html><body></body></html>", crawler=_THREADS_OG_PAGE)
+    rec, reason = ing.from_url("https://www.threads.net/@author/post/ABC")
+    assert reason == "" and rec is not None
+    assert used == ["crawler"]
+    assert calls["video"][0]["title"] == "某作者 (@author) on Threads"
+    assert calls["video"][0]["platform"] == "threads"
+    (text, kind), = calls["meta"]
+    assert kind == "article" and "兩稅法其實是財政改革" in text
+
+
+def test_article_without_title_for_either_ua_still_reports_failure(monkeypatch):
+    calls, added = _stub_ai_and_repo(monkeypatch)
+    used = serve_by_ua(monkeypatch, browser="<html><body><p>有字沒標題</p></body></html>", crawler=None)
+    rec, reason = ing.from_url("https://example.com/untitled")
+    assert rec is None and reason == ing._NO_TITLE_REASON
+    assert used == ["browser", "crawler"]
+    assert calls["video"] == [] and calls["meta"] == [] and added == []
+
+
+def test_article_big5_page_without_header_charset_is_stored_with_readable_title(monkeypatch):
+    calls, _ = _stub_ai_and_repo(monkeypatch)
+    page = ('<html><head><meta http-equiv="Content-Type" content="text/html; charset=big5">'
+            "<title>唐朝的經濟</title></head>"
+            "<body><article><p>兩稅法取代租庸調。</p></article></body></html>").encode("big5")
+    used = serve_by_ua(monkeypatch, browser=page)
+    rec, reason = ing.from_url("https://example.com/big5")
+    assert reason == "" and rec is not None
+    assert used == ["browser"]
+    assert calls["video"][0]["title"] == "唐朝的經濟"
+    (text, kind), = calls["meta"]
+    assert kind == "article" and "兩稅法取代租庸調。" in text

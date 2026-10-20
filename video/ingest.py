@@ -7,14 +7,14 @@
 兩條抽取路徑，依 video.extract.kind_of(platform) 分：
 - 影片（youtube／instagram／tiktok／facebook）：複用美食抽取基建 food.extract.from_url（yt-dlp 抓 title/uploader/desc），
   標題取 blob 第一行
-- 文章（其餘）：video.extract.fetch_html 用瀏覽器 UA 抓網頁 → article_fields 抽標題／描述／內文，
+- 文章（其餘）：video.extract.fetch_article 抓網頁並抽標題／描述／內文（UA 的挑選與重抓都在裡面），
   food.extract 不經手：美食模組共用它，動它會連動美食的抽取行為
 """
 from food.links import classify_platform
 from food.extract import from_url as _extract_from_url
 from autofix import sensors
 from video import repo
-from video.extract import article_fields, fetch_html, kind_of, meta_from_text
+from video.extract import fetch_article, kind_of, meta_from_text
 
 
 _NO_TITLE_REASON = "抽不到標題（連結打不開，或頁面沒有標題）"
@@ -31,9 +31,9 @@ def _video_material(url: str, platform: str) -> tuple[str, str]:
     return title, blob
 
 
-def _article_material(url: str) -> tuple[str, str]:
+def _article_material(url: str, platform: str) -> tuple[str, str]:
     """文章連結 → (標題, 餵 AI 的文字)。抓不到內文時只剩標題＋描述，抓不到網頁則兩者皆空。"""
-    fields = article_fields(fetch_html(url))
+    fields = fetch_article(url, platform)
     return fields["title"], _join(fields["title"], fields["description"], fields["text"])
 
 
@@ -44,7 +44,7 @@ def from_url(url: str, *, caption: str = "") -> tuple[dict | None, str]:
 
     try:
         title, material = (_video_material(url, platform) if kind == "video"
-                           else _article_material(url))
+                           else _article_material(url, platform))
     except Exception as ex:
         sensors.extract_failed("video", platform, url, ex)
         return None, f"連結抽取失敗：{ex}"

@@ -4,7 +4,8 @@
 - parse_video_meta：純函式，把 codex 回應字串解析成 {topic, tags}（壞 JSON/缺欄位回空）
 - meta_from_text：用 codex_text 從一段文字判主題+標籤；提示依種類寫影片或文章
 - article_fields：純函式，HTML → {title, description, text}（文章專用，不動 food.extract）
-- fetch_html：用一般瀏覽器 UA 抓網頁，過 food.extract 的 SSRF 守門；失敗回 None
+- fetch_html：用指定 UA（預設一般瀏覽器 UA）抓網頁，過 food.extract 的 SSRF 守門；依 header／meta 宣告的編碼解碼；失敗回 None
+- fetch_article：抓文章網頁 → article_fields；標題或內容缺就換另一種 UA 再抓一次（Threads 先用爬蟲 UA）
 - youtube_thumbnail：reuse food.extract.parse_video_id → 縮圖網址（非 YouTube 回 None）
 """
 import json
@@ -13,7 +14,7 @@ import urllib.request
 from html.parser import HTMLParser
 
 from codex_cli import codex_text
-from food.extract import _is_safe_fetch_url, parse_video_id
+from food.extract import _FETCH_UA as _CRAWLER_UA, _is_safe_fetch_url, parse_video_id
 
 
 _VIDEO_PLATFORMS = frozenset({"youtube", "instagram", "tiktok", "facebook"})
@@ -94,9 +95,15 @@ _DESC_MAX = 2000
 _TEXT_MAX = 3000
 _FETCH_MAX_BYTES = 1_000_000
 _FETCH_TIMEOUT = 12
+# header 沒宣告編碼時，只在開頭這段位元組裡找 <meta> 的宣告（頁面後段出現的 <meta> 字樣不算）。
+_CHARSET_SNIFF_BYTES = 2048
+# <meta charset="x"> 與 <meta http-equiv="Content-Type" content="text/html; charset=x"> 都含 charset=x。
+_META_CHARSET_RE = re.compile(rb"""<meta\s[^>]*?charset\s*=\s*["']?\s*([\w.:-]+)""", re.IGNORECASE)
 # 一般瀏覽器 UA：多數新聞／部落格站對爬蟲 UA 回精簡版或擋掉。
 _BROWSER_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+# 這些平台對瀏覽器 UA 不給 og 標題與描述，只對 food.extract 的爬蟲 UA（facebookexternalhit）給，所以先用爬蟲 UA。
+_CRAWLER_FIRST_PLATFORMS = frozenset({"threads"})
 # 不是內文的區塊：連同裡面的字整段丟掉。
 _SKIP_TAGS = frozenset({"script", "style", "noscript", "template", "nav", "header", "footer"})
 
@@ -174,21 +181,53 @@ def article_fields(html: str | None) -> dict:
     return {"title": title[:_TITLE_MAX], "description": desc[:_DESC_MAX], "text": text[:_TEXT_MAX]}
 
 
-def fetch_html(url: str) -> str | None:
-    """用瀏覽器 UA 抓網頁 → HTML 字串；不安全的網址、連線或解碼失敗回 None。"""
+def _enough(fields: dict) -> bool:
+    """有標題，且描述或內文至少有一樣，才夠拿去分類。"""
+    return bool(fields["title"] and (fields["description"] or fields["text"]))
+
+
+def fetch_article(url: str, platform: str | None = None) -> dict:
+    """文章連結 → {title, description, text}，抓不到的欄位是空字串。
+
+    先用一種 UA 抓（Threads 先用爬蟲 UA，其餘先用瀏覽器 UA）；標題缺，或描述與內文都缺，
+    就換另一種 UA 再抓一次。第一個夠用的結果整份採用，兩次都不夠就逐欄取先抓到的非空值。
+    """
+    uas = ((_CRAWLER_UA, _BROWSER_UA) if platform in _CRAWLER_FIRST_PLATFORMS
+           else (_BROWSER_UA, _CRAWLER_UA))
+    merged = dict.fromkeys(("title", "description", "text"), "")
+    for ua in uas:
+        fields = article_fields(fetch_html(url, user_agent=ua))
+        if _enough(fields):
+            return fields
+        merged = {k: merged[k] or fields[k] for k in merged}
+    return merged
+
+
+def _decode_html(raw: bytes, header_charset: str | None) -> str:
+    """位元組 → 字串。編碼依序看 HTTP header、開頭 2KB 裡的 <meta> 宣告，都沒有就當 UTF-8；壞位元組換成 �。"""
+    m = _META_CHARSET_RE.search(raw[:_CHARSET_SNIFF_BYTES])
+    meta_charset = m.group(1).decode("ascii", "ignore") if m else None
+    for charset in (header_charset, meta_charset):
+        if not charset:
+            continue
+        try:
+            return raw.decode(charset, "replace")
+        except (LookupError, UnicodeError):
+            pass   # 不認得的編碼名（含 base64 這類非文字編碼）當作沒宣告，換下一個
+    return raw.decode("utf-8", "replace")
+
+
+def fetch_html(url: str, user_agent: str = _BROWSER_UA) -> str | None:
+    """用指定 UA（預設一般瀏覽器 UA）抓網頁 → HTML 字串；不安全的網址、連線或解碼失敗回 None。"""
     if not _is_safe_fetch_url(url):
         return None
     try:
         req = urllib.request.Request(url, headers={
-            "User-Agent": _BROWSER_UA,
+            "User-Agent": user_agent,
             "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
         })
         r = urllib.request.urlopen(req, timeout=_FETCH_TIMEOUT)
         raw = r.read(_FETCH_MAX_BYTES)
-        charset = r.headers.get_content_charset() or "utf-8"
-        try:
-            return raw.decode(charset, "replace")
-        except LookupError:
-            return raw.decode("utf-8", "replace")
+        return _decode_html(raw, r.headers.get_content_charset())
     except Exception:
         return None
