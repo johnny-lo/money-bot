@@ -226,7 +226,7 @@ def test_名單_兩個保護層照舊依reason列_求職層依category列():
 
 def test_名單_求職層在總覽_且不含keep_inbox():
     keys = [k for k, _ in views.LAYERS]
-    assert "career" in keys and "keep_inbox" not in keys and len(keys) == 20 and len(keys) <= 25
+    assert "career" in keys and "keep_inbox" not in keys and len(keys) == 21 and len(keys) <= 25
     ov = {o["key"]: o["count"] for o in views.overview_from(
         [M(cat="career", reason=C.REASON_JOB), M(cat="keep_inbox", reason=C.REASON_JOB)], [], [], T)}
     assert ov["career"] == 1 and ov["job"] == 2

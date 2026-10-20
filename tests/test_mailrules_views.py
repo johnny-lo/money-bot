@@ -17,10 +17,12 @@ def M(sender="a@shop.example", subject="s", d=date(2026, 10, 1), cat=None, reaso
             "trashed_at": trashed}
 
 
-def test_共20層_順序固定_下拉放得下():
+def test_共21層_順序固定_下拉放得下():
     keys = [k for k, _ in views.LAYERS]
-    assert len(keys) == 20 and keys[:6] == ["job", "valued", "human", "self", "rules", "unknown"]
+    assert len(keys) == 21 <= 25 and keys[:6] == ["job", "valued", "human", "self", "rules", "unknown"]
     assert keys[-1] == "trash" and "keep_inbox" not in keys
+    assert keys.index("travel_abroad") == keys.index("travel") + 1
+    assert dict(views.LAYERS)["travel_abroad"] == "出國旅遊" and dict(views.LAYERS)["travel"] == "國內旅遊／交通"
 
 
 def test_下一步_公司通知在收件匣先移出_已移出就等丟():
@@ -35,12 +37,15 @@ def test_下一步_公司通知在收件匣先移出_已移出就等丟():
 
 def test_保護層依理由分_類別層不含保護的信_跨年寫年份():
     msgs = [M(subject="面試通知", cat="keep_inbox", reason=REASON_JOB),
+            M(subject="扣款通知", cat="card", reason="規則 #1", inbox=False, labels=["整理/刷卡扣款"]),
             M(subject="帳單", cat="bill", reason="規則 #1", inbox=False, labels=["整理/帳單"]),
             M(subject="hi", cat="keep_inbox", reason=REASON_HUMAN)]
     job = views.build_layer("job", msgs, [], [], T)
     assert job["kind"] == "messages" and [r["subject"] for r in job["rows"]] == ["面試通知"]
+    card = views.build_layer("card", msgs, [], [], T)["rows"][0]
+    assert card["where"] == "資料夾" and card["next"] == "2028/09/30 丟"
     bill = views.build_layer("bill", msgs, [], [], T)["rows"][0]
-    assert bill["where"] == "資料夾" and bill["next"] == "2028/09/30 丟"
+    assert bill["where"] == "資料夾" and bill["next"] is None
     assert views.build_layer("company", [M(cat="company", reason="規則 #2")], [], [], T)["rows"][0]["next"] == "10/01 移出"
 
 
@@ -128,7 +133,7 @@ def test_未知的層_KeyError():
 
 def test_總覽每層一筆():
     ov = views.overview_from([M(cat="login", reason="規則 #2")], [], [], T)
-    assert len(ov) == 20 and {o["key"]: o["count"] for o in ov}["login"] == 1
+    assert len(ov) == 21 and {o["key"]: o["count"] for o in ov}["login"] == 1
 
 
 def test_信件API都要token():

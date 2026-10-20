@@ -30,8 +30,10 @@ def test_保留期限():
     R = config.RETENTION
     assert (R["login"].trash_after_days, R["social"].trash_after_days) == (0, 0)
     assert (R["company"].trash_after_days, R["jobs"].trash_after_days, R["promo"].trash_after_days) == (30, 14, 14)
-    assert R["card"].trash_after_days == R["receipt"].trash_after_days == R["bill"].trash_after_days == config.FINANCE_KEEP_DAYS
-    assert R["travel"].trash_after_days == 180
+    assert R["card"].trash_after_days == R["receipt"].trash_after_days == config.FINANCE_KEEP_DAYS
+    assert R["bill"] == config.Retention(label="整理/帳單", archive_after_days=0)
+    assert R["travel"] == config.Retention(label="整理/旅遊", archive_after_days=0, trash_after_days=180)
+    assert R["travel_abroad"] == config.Retention(label="整理/出國旅遊", archive_after_days=0)
     assert R["security"].archive_after_days == 7 and R["security"].trash_after_days is None
     for k in ("keep_inbox",):
         assert R[k].label is None and R[k].archive_after_days is None and R[k].trash_after_days is None
