@@ -20,6 +20,8 @@ HOST = "imap.gmail.com"
 FIELDS = "(FROM SUBJECT DATE LIST-UNSUBSCRIBE)"
 FETCH_ITEMS = f"(X-GM-MSGID X-GM-LABELS BODY.PEEK[HEADER.FIELDS {FIELDS}])"
 CHUNK = 500
+WRITE_GROUP = 50                                           # 一個寫入指令最多帶幾個 UID
+_WRITE_ORDER = ("label", "archive", "trash")               # 同一批的執行順序
 
 imaplib.Commands.setdefault("MOVE", ("SELECTED",))     # 舊版 imaplib 的 uid() 不認得 MOVE
 
@@ -346,20 +348,41 @@ def apply(actions: list[Action], expected_uidvalidity: int | None = None
     return done, failed, gone
 
 
+def _send(M, kind: str, label: str | None, uids: list[int], trash: str, use_move: bool) -> bool:
+    """送一個寫入指令（一組 UID 共用）；回應不是 OK 或拋例外都算失敗。"""
+    ids = ",".join(map(str, dict.fromkeys(uids)))
+    try:
+        if kind == "label":
+            typ, _ = M.uid("STORE", ids, "+X-GM-LABELS", '("' + imap_utf7_encode(label) + '")')
+        elif kind == "archive":
+            typ, _ = M.uid("STORE", ids, "-X-GM-LABELS", "(\\Inbox)")
+        elif use_move:
+            typ, _ = M.uid("MOVE", ids, '"' + trash + '"')
+        else:
+            typ, _ = M.uid("STORE", ids, "+X-GM-LABELS", "(\\Trash)")
+    except Exception:
+        return False
+    return typ == "OK"
+
+
 def _write(M, actions: list[Action], trash: str, use_move: bool, done: list, failed: list) -> None:
-    for a in actions:
-        try:
-            if a.kind == "label":
-                typ, _ = M.uid("STORE", str(a.uid), "+X-GM-LABELS", '("' + imap_utf7_encode(a.label) + '")')
-            elif a.kind == "archive":
-                typ, _ = M.uid("STORE", str(a.uid), "-X-GM-LABELS", "(\\Inbox)")
-            elif a.kind == "trash":
-                if use_move:
-                    typ, _ = M.uid("MOVE", str(a.uid), '"' + trash + '"')
+    """核對過的動作依（種類, 標籤）分組，每組每 WRITE_GROUP 個 UID 送一個指令。
+    順序固定 label → archive → trash：MOVE 會讓 UID 失效，同一封信的標籤與移出要在它之前。
+    整組不是 OK（或拋例外）→ 那一組逐封各送一個指令，才知道是哪封失敗。done／failed 維持輸入順序。"""
+    groups: dict[tuple, list[int]] = {}
+    for i, a in enumerate(actions):
+        if a.kind in _WRITE_ORDER:
+            groups.setdefault((a.kind, a.label if a.kind == "label" else None), []).append(i)
+    ok: set[int] = set()
+    for kind in _WRITE_ORDER:
+        for (k, label), idx in groups.items():
+            if k != kind:
+                continue
+            for s in range(0, len(idx), WRITE_GROUP):
+                part = idx[s:s + WRITE_GROUP]
+                if _send(M, kind, label, [actions[i].uid for i in part], trash, use_move):
+                    ok.update(part)
                 else:
-                    typ, _ = M.uid("STORE", str(a.uid), "+X-GM-LABELS", "(\\Trash)")
-            else:
-                typ = "NO"
-        except Exception:
-            typ = "NO"
-        (done if typ == "OK" else failed).append(a)
+                    ok.update(i for i in part if _send(M, kind, label, [actions[i].uid], trash, use_move))
+    for i, a in enumerate(actions):
+        (done if i in ok else failed).append(a)
