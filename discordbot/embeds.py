@@ -375,7 +375,10 @@ def help_embed() -> discord.Embed:
 
 def video_card_embed(v: dict, *, created: bool = True) -> discord.Embed:
     from video.commands import CHEAT_SHEET
-    title = (f"🎥 已收錄：{v['title']}" if created else f"🎥 你已收錄過：{v['title']}")
+    from video.extract import kind_of
+    kind = v.get("kind") or kind_of(v.get("platform"))
+    icon = "🎥" if kind == "video" else "📄"
+    title = (f"{icon} 已收錄：{v['title']}" if created else f"{icon} 你已收錄過：{v['title']}")
     e = discord.Embed(title=title, color=COLOR_VIDEO)
     e.add_field(name="📚 主題", value=v.get("topic") or "（未分類）", inline=True)
     e.add_field(name="編號", value=f"#{v['id']}", inline=True)
@@ -390,11 +393,13 @@ def video_card_embed(v: dict, *, created: bool = True) -> discord.Embed:
 
 def video_help_embed() -> discord.Embed:
     from video.commands import CHEAT_SHEET
-    return discord.Embed(title="🎥 歷史影片：怎麼用", description=CHEAT_SHEET, color=COLOR_VIDEO)
+    return discord.Embed(title="📜 歷史教學（影片、文章）：怎麼用",
+                         description="📥 貼影片或文章連結就會自動收錄。\n\n" + CHEAT_SHEET,
+                         color=COLOR_VIDEO)
 
 
 def video_missing_embed(reason: str) -> discord.Embed:
-    e = discord.Embed(title="⚠️ 沒收進來", description=reason or "抽不到影片資訊", color=COLOR_WARN)
+    e = discord.Embed(title="⚠️ 沒收進來", description=reason or "抽不到影片或文章的資訊", color=COLOR_WARN)
     e.set_footer(text="🔁 重貼連結，或 reply 這張卡片給我新標題")
     return e
 
