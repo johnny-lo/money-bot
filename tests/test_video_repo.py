@@ -24,3 +24,15 @@ def test_to_dict_non_youtube_thumbnail_none_and_default_tags():
     d = to_dict(v)
     assert d["thumbnail"] is None
     assert d["tags"] == []        # 沒帶 tags → 預設空陣列
+
+
+def test_to_dict_kind_video_for_video_platforms():
+    for platform in ("youtube", "instagram", "tiktok", "facebook"):
+        v = _vid(title="x", url="https://example.com/v", platform=platform)
+        assert to_dict(v)["kind"] == "video"
+
+
+def test_to_dict_kind_article_for_everything_else():
+    for platform in ("other", "threads", "gmaps", None):
+        v = _vid(title="x", url="https://example.com/a", platform=platform)
+        assert to_dict(v)["kind"] == "article"

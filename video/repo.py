@@ -6,11 +6,11 @@ from sqlalchemy.exc import IntegrityError
 
 from database import SessionLocal
 from models import HistoryVideo, VideoTag
-from video.extract import youtube_thumbnail
+from video.extract import kind_of, youtube_thumbnail
 
 
 def to_dict(rec: HistoryVideo, tags: list[str] | None = None) -> dict:
-    """ORM → dict。thumbnail 由 url 算；tags 由呼叫端附（預設空）。"""
+    """ORM → dict。thumbnail 由 url 算；kind 由 platform 推（video / article）；tags 由呼叫端附（預設空）。"""
     return {
         "id": rec.id,
         "title": rec.title,
@@ -18,6 +18,7 @@ def to_dict(rec: HistoryVideo, tags: list[str] | None = None) -> dict:
         "topic": rec.topic,
         "channel": rec.channel,
         "platform": rec.platform,
+        "kind": kind_of(rec.platform),
         "thumbnail": youtube_thumbnail(rec.url or ""),
         "tags": tags or [],
         "discord_message_id": rec.discord_message_id,

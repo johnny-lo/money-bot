@@ -745,6 +745,23 @@
   這類回歸不會讓任何既有測試變紅，只能靠人想到——所以**想到的當下就補一個測試把它釘住**
   （`tests/test_report_token.py::test_device_token_refused_for_pwa_minted_token`）。
 
+### 坑：另寫一支抓網頁的函式，沒帶走前一支記下的平台脾氣（Threads 抽不到標題、Big5 標題亂碼）
+- **現象**：歷史頻道要收文章內文，`video.extract.fetch_html` 自己用「一般瀏覽器 UA」抓網頁；Threads 連結因此拿不到 og 標題與描述
+  （`food/extract.py` 的 `_FETCH_UA` 旁邊早就寫了：Threads 對瀏覽器 UA 不給 og、只對 `facebookexternalhit` 給）。
+  同一支還只看 `Content-Type` 的 charset，沒宣告編碼的 Big5 舊站被當 UTF-8 解成亂碼，標題卻照樣入庫。
+- **根因**：新函式是照「多數網站對爬蟲 UA 回精簡版」設計的，沒去翻既有抓取函式註解裡的平台例外；
+  單元測試的 HTML 都是合成的 UTF-8 頁，兩種情況都測不到。
+- **解法**：`video.extract.fetch_article`——threads 先用爬蟲 UA（`_CRAWLER_UA` 直接 import `food.extract._FETCH_UA`，不複製字串），
+  其餘先用瀏覽器 UA；標題缺、或描述與內文都缺，就換另一種 UA 再抓一次，第一個「有標題且有描述或內文」的結果整份採用，
+  都不夠就逐欄取先抓到的非空值（先抓到的標題不會因為重抓失敗而丟掉）。`fetch_html` 的編碼依序看 HTTP header →
+  開頭 2KB 的 `<meta charset>`／http-equiv → UTF-8，宣告了不認得的編碼名（含 `base64` 這類 `codecs.lookup` 查得到、
+  `decode` 卻丟 `LookupError` 的非文字編碼）就當沒宣告。
+- **測試怎麼寫才測得到**：把 `urllib.request.urlopen` 換成**依 User-Agent 回不同網頁**的替身（`tests/test_video_article.py` 的
+  `serve_by_ua`），斷言「實際送出的 UA 與順序」；Big5 用 `str.encode("big5")` 造位元組、header 不宣告編碼。
+  只 stub 掉自己的內部函式（`fetch_html` 回固定 HTML）的話，UA 與編碼這兩層整個被跳過。
+- **教訓**：為同一類頁面再寫一支抓取函式前，先 grep 既有那支的註解與 UA 常數——平台脾氣（UA、編碼）寫在註解裡，
+  不會跟著函式簽名被複製；爬蟲 UA 這種常數只留一份。測試要擋在「真正送出去的請求」那一層，不是自己包的那一層。
+
 ## 8. 工作流程（這個 session 怎麼推進的）
 1. **brainstorming**（skill）→ 一次問一題、定方案 → 寫 spec 到 `docs/superpowers/specs/`。
 2. **writing-plans**（skill）→ 拆成可逐步 TDD 的任務 → `docs/superpowers/plans/`。

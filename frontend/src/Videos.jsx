@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getVideos, updateVideo, addVideoTag, removeVideoTag, deleteVideo } from './api'
 
-// 🎥 歷史教學影片：按主題書架瀏覽 + 標籤/關鍵字搜尋。點卡片 → sheet 編輯主題/標籤。
+// 🎥📄 歷史教學影片與文章：按主題書架瀏覽 + 標籤/關鍵字搜尋。點卡片 → sheet 編輯主題/標籤。
+// 影片還是文章由後端的 kind 欄位決定（'video' / 'article'）。
+const kindIcon = (v) => (v.kind === 'article' ? '📄' : '🎥')
 export default function Videos() {
   const [videos, setVideos] = useState([])
   const [error, setError] = useState('')
@@ -19,8 +21,8 @@ export default function Videos() {
   }
   useEffect(() => { load() }, [])
 
-  // 書架 = 出現過的 topic，**依影片數由多到少排**並帶上數量。
-  // 為什麼要排：33 支影片散在 21 個書架，大半只有 1 支。照資料庫回傳順序的話，
+  // 書架 = 出現過的 topic，**依數量由多到少排**並帶上數量。
+  // 為什麼要排：33 則內容散在 21 個書架，大半只有 1 則。照資料庫回傳順序的話，
   // 真正有東西的書架會被埋在一堆只有一支的書架後面，得橫捲很久才找得到。
   // 帶數量則是讓「這個書架值不值得點」一眼看得出來，不用逐個點進去試。
   const topics = useMemo(() => {
@@ -73,13 +75,13 @@ export default function Videos() {
 
       {/* 清單 */}
       <div className="video-list">
-        <div className="recipe-count">{shown.length} 支影片</div>
+        <div className="recipe-count">{shown.length} 則</div>
         {loading && <div className="video-empty">載入中…</div>}
         {!loading && shown.length === 0 && (
           <div className="video-empty">
             {videos.length === 0
-              ? '還沒有影片。把 YouTube 連結丟進 Discord 的 #📜-歷史教學 頻道就會自動收錄。'
-              : '這個條件下沒有影片，換個書架或清掉搜尋字看看。'}
+              ? '還沒有內容。把影片或文章連結丟進 Discord 的 #📜-歷史教學 頻道就會自動收錄。'
+              : '這個條件下沒有內容，換個書架或清掉搜尋字看看。'}
           </div>
         )}
         {shown.map((v) => (
@@ -87,11 +89,13 @@ export default function Videos() {
             <div className="video-thumb">
               {v.thumbnail
                 ? <img src={v.thumbnail} alt="" loading="lazy" />
-                : '🎥'}
+                : kindIcon(v)}
             </div>
             <div className="video-info">
               <div className="video-title">{v.title}</div>
               <div className="video-sub">
+                <span>{v.kind === 'article' ? '文章' : '影片'}</span>
+                {' '}
                 {v.topic && <span className="tag visited">{v.topic}</span>}
                 {v.channel && <span> {v.channel}</span>}
               </div>
@@ -109,7 +113,7 @@ export default function Videos() {
           <div className="sheet-handle" />
           {fresh && (
             <>
-              <h3>🎥 {fresh.title}</h3>
+              <h3>{kindIcon(fresh)} {fresh.title}</h3>
 
               {/* 主題（自由字串，建議清單來自既有 topics） */}
               <label className="video-field">主題
@@ -143,7 +147,9 @@ export default function Videos() {
               </div>
 
               <div className="sheet-actions">
-                <a className="btn primary" href={fresh.url} target="_blank" rel="noopener">▶️ 開啟</a>
+                <a className="btn primary" href={fresh.url} target="_blank" rel="noopener">
+                  {fresh.kind === 'article' ? '📖 開啟' : '▶️ 開啟'}
+                </a>
                 <button className="btn danger" disabled={busy} onClick={() => {
                   if (window.confirm(`刪掉「${fresh.title}」？`))
                     run(async () => { await deleteVideo(fresh.id); setEditing(null) })

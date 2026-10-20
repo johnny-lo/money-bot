@@ -1,4 +1,4 @@
-"""歷史影片 JSON API（PWA 🎥 分頁用）。
+"""歷史影片與文章 JSON API（PWA 歷史分頁用）。
 
 新增影片走 Discord 頻道（需連結抽取 pipeline）；這裡給 PWA 讀清單 + 編輯主題/標籤/刪除。
 回全部、前端再過濾（與 /api/food/places 一致）。
@@ -14,7 +14,7 @@ router = APIRouter()
 
 @router.get("/api/videos", dependencies=[Depends(require_token)])
 def api_list_videos():
-    """全部影片（新到舊，每筆附 tags + thumbnail）。"""
+    """全部影片與文章（新到舊，每筆附 tags + thumbnail + kind）。"""
     return {"videos": repo.list_videos()}
 
 
