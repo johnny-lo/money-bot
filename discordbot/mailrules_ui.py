@@ -366,12 +366,13 @@ class ConfirmButton(discord.ui.DynamicItem[discord.ui.Button], template=r"mailru
 
 
 def _assign_options() -> list[discord.SelectOption]:
-    # 不提供「重要」：保護的信不走規則（安全網），手動指定只給會整理的類別
-    return [discord.SelectOption(label=name, value=key) for key, name in config.CATEGORIES if key != "keep_inbox"]
+    # 不提供「重要」「求職」：保護的信不走規則（安全網），手動指定只給會整理的類別
+    return [discord.SelectOption(label=name, value=key) for key, name in config.CATEGORIES
+            if key not in config.SAFETY_NET_ONLY]
 
 
 def _valid_category(vals) -> str | None:
-    return vals[0] if vals and vals[0] in config.LABELS and vals[0] != "keep_inbox" else None
+    return vals[0] if vals and vals[0] in config.LABELS and vals[0] not in config.SAFETY_NET_ONLY else None
 
 
 class SenderAssignSelect(discord.ui.DynamicItem[discord.ui.Select],
