@@ -237,6 +237,43 @@ def add_suggestions(db, items: list[tuple[str, str, str, str]]) -> list[str]:
     return cards
 
 
+def _is_auto_wildcard(r) -> bool:
+    """ensure_promo_wildcards 補的那種：不屬於任何確認卡、本人名義、類別推銷的「任何主旨」規則。"""
+    return r.card is None and r.subject_pattern == "*" and r.category == "promo" and r.suggested_by == "user"
+
+
+def ensure_promo_wildcards(db, valued: set[str]) -> int:
+    """讓完整寄件地址（不含 @網域）的「任何主旨＝推銷」規則跟著它現在的規則走；回傳這次補與移除的條數合計，冪等。
+    補：地址的規則全部是已確認的推銷（沒有其他類別、沒有被拒絕或待確認的規則）、寄件網域不在 valued（含子網域）、
+    而且還沒有「任何主旨」規則 → 補一條已確認的「任何主旨＝推銷」。
+    移除：補的那種規則（_is_auto_wildcard）所在的地址又有了非推銷或非已確認的規則（例如手動指定改選別的類別）
+    → 移除，否則它會把這個地址之後所有主旨的信都歸成推銷；確認卡上的、AI 或內建建議的、別的類別的「任何主旨」規則
+    不動，地址只剩補的那種規則時也留著。
+    只處理完整地址：同網域的其他地址可能寄收據、通知，@網域的「任何主旨」規則會把它們一起歸成推銷；
+    @網域規則不算完整地址的規則。"""
+    from .patterns import _domain_in, addr_domain
+    by_sender: dict[str, list] = {}
+    for r in db.query(MailRule).all():
+        sender = (r.sender or "").strip().lower()
+        if sender and not sender.startswith("@"):
+            by_sender.setdefault(sender, []).append(r)
+    added = removed = 0
+    now = _now()
+    for sender, rows in sorted(by_sender.items()):
+        auto = [r for r in rows if _is_auto_wildcard(r)]
+        if any(r.status != "confirmed" or r.category != "promo" for r in rows if not _is_auto_wildcard(r)):
+            for r in auto:
+                db.delete(r)
+            removed += len(auto)
+        elif not any(r.subject_pattern == "*" for r in rows) and not _domain_in(addr_domain(sender), valued):
+            db.add(MailRule(sender=sender, subject_pattern="*", category="promo", status="confirmed",
+                            suggested_by="user", card=None, confirmed_at=now))
+            added += 1
+    if added or removed:
+        db.commit()
+    return added + removed
+
+
 def _card_rows(db, card: str) -> list:
     return db.query(MailRule).filter(MailRule.card == card).order_by(MailRule.id).all()
 

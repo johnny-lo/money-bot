@@ -28,7 +28,8 @@ CATEGORIES = [
     ("promo", "推銷／電子報"),
 ]
 LABELS = dict(CATEGORIES)
-# 只由安全網（classify）判定的類別：AI 建議與手動指定都不提供
+# AI 建議與 Discord 手動指定都不提供的類別：keep_inbox 只由安全網（classify）判定，
+# career 除了安全網，也可以是 DB 裡直接指定的規則類別
 SAFETY_NET_ONLY = ("keep_inbox", "career")
 
 
