@@ -117,6 +117,10 @@ discordbot/mailrules_ui.py   確認卡、每日報告卡、職缺摘要、推銷
 
 **禁止**：永久刪除（對垃圾桶 EXPUNGE、`\Deleted` 旗標）、讀內文（`BODY[]`、`BODY.PEEK[]` 不帶 HEADER.FIELDS、`RFC822`）、
 寄信、改其他旗標。守衛測試掃 `gmail_rw.py` 原始碼確認（比照 `tests/test_cardrecon_gmail_guard`）。
+
+**一個指令一次 50 封**（2026-10-20 本人決定）：核對過的動作依（種類, 標籤）分組，每組每 50 個 UID 送一個
+`UID STORE`／`UID MOVE`；同一封信的順序固定為加標籤 → 移出 → 丟垃圾桶。整組指令不是 OK 或拋例外 → 那一組退回逐封重送，
+逐封結果照舊記成功／失敗。逐封送時 13,000 個動作要約 2.5 小時（一個來回約 0.5 秒），一次 50 封約幾分鐘。
 cardrecon 的 `gmail.py` 維持純唯讀，不共用寫入程式。
 
 ### 資料表（新表，create_all 自動建）
