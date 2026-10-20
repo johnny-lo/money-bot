@@ -237,6 +237,31 @@ def add_suggestions(db, items: list[tuple[str, str, str, str]]) -> list[str]:
     return cards
 
 
+def ensure_promo_wildcards(db, valued: set[str]) -> int:
+    """完整寄件地址的規則全部是已確認的推銷（沒有其他類別、沒有被拒絕或待確認的規則）、寄件網域不在
+    valued（含子網域）、而且還沒有「任何主旨」規則 → 補一條已確認的「任何主旨＝推銷」；回傳補了幾條，冪等。
+    只補完整地址：同網域的其他地址可能寄收據、通知，@網域的「任何主旨」規則會把它們一起歸成推銷。
+    @網域規則不算完整地址的規則。"""
+    from .patterns import _domain_in, addr_domain
+    by_sender: dict[str, list] = {}
+    for r in db.query(MailRule).all():
+        sender = (r.sender or "").strip().lower()
+        if sender and not sender.startswith("@"):
+            by_sender.setdefault(sender, []).append(r)
+    n, now = 0, _now()
+    for sender, rows in sorted(by_sender.items()):
+        if any(r.status != "confirmed" or r.category != "promo" or r.subject_pattern == "*" for r in rows):
+            continue
+        if _domain_in(addr_domain(sender), valued):
+            continue
+        db.add(MailRule(sender=sender, subject_pattern="*", category="promo", status="confirmed",
+                        suggested_by="user", card=None, confirmed_at=now))
+        n += 1
+    if n:
+        db.commit()
+    return n
+
+
 def _card_rows(db, card: str) -> list:
     return db.query(MailRule).filter(MailRule.card == card).order_by(MailRule.id).all()
 

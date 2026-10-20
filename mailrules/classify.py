@@ -95,7 +95,8 @@ _TAX = _rx(r"薪資|扣繳|所得稅|保單|保費|保險契約|稅|健保|勞�
 _CARD = _rx(r"消費通知|交易.*通知|扣款|轉帳|繳款|繳費|入帳")
 _BILL = _rx(r"帳單|對帳單|statement")
 _RECEIPT = _rx(r"收據|receipt|訂單|order|出貨|配送|已送達|發票|invoice")
-_TRAVEL = _rx(r"航班|班機|機票|訂房|booking|itinerary|行程|登機")
+_TRAVEL_ABROAD = _rx(r"航班|班機|機票|登機|flight|boarding")
+_TRAVEL = _rx(r"訂房|booking|itinerary|行程")
 _PROMO = _rx(r"電子報|優惠|折扣|抽獎|限時|週年慶|回饋|newsletter")
 
 
@@ -126,6 +127,8 @@ def builtin_suggest(h: MailHeader, pattern: str, company_domains: set[str]) -> s
         return "bill"
     if _RECEIPT.search(s):
         return "receipt"
+    if _TRAVEL_ABROAD.search(s):
+        return "travel_abroad"
     if _TRAVEL.search(s):
         return "travel"
     if h.unsub or _PROMO.search(s):

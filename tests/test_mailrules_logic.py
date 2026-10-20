@@ -93,7 +93,8 @@ def test_內建建議():
     assert S(subject="信用卡消費通知", unsub=False) == "card"
     assert S(subject="電子對帳單", unsub=False) == "bill"
     assert S(subject="您的訂單已出貨", unsub=False) == "receipt"
-    assert S(subject="班機異動", unsub=False) == "travel"
+    assert S(subject="班機異動", unsub=False) == "travel_abroad"
+    assert S(subject="訂房確認", unsub=False) == "travel"
     assert S(subject="本週新品") == "promo"
     assert S(subject="隨便", unsub=False) is None
 

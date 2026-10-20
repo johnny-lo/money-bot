@@ -646,10 +646,19 @@
   要整批算失敗；只有 SEARCH 回 OK 且空，才算 gone。
 - **從垃圾桶救回來的信會換 UID**（2026-10-14 垃圾桶實測：41957 → 41958），X-GM-MSGID 不變。
   所以 DB 存的 uid 只是快取，寫入前一律用 X-GM-MSGID 核對／重找（上面那條就是為此）。
-- **`career`（求職）、`keep_inbox` 只由安全網判定**：類別清單給 AI／手動指定下拉時一律用 `config.SAFETY_NET_ONLY` 排除，
-  別各處自己寫 `!= "keep_inbox"`（新增第二個安全網類別時漏改一處，就等於讓 AI 或手動規則把求職信分去整理／丟掉）。
-  `plan_actions` 對 `protected` 判定最多只出 label 動作；`STRONG_JOB_KEYWORDS` 的每個字眼也要在 `JOB_KEYWORDS` 裡
+- **`keep_inbox` 只由安全網判定；`career`（求職）由安全網判定，規則也可以是求職**：AI 建議與 Discord 手動指定都不提供
+  這兩類——類別清單給 AI／手動指定下拉時一律用 `config.SAFETY_NET_ONLY` 排除，別各處自己寫 `!= "keep_inbox"`
+  （新增第二個安全網類別時漏改一處，就等於讓 AI 或手動規則把求職信分去整理／丟掉）。規則判成求職只有本人在 Claude Code
+  指定：這種信 `protected` 是 False，但 `RETENTION["career"]` 只有標籤，所以同樣只加 `整理/求職`、不移出不丟
+  （`tests/test_mailrules_wildcard.py` 釘住）。`plan_actions` 對 `protected` 判定最多只出 label 動作；`STRONG_JOB_KEYWORDS` 的每個字眼也要在 `JOB_KEYWORDS` 裡
   （classify 只對有求職字眼的主旨再看強字眼，否則像「錄用通知」這類主旨既不保護也不歸 career；`tests/test_mailrules_career.py` 釘住）。
+- **推銷寄件者的「任何主旨」規則由每日整理補**：電子報每期換主旨，逐主旨規則會讓每一期都長出新的待確認樣式。
+  `repo.ensure_promo_wildcards(db, valued)` 對每個完整寄件地址（不含 `@網域`）檢查：它所有規則都是已確認的推銷
+  （沒有其他類別、沒有被拒絕或待確認的規則）、寄件網域（含子網域）不在已確認重視網域、還沒有 `*` 規則 → 補一條
+  `*`＝推銷（`suggested_by='user'`、`card=NULL`、已確認）；冪等。**只補完整地址、不補混寄地址**：`@網域` 的 `*` 會把同網域
+  其他地址的收據、通知一起當推銷丟掉，混寄地址補了也一樣。呼叫點是 `run._run_daily` 的 `_sync` 之後、`_classify_all` 之前，
+  所以當天寄來的新主旨就被歸推銷、不開新卡；`match_rule` 優先序與第 1 條安全網不變。補規則會讓 `rules_fingerprint` 變，
+  歷史整理完成前補到的話，已發出的計畫卡會回「計畫已過期」，用 `/信件計畫` 重發（零寫入、不會誤動信）。
 
 ### 🔴 坑：保護網用合成資料測都對，套到真信箱卻吃掉四成——上線前一定要對真信箱唯讀試跑
 - **實例**：單元測試全綠的「重視的公司」與「真人地址」兩條安全網，唯讀試跑真信箱（9,854 封）時：
