@@ -649,6 +649,9 @@
 - **`run._LOCK` 只鎖同一個行程**：用 `docker exec` 另開 python 跑 `execute_history`／`run_daily`，和 money-bot 裡的排程不共用鎖。
   手動跑長時間的寫入要避開 23:30，或先確認排程那次不會動信（歷史未完成前每日零寫入）；也別在跑的時候 `docker restart`（會中斷它）。
 - **兩條流程同時寫**：每日排程和「🚀 執行歷史整理」可能同時跑 → `run._LOCK`；每日搶不到就略過、歷史搶不到就拋錯。
+- **確認卡上的顯示名稱、主旨是外來文字**：進 Discord 內文前要先跳脫 Markdown 符號（`mailrules_ui._md`；名稱 `**`、主旨 `~~`／`||`／反引號會把整張卡的排版弄壞），
+  而且長度要算跳脫後的（符號全跳脫會變兩倍）。每行加長後 25 個寄件者可能超過 4096：`suggest_embed` 先去掉主旨行，不用丟寄件者
+  （`tests/test_mailrules_sender_info.py` 釘住）。名稱與主旨查不到只能少顯示，不能擋按鈕與發卡（`_safe_info`）。
 - **「發了」不等於「送出了」**：`bridge.post_sync` 只把 coroutine 排進 bot loop 就回來（bot 沒 ready 直接 return、
   送失敗只 print）。拿它的「呼叫完成」去記「計畫卡已發」「確認卡已發」，卡沒送出也被記成已發 → 之後只剩一行提醒、
   永遠看不到卡。**要記已發的一律用 `post_sync_wait`（等 future 結果，True 才記）**，而且「發過沒」逐卡存 DB
