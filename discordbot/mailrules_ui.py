@@ -32,7 +32,8 @@ _INFO_SENDER_CHARS = 40       # 同上，但卡上附了顯示名稱與主旨時
 _NAME_CHARS = 30              # 卡上寄件者顯示名稱最多顯示幾個字
 _SUBJECT_CHARS = 50           # 卡上最近一封信的主旨最多顯示幾個字
 _SUBJECT_PREFIX = "　└ "
-_ASSIGN_PER_MSG = 4           # 手動指定下拉一則訊息最多幾個（Discord 一則訊息最多 5 列元件）
+_MD_ESCAPE = frozenset("\\*_~`|[]()<")      # Markdown 符號、遮罩連結 [..](..)、提及／表情／時間戳 <…> 的起手符號
+_ASSIGN_PER_MSG = 4          # 手動指定下拉一則訊息最多幾個（Discord 一則訊息最多 5 列元件）
 _FULL_LIST = "完整名單：/信件名單 層:你的規則，或手機 PWA 📬"
 
 
@@ -225,9 +226,11 @@ def _one_line(s: str | None, n: int) -> str:
 
 
 def _md(s: str | None, n: int) -> str:
-    """同 _one_line，但輸出是 Markdown 內文：符號先跳脫（顯示名稱、主旨是外來文字，不能讓它改掉卡片排版），
-    n 是跳脫後的長度；逐字跳脫，截斷處不會留下孤立的反斜線。"""
-    parts = [discord.utils.escape_markdown(c) for c in " ".join((s or "").split())]
+    """同 _one_line，但輸出是 Markdown 內文：顯示名稱、主旨是外來文字，不能讓它改掉卡片排版、變成遮罩連結或 tag 人。
+    @everyone／@here／@id 的 @ 後面插零寬空白；_MD_ESCAPE 的符號逐字加反斜線——不交給 discord.utils.escape_markdown：
+    整串跳脫會在截斷處留下孤立的反斜線，逐字呼叫又看不到 [..](..) 這種多字元語法。n 是跳脫後的長度。"""
+    text = discord.utils.escape_mentions(" ".join((s or "").split()))
+    parts = ["\\" + c if c in _MD_ESCAPE else c for c in text]
     if sum(map(len, parts)) <= n:
         return "".join(parts)
     out, size = [], 0
@@ -308,8 +311,10 @@ async def _send_assign_cards(interaction, card: str, rules: list[Rule], info: di
     for i in range(0, len(picks), _ASSIGN_PER_MSG):
         chunk = picks[i:i + _ASSIGN_PER_MSG]
         lines = "\n".join(_sender_text({"sender": s, "patterns": len(rej[s]), "n": None}, info) for _, s in chunk)
+        # 內文帶外來的名稱與主旨，bot 又沒設全域 allowed_mentions：這則訊息自己關掉所有提及
         await interaction.followup.send(f"這些被拒絕的寄件者請手動指定類別（{card} 上這個寄件者的樣式一起指定）：\n{lines}"[:2000],
-                                        view=assign_view(card, chunk, info))
+                                        view=assign_view(card, chunk, info),
+                                        allowed_mentions=discord.AllowedMentions.none())
 
 
 async def _rerender_card(interaction, card: str, rules: list[Rule], counts: dict, info: dict | None = None) -> None:

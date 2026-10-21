@@ -1,9 +1,12 @@
 """確認卡的寄件者資訊：顯示名稱＋最近一封主旨（repo.card_sender_info）、卡片內文、「這些不是」下拉、
 手動指定卡，以及所有畫卡路徑都帶 info。全部合成值（*.example）。"""
 import asyncio
+import re
 from dataclasses import replace
 from datetime import date, datetime
 from types import SimpleNamespace
+
+import discord
 
 from discordbot import mailrules_ui as ui
 from mailrules import repo
@@ -226,7 +229,7 @@ def test_view_有_info_label_是名稱_description_是地址加主旨_value_不�
     asyncio.run(go())
 
 
-def test_view_省略_info_與現在一樣():
+def test_view_省略_info_label是地址_description是樣式數與封數():
     rules = [R(1, "a@x.example"), R(2, "b@x.example")]
 
     async def go():
@@ -251,7 +254,7 @@ def test_view_長名稱主旨_label與description_不超過100():
 
 def test_from_custom_id_重建_option_保留_description():
     async def go():
-        item = ui.SenderRejectSelect("s3", [__import__("discord").SelectOption(label="甲", value="0", description="a@x.example｜週報")])
+        item = ui.SenderRejectSelect("s3", [discord.SelectOption(label="甲", value="0", description="a@x.example｜週報")])
         m = ui.SenderRejectSelect.__discord_ui_compiled_template__.fullmatch("mailrules:rejsender:s3")
         new = await ui.SenderRejectSelect.from_custom_id(None, item.item, m)
         assert [(o.label, o.value, o.description) for o in new.item.options] == [("甲", "0", "a@x.example｜週報")]
@@ -268,7 +271,7 @@ def test_assign_view_placeholder_有名稱寫名稱加地址_custom_id不變():
     asyncio.run(go())
 
 
-def test_assign_view_省略_info_與現在一樣():
+def test_assign_view_省略_info_placeholder只有地址():
     async def go():
         v = ui.assign_view("s3", [(0, "a@x.example")])
         assert v.children[0].item.placeholder == "a@x.example → 選類別"
@@ -289,7 +292,7 @@ def test_手動指定卡文字_名稱地址與主旨(monkeypatch):
     assert [c.custom_id for c in view.children] == ["mailrules:assignsender:s3:0", "mailrules:assignsender:s3:1"]
 
 
-def test_手動指定卡文字_省略_info_與現在一樣():
+def test_手動指定卡文字_省略_info_只列地址與樣式數():
     rules = [R(1, "a@x.example", status="rejected")]
     it = _ix()
     asyncio.run(ui._send_assign_cards(it, "s3", rules))
@@ -403,7 +406,7 @@ def test_舊的逐條拒絕下拉重畫_也帶_info(monkeypatch):
     _wire(monkeypatch, fake)
     it = _ix()
     it.data = {"values": ["1"]}
-    asyncio.run(ui.RejectSelect("s3", [__import__("discord").SelectOption(label="a", value="1")]).callback(it))
+    asyncio.run(ui.RejectSelect("s3", [discord.SelectOption(label="a", value="1")]).callback(it))
     assert "~~**甲商店**" in it.response.edit_message.await_args.kwargs["embed"].description
 
 
@@ -437,3 +440,137 @@ def test_info_查詢失敗_按鈕照常重畫(monkeypatch, capsys):
     asyncio.run(ui.SenderRejectSelect("s3", []).callback(it2))
     it2.response.edit_message.assert_awaited_once()
     assert capsys.readouterr().out.count("⚠️") == 2
+
+
+# ── 外來文字：不能變成遮罩連結、不能 tag 人 ─────────────────────────────
+
+# Discord（simple-markdown）的連結語法：先吃掉反斜線跳脫過的字元，剩下的 [..](..) 才會變成可點的連結
+_MASKED_LINK = re.compile(r"""\[((?:\[[^\]]*\]|[^\[\]]|\](?=[^\[]*\]))*)\]\(\s*<?((?:\([^)]*\)|[^\s\\]|\\.)*?)>?"""
+                          r"""(?:\s+['"]([\s\S]*?)['"])?\s*\)""")
+_ESCAPED = re.compile(r"\\[^0-9A-Za-z\s]")
+
+
+def has_masked_link(text):
+    i = 0
+    while i < len(text):
+        if _ESCAPED.match(text, i):
+            i += 2
+        elif text[i] == "[" and _MASKED_LINK.match(text, i):
+            return True
+        else:
+            i += 1
+    return False
+
+
+def renders_mention(text):
+    """貼進 Discord 內文會不會 tag 到人：@everyone／@here／@id 字樣（escape_mentions 還會改動它），
+    或沒被反斜線跳脫的 <（<@…> <@&…> <#…> <:…:…> <t:…> 都從它起頭）。"""
+    return discord.utils.escape_mentions(text) != text or "<" in _ESCAPED.sub("", text)
+
+
+LINKS = ["[Bank](https://x.test)",
+         "[a.test](https://e.test)",                # 顯示文字像網域、實際連到別處
+         "\\[Bank](https://x.test)",                    # 自己帶的反斜線：只跳脫 [ 會變成 \\[ ，[ 反而恢復成連結
+         "\\\\[Bank](https://x.test)",
+         "[[Bank]](https://x.test)",
+         "[Bank](<https://x.test>)",
+         '[B](https://x.test "登入")']
+PINGS = ["@everyone", "@here", "<@&123456789012345678>", "<@123456789012345678>", "<@!123456789012345678>"]
+
+
+def test_外來文字_判斷用的連結規則本身可靠():
+    assert has_masked_link("[Bank](https://x.test)") and has_masked_link("看 [a.test](https://e.test) 吧")
+    assert has_masked_link("\\\\[Bank](https://x.test)")           # 反斜線自己被跳脫了，[ 沒有
+    assert not has_masked_link("\\[Bank\\]\\(https://x.test\\)")
+    assert not has_masked_link("\\[Bank](https://x.test)")
+    assert not has_masked_link("[Bank] (https://x.test)")
+    assert renders_mention("@everyone") and renders_mention("<@&123456789012345678>") and renders_mention("@@here")
+    assert not renders_mention("@\u200beveryone \\<@\u200b&123456789012345678>")
+
+
+def test_外來文字_名稱與主旨是遮罩連結_卡片內文不含連結():
+    for evil in LINKS:
+        info = {"a@shop.example": I(evil, evil)}
+        desc = ui.suggest_embed("s3", [R(1, "a@shop.example")], {}, info).description
+        assert not has_masked_link(desc), (evil, desc)
+        assert "…" not in desc                      # 沒被截斷：是跳脫擋住的，不是截斷剛好切掉
+
+
+def test_外來文字_遮罩連結逐字跳脫_括號與方括號都有反斜線():
+    info = {"a@shop.example": I(LINKS[0], LINKS[0])}
+    assert ui.suggest_embed("s3", [R(1, "a@shop.example")], {}, info).description.split("\n") == [
+        "**\\[Bank\\]\\(https://x.test\\)** `a@shop.example`｜1 種主旨",
+        "　└ \\[Bank\\]\\(https://x.test\\)"]
+
+
+def test_外來文字_已拒絕劃掉的行也不含連結():
+    info = {"a@shop.example": I(LINKS[1], LINKS[1])}
+    desc = ui.suggest_embed("s3", [R(1, "a@shop.example", status="rejected")], {}, info).description
+    assert desc.startswith("~~**") and desc.endswith("~~ 已拒絕") and not has_masked_link(desc)
+
+
+def test_外來文字_括號方括號在截斷處不留孤立反斜線():
+    info = {"a@shop.example": I("[" * 40, "(" * 80)}
+    name_line, subject_line = ui.suggest_embed("s3", [R(1, "a@shop.example")], {}, info).description.split("\n")
+    name = name_line[len("**"):name_line.index("** ")]
+    subject = subject_line[len("　└ "):]
+    for text, limit in ((name, 30), (subject, 50)):
+        assert len(text) <= limit and text.endswith("…")
+        assert _ESCAPED.sub("", text[:-1]) == ""                 # 每個字元都在一組「\\X」裡，沒有孤立的反斜線
+
+
+def test_外來文字_名稱與主旨是提及_卡片內文不會tag人():
+    rules = [R(i, f"{i}@shop.example") for i in range(len(PINGS))]
+    info = {r.sender: I(p, p) for r, p in zip(rules, PINGS)}
+    desc = ui.suggest_embed("s3", rules, {}, info).description
+    assert not renders_mention(desc), desc
+    assert desc.count("@\u200beveryone") == 2 and desc.count("@\u200bhere") == 2
+
+
+def test_外來文字_md_提及與連結符號():
+    assert ui._md("@everyone @here", 40) == "@\u200beveryone @\u200bhere"
+    assert ui._md("<@&123456789012345678>", 40) == "\\<@\u200b&123456789012345678>"
+    assert ui._md("[a](b)", 40) == "\\[a\\]\\(b\\)"
+    assert ui._md("@" + "x" * 50, 10) == "@xxxxxxxx…"
+
+
+def test_外來文字_手動指定卡_不tag人_訊息帶_allowed_mentions_none():
+    rules = [R(i, f"{i}@shop.example", status="rejected") for i in range(len(PINGS))]
+    info = {r.sender: I(p, p) for r, p in zip(rules, PINGS)}
+    it = _ix()
+    asyncio.run(ui._send_assign_cards(it, "s3", rules, info))
+    calls = it.followup.send.await_args_list
+    assert len(calls) == 2
+    for c in calls:
+        assert not renders_mention(c.args[0]), c.args[0]
+        am = c.kwargs["allowed_mentions"]
+        assert (am.everyone, am.users, am.roles, am.replied_user) == (False, False, False, False)
+
+
+def test_外來文字_沒有_info_的手動指定卡_也帶_allowed_mentions_none():
+    it = _ix()
+    asyncio.run(ui._send_assign_cards(it, "s3", [R(1, "a@x.example", status="rejected")]))
+    am = it.followup.send.await_args.kwargs["allowed_mentions"]
+    assert (am.everyone, am.users, am.roles) == (False, False, False)
+
+
+def test_外來文字_手動指定卡_遮罩連結不會變成連結():
+    rules = [R(i, f"{i}@shop.example", status="rejected") for i in range(len(LINKS))]
+    info = {r.sender: I(v, v) for r, v in zip(rules, LINKS)}
+    it = _ix()
+    asyncio.run(ui._send_assign_cards(it, "s3", rules, info))
+    calls = it.followup.send.await_args_list
+    assert len(calls) == 2
+    assert not any(has_masked_link(c.args[0]) for c in calls)
+
+
+def test_外來文字_下拉選項與_placeholder_是純文字_不跳脫():
+    rules = [R(1, "a@x.example")]
+    info = {"a@x.example": I("A*B* [x](y)", "5折 ~~限時~~ <@&123456789012345678>")}
+
+    async def go():
+        opt = _reject_select(ui.suggest_view("s3", rules, {}, info)).options[0]
+        assert (opt.label, opt.description) == ("A*B* [x](y)", "a@x.example｜5折 ~~限時~~ <@&123456789012345678>")
+        v = ui.assign_view("s3", [(0, "a@x.example")], info)
+        assert v.children[0].item.placeholder == "A*B* [x](y) a@x.example → 選類別"
+    asyncio.run(go())
