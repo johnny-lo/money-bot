@@ -297,6 +297,25 @@ def card_counts(db, card: str) -> dict[tuple[str, str], int]:
     return out
 
 
+def card_sender_info(db, card: str) -> dict[str, dict]:
+    """{寄件者: {'name': 顯示名稱或 None, 'subject': 主旨}}（確認卡顯示用）：每個寄件者取卡上（寄件者, 樣式）
+    對得到、還在信箱的信裡寄信日最新的一封；同一天的信取 gm_msgid 最大的，結果才不隨列的順序變。"""
+    keys = {(r.sender, r.subject_pattern) for r in _card_rows(db, card)}
+    senders = sorted({s for s, _ in keys})
+    newest: dict = {}
+    for i in range(0, len(senders), _IN_CHUNK):
+        rows = (db.query(MailMessage)
+                .filter(MailMessage.from_addr.in_(senders[i:i + _IN_CHUNK]), MailMessage.gone_at.is_(None)).all())
+        for r in rows:
+            if (r.from_addr, r.subject_pattern) not in keys or r.gone_at is not None:
+                continue
+            rank = (1, r.sent_date, r.gm_msgid) if r.sent_date is not None else (0, None, r.gm_msgid)   # 沒日期的最舊
+            if r.from_addr not in newest or rank > newest[r.from_addr][0]:
+                newest[r.from_addr] = (rank, r)
+    return {s: {"name": (r.from_name or "").strip() or None, "subject": r.subject or ""}
+            for s, (_, r) in newest.items()}
+
+
 def confirm_card(db, card: str, rejected_ids: list[int]) -> tuple[int, int]:
     rej, confirmed, rejected = set(rejected_ids), 0, 0
     for r in _card_rows(db, card):
