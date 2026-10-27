@@ -288,6 +288,18 @@ from mailrules.config import DAILY_RUN as _MAIL_RUN
 scheduler.add_job(_mail_daily, "cron", hour=_MAIL_RUN[0], minute=_MAIL_RUN[1], id="mail_daily")
 
 
+def _line_watchdog():
+    """每 30 分鐘：拆不出來的中信 LINE 通知交給 codex、listener 被登出或停擺就告警（同一次故障只發一次）。"""
+    try:
+        from lineinbox.watchdog import run as line_watchdog_run
+        line_watchdog_run()
+    except Exception as e:
+        print(f"⚠️ LINE watchdog 失敗：{type(e).__name__}")   # 只印類別：DB 例外訊息會帶 SQL 參數（通知文字）
+
+
+scheduler.add_job(_line_watchdog, "interval", minutes=30, id="line_watchdog")
+
+
 def _startup_catchup():
     """開機後背景補拓一次（機器關了又開時盡快追上）；開機只在有新發票或失敗才發卡。"""
     result = sync_with_backfill()
@@ -307,6 +319,7 @@ async def startup_event():
         "週一~週六 21:00 發票補拓+Discord 通知 / "
         "週日 21:00 補拓→刷卡比對→分類→週報（每月第一個週日多推上月月結）/ "
         f"每日 {_MAIL_RUN[0]:02d}:{_MAIL_RUN[1]:02d} 信件整理 / "
+        "每 30 分鐘 LINE watchdog / "
         "開機後 3 分鐘背景發票補拓"
     )
 
