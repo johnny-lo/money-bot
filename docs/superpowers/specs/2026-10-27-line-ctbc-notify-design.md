@@ -40,7 +40,7 @@
 |---|---|
 | 讀 LINE 的方式 | OkLine（非官方，模仿 LINE Chrome 擴充功能 3.7.2 的協定）。本人知道這違反 LINE 條款、帳號可能被限制，接受 |
 | Chrome 裡的 LINE | 試做的新登入把本人 Chrome 裡的 LINE 擠掉了，本人接受；之後 Chrome 不再登入 LINE（再登會把程式踢掉） |
-| 通知怎麼拆 | 一般程式拆；拆不出來才交給 codex，模型用 sol，不用 astra（容器目前只能用 `gpt-5.6-sol`，見 watchdog 一節） |
+| 通知怎麼拆 | 一般程式拆；拆不出來才交給 codex，模型用 sol（`gpt-6.1-sol`），不用 astra；容器 codex 升到 0.164.0 才叫得到（見 watchdog 一節） |
 | Discord 即時推 | 不推，照每週日清單 |
 | 回補 | 補 LINE 上還留著的（10/14 起） |
 
@@ -113,7 +113,7 @@
 ```
 lineinbox/
   config.py    被監看帳號（displayName「中國信託」→ 來源鍵）、session 路徑 /data/tokens.json、
-               心跳／重連參數、codex 備援模型（先用 "gpt-5.6-sol"）
+               心跳／重連參數、codex 備援模型 "gpt-6.1-sol"
   flex.py      純函式：Flex JSON → 依出現順序的 text 串列（走 header/hero/body/footer/contents）
   repo.py      line_messages 的唯一寫入咽喉點（以 LINE message id 去重）＋ listener 狀態
   listener.py  money-line 的主程式：開機補讀 → 長連線收新訊息 → 心跳 → 被踢就停
@@ -182,8 +182,8 @@ LINE message id（唯一）、來源鍵、訊息時間（LINE `createdTime`，�
 
 1. **codex 備援**：「等 codex」的消費通知 → `codex_cli.codex_text(prompt, model=<sol>, schema=…)`。
    實測（2026-10-27）：容器裡的 codex 0.154.0 用 ChatGPT 帳號時 `gpt-6.1-sol`、`gpt-6-sol` 都回 `model_not_found`，
-   只有 `gpt-5.6-sol` 可用；主機的 codex 0.164.0 可以用 `gpt-6.1-sol`。所以模型做成設定常數，先用 `gpt-5.6-sol`；
-   要換 `gpt-6.1-sol` 得先把 Dockerfile 的 `CODEX_VERSION` 升到 0.164.0 並重 build（另一件事，要跟本人說）
+   只有 `gpt-5.6-sol` 可用；主機的 codex 0.164.0 可以用 `gpt-6.1-sol`。本人選擇（2026-10-28）一起升級：Dockerfile 的
+   `CODEX_VERSION` 升到 0.164.0，備援用 `gpt-6.1-sol`（模型仍是設定常數）
    → 驗證（金額 > 0、卡號 4 碼、刷卡日在訊息時間 ±1 天內）→ 寫 `card_charges`。還是失敗 → 標成看不懂，
    發一張 Discord 卡附上通知文字，讓本人看。
 2. **listener 告警**：狀態是被踢，或心跳超過 1 小時沒更新 → Discord 告警**一次**，恢復前不重發。內容要寫清楚重新登入

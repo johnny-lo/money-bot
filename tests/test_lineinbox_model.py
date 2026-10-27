@@ -18,5 +18,5 @@ def test_config():
     assert config.WATCHED == {"中國信託": "ctbc"}
     assert config.CHARGE_ID_PREFIX == "line:"
     assert config.SESSION_PATH == "/data/tokens.json"
-    assert config.CODEX_FALLBACK_MODEL == "gpt-5.6-sol"
+    assert config.CODEX_FALLBACK_MODEL == "gpt-6.1-sol"
     assert (config.STALE_MIN, config.BACKOFF_START, config.BACKOFF_MAX) == (60, 5, 600)

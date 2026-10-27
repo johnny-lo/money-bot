@@ -744,6 +744,9 @@
   ```bash
   codex --version; docker exec money-bot codex --version   # 兩邊要一致
   ```
+- **延伸**（2026-10-27）：模型叫不叫得到也看 CLI 版本。容器 codex 0.154.0 用 ChatGPT 帳號打 `gpt-6.1-sol`、`gpt-6-sol` 回
+  `model_not_found`，只有 `gpt-5.6-sol` 可用；升到 0.164.0 才叫得到。程式裡寫死模型名之前，先在**容器裡**實打一次
+  `codex_cli.codex_text(..., model=…)`，不要拿主機的 codex 測。
 - **教訓**：共用設定檔的兩端，版本也得綁在一起；「沒寫版本號」在 Docker 裡 ≠「永遠最新」，而是「永遠第一次 build 那版」。
 
 ### 坑：外部服務死掉，但 log 一行都沒有（2026-09 Google Places 全滅）
@@ -803,6 +806,19 @@
 - **教訓**：為同一類頁面再寫一支抓取函式前，先 grep 既有那支的註解與 UA 常數——平台脾氣（UA、編碼）寫在註解裡，
   不會跟著函式簽名被複製；爬蟲 UA 這種常數只留一份。測試要擋在「真正送出去的請求」那一層，不是自己包的那一層。
 
+### 坑：讀個人 LINE（OkLine、money-line 容器）
+- **往回翻頁會無限迴圈**：OkLine 的 `get_previous_messages` 只回傳 end message 本身，拿它的最後一則再翻，永遠拿到同一則。
+  試做時迴圈跑了 24 分鐘才發現。伺服器端的歷史本來就只留約兩週，`get_recent_messages(mid, 200)` 一次拿完，**不要翻頁**。
+- **同一個 LINE 帳號只能有一個 Chrome 版登入**：listener 登入會把瀏覽器裡的 LINE Chrome 擴充功能擠掉，之後瀏覽器再登入會反過來
+  把 listener 踢掉。LINE 電腦版（Windows／Mac）是另一個位置，互不影響（本人實測）。
+- **Chrome 的路走不通**：Chrome 136 以後主要設定檔不能開遠端除錯；Claude in Chrome 也打不開 `chrome-extension://` 頁面。
+  所以「借用瀏覽器已登入的 LINE」做不到，listener 一定要有自己的 QR 登入。
+- **session 檔＝整個 LINE 帳號＋解密金鑰**：只掛進 money-line（`~/.config/money-bot/line/`，0700／0600）。money-bot 裡的 codex
+  以 danger-full-access 跑、讀得到容器內任何檔案，所以絕不能掛進 money-bot。
+- **money-line 疊在 money-bot image 上**（`docker/line.Dockerfile` 的 `FROM money-bot`）：money-bot 重 build 之後要
+  `docker compose build line && docker compose up -d line`，不然 money-line 還跑舊底層。
+- **repo 是公開的**：測試 fixture、spec 只能放合成資料，不能放真實卡號、店名、金額、聯絡人姓名或 LINE mid。
+
 ## 8. 工作流程（這個 session 怎麼推進的）
 1. **brainstorming**（skill）→ 一次問一題、定方案 → 寫 spec 到 `docs/superpowers/specs/`。
 2. **writing-plans**（skill）→ 拆成可逐步 TDD 的任務 → `docs/superpowers/plans/`。
@@ -812,6 +828,7 @@
 
 ## 9. 重啟前 / 宣稱完成前 檢查清單
 - [ ] `docker exec -w /app money-bot python -c "import main"` 不崩（import 預檢）。
+      注意：import 時就會對**正式 DB** 跑 `create_all` 和 `main.py` 的 ALTER，新表／新欄位在這一步就建好了。
 - [ ] `docker exec -w /app money-bot python -m pytest tests/ -q` 全綠。
 - [ ] 重啟後等到 `Application startup complete`，`docker ps` 是 `Up`。
 - [ ] 動到 API → curl smoke（帶 device token）；動到前端 → `npm run build --prefix frontend` + curl 確認伺服器送新 bundle。

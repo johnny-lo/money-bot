@@ -18,7 +18,7 @@ RUN playwright install --with-deps chromium
 # 舊 CLI 會被 API 拒絕（"requires a newer version of Codex"）。升級＝改這個數字再 build——
 # 不寫版本號的話這層會被 Docker 快取住，`--build` 也不會拉新版。
 # apt 換台灣鏡像（build 內直連 deb.debian.org 曾卡在 77 KB/s；只改這層，不動上面已快取的層）
-ARG CODEX_VERSION=0.154.0
+ARG CODEX_VERSION=0.164.0
 #（只換主庫；debian-security 台灣鏡像沒有 → 404，留官方）
 RUN sed -i 's|deb.debian.org/debian$|ftp.tw.debian.org/debian|' /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y --no-install-recommends nodejs npm \

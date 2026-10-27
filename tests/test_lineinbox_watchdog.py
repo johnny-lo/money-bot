@@ -77,7 +77,7 @@ def test_codex成功後寫刷卡並更新狀態(monkeypatch):
 
     assert result == {"codex": 1, "unreadable": 0, "alert": None}
     assert len(codex_calls) == 1
-    assert codex_calls[0][1:] == ("gpt-5.6-sol", SCHEMA)
+    assert codex_calls[0][1:] == ("gpt-6.1-sol", SCHEMA)
     assert calls["upsert"][0][0] == "line:900000000000000001"
     assert calls["upsert"][0][1][0].amount == 1280
     assert calls["status"] == [(item.message_id, CODEX_PARSED, None)]
