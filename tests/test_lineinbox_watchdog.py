@@ -1,5 +1,5 @@
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pytest
 
@@ -117,3 +117,53 @@ def test_listener被登出只在告警種類改變時通知(monkeypatch, alerted
     assert result == {"codex": 0, "unreadable": 0, "alert": "kicked"}
     assert len(calls["listener"]) == expected_notifications
     assert calls["alerted"] == (["kicked"] if expected_notifications else [])
+
+
+class _UTC容器時鐘(datetime):
+    """模擬 TZ 沒設的容器：不帶 tz 的 now() 回 UTC naive，帶 tz 才換算。"""
+    INSTANT = datetime(2026, 10, 27, 4, 0, tzinfo=timezone.utc)   # 台北 12:00
+
+    @classmethod
+    def now(cls, tz=None):
+        if tz is None:
+            return cls.INSTANT.replace(tzinfo=None)
+        return cls.INSTANT.astimezone(tz)
+
+
+class _狀態列Session:
+    def __init__(self):
+        self.row = None
+
+    def get(self, model, pk):
+        return self.row
+
+    def add(self, row):
+        self.row = row
+
+    def commit(self):
+        pass
+
+
+def test_心跳與watchdog的現在時間都用台北時間naive(monkeypatch):
+    import lineinbox
+    from lineinbox import health, repo
+    from lineinbox.types import OK
+
+    for name in ("clock", "repo", "watchdog"):
+        mod = getattr(lineinbox, name, None)
+        if mod is not None and hasattr(mod, "datetime"):
+            monkeypatch.setattr(mod, "datetime", _UTC容器時鐘)
+    monkeypatch.setattr(watchdog.line_repo, "pending_codex", lambda db, limit: [])
+    seen = []
+    real_alert_kind = health.alert_kind
+    monkeypatch.setattr(watchdog.health, "alert_kind",
+                        lambda state, now, stale_min: seen.append(now) or real_alert_kind(state, now, stale_min))
+    db = _狀態列Session()
+
+    repo.set_state(db, OK)
+    result = watchdog.run(db=db)
+
+    taipei_noon = datetime(2026, 10, 27, 12, 0)
+    assert db.row.heartbeat_at == taipei_noon
+    assert seen == [taipei_noon]
+    assert result["alert"] is None

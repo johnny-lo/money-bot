@@ -4,6 +4,7 @@ from datetime import datetime
 
 from models import LineListenerState, LineMessage
 
+from .clock import now_taipei
 from .types import NEEDS_CODEX, OK, InboxMessage, ListenerState
 
 
@@ -44,7 +45,7 @@ def set_state(db, state: str, error: str | None = None, now: datetime | None = N
         db.add(row)
     row.state, row.last_error = state, error
     if state == OK:
-        row.heartbeat_at = now or datetime.now()
+        row.heartbeat_at = now or now_taipei()
         row.alerted = None
     db.commit()
 

@@ -11,6 +11,7 @@ from discordbot import lineinbox_ui
 
 from . import health
 from . import repo as line_repo
+from .clock import now_taipei
 from .config import CHARGE_ID_PREFIX, CODEX_FALLBACK_MODEL, FALLBACK_PER_RUN, STALE_MIN
 from .fallback import SCHEMA, build_prompt, charge_from_reply
 from .types import CODEX_PARSED, UNREADABLE
@@ -20,7 +21,7 @@ def run(now: datetime | None = None, db=None) -> dict:
     own = db is None
     db = db or SessionLocal()
     try:
-        return _run(db, now or datetime.now())   # 跟 repo.set_state 寫心跳用同一種 naive 時間
+        return _run(db, now or now_taipei())   # 跟 repo.set_state 寫心跳同一個台北 naive 基準
     finally:
         if own:
             db.close()
