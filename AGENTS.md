@@ -336,6 +336,9 @@
 - **驗收**：`docker exec money-bot printenv VAR`，看到值才算數。程式端讀 `os.getenv` 一律要能吃 None。
 - **教訓**：「改了 `.env` 就 `docker compose up -d`」這句只在**變數已經在白名單裡**時成立。
   `Running` 而不是 `Recreated` 就是警訊——那代表 compose 認為什麼都沒變。
+- **再犯**（2026-10-27）：四桶水位的 `MONTHLY_INCOME`／`BUCKET_RATIOS`／`SHARED_SPLIT` 從 8/19 上線起就只在 `.env`，
+  沒進白名單。程式「任何失敗回 None」的保護讓它靜靜退回保守模式兩個多月，沒有任何 log 或畫面露出異狀。
+  **教訓**：讀設定的功能，上線驗收要看到「設定生效後的輸出」（例如 `bucket_context()` 回的文字），不是只看沒報錯。
 - 機密（清單見 `app_secrets.py` 用法與 compose `secrets:`）不走這條，見下一條。
 
 ### 🔴 坑：新增機密是「三個地方」的事，少一個就靜默失效或整個起不來
