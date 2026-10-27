@@ -1,5 +1,6 @@
 """純函式：銀行信件/PDF 文字 → Charge / Receipt。版型不認得回空，不丟例外（ingest 記成警告）。"""
 import re
+import unicodedata
 from datetime import date
 
 from .types import Charge, Receipt
@@ -106,6 +107,74 @@ def parse_sinopac_online(text: str) -> Receipt | None:
         return None
     card = _SP_CARD.search(text)
     return Receipt(paid_date=paid, amount=_amount(m[4]), merchant=m[5].strip(), card_last4=card[1] if card else None)
+
+
+_CTBC_LINE_AMOUNT = re.compile(r"^NT\$\s*([\d,]+)$")
+_CTBC_LINE_CARD = re.compile(r"^\d{4}$")
+_CTBC_LINE_TIME = re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2})\s+(\d{1,2}):(\d{2})$")
+
+
+def _ctbc_line_value(texts: list[str], label: str) -> str | None:
+    try:
+        index = texts.index(label)
+    except ValueError:
+        return None
+    if index + 1 >= len(texts):
+        return None
+    value = texts[index + 1]
+    return value if isinstance(value, str) else None
+
+
+def foreign_amount(texts: list[str]) -> bool:
+    """判斷通知是否包含外幣金額欄位。"""
+    return "外幣金額：" in texts
+
+
+def parse_ctbc_line(texts: list[str]) -> Charge | None:
+    """解析一則已攤平的中信 LINE 消費通知。"""
+    if foreign_amount(texts):
+        return None
+
+    amount_match = next(
+        (match for text in texts if isinstance(text, str)
+         and (match := _CTBC_LINE_AMOUNT.fullmatch(text))),
+        None,
+    )
+    card_last4 = _ctbc_line_value(texts, "卡末四碼：")
+    time_text = _ctbc_line_value(texts, "交易時間：")
+    time_match = _CTBC_LINE_TIME.fullmatch(time_text) if time_text else None
+    if not amount_match or not card_last4 or not _CTBC_LINE_CARD.fullmatch(card_last4) or not time_match:
+        return None
+
+    try:
+        amount = _amount(amount_match[1])
+        charge_date = date(int(time_match[1]), int(time_match[2]), int(time_match[3]))
+        hour, minute = int(time_match[4]), int(time_match[5])
+        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            return None
+    except ValueError:
+        return None
+    if amount <= 0:
+        return None
+
+    merchant_value = _ctbc_line_value(texts, "商店名稱：")
+    merchant = unicodedata.normalize("NFKC", merchant_value).strip() if merchant_value else None
+    merchant = merchant or None
+    pay_method = _ctbc_line_value(texts, "交易類型：") or None
+    merchant_type = _ctbc_line_value(texts, "商店類型：") or None
+    return Charge(
+        source="ctbc_line",
+        card_last4=card_last4,
+        charge_date=charge_date,
+        charge_time=f"{hour:02d}:{minute:02d}",
+        amount=amount,
+        merchant=merchant,
+        pay_method=pay_method,
+        merchant_type=merchant_type,
+        line_no=0,
+        region=None,
+        post_date=None,
+    )
 
 
 RECEIPT_PARSERS = {"autopass": parse_autopass, "sinopac_online": parse_sinopac_online}
