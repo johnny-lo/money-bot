@@ -77,6 +77,28 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  # 3. LINE 收件匣 listener（lineinbox/listener.py）：讀個人 LINE 裡被監看官方帳號的通知
+  # 獨立容器：session 檔＝整個 LINE 帳號＋解密金鑰，不能進 money-bot（codex 讀得到容器內任何檔案）。
+  # 只給 database_url；不掛 ~/.codex、不給其他 secrets。以主機使用者執行，refresh 寫回的 session 檔仍屬本人。
+  # 重新登入：docker compose run --rm line okline login --save /data/tokens.json --wait 240
+  line:
+    image: money-line
+    build:
+      context: ./docker
+      dockerfile: line.Dockerfile
+    container_name: money-line
+    restart: unless-stopped
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    depends_on:
+      - db
+    volumes:
+      - .:/app:ro
+      # session 檔 /data/tokens.json；rw：token refresh 會寫回
+      - ${HOME}/.config/money-bot/line:/data
+    working_dir: /app
+    secrets:
+      - database_url
+
 volumes:
   postgres_data:
 
