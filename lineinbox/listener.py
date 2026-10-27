@@ -18,7 +18,7 @@ from collections import Counter
 from . import client, process
 from . import repo as inbox_repo
 from .config import (BACKOFF_MAX, BACKOFF_START, HEARTBEAT_SEC, KICKED_POLL_SEC, RECENT_COUNT,
-                     SESSION_PATH, WATCHED)
+                     SESSION_PATH, STREAM_STABLE_SEC, WATCHED)
 from .types import ERROR, KICKED, OK, STARTING
 
 _state_lock = threading.Lock()
@@ -124,17 +124,23 @@ def _is_kicked(api, exc: Exception) -> bool:
 
 
 def _serve(api, mids: dict[str, str]) -> None:
-    """補讀＋長連線，斷線就退避、補讀後重連；只有被踢才回。"""
+    """補讀＋長連線，斷線就退避、補讀後重連；只有被踢才回。
+
+    退避次數在兩種情況歸零：收到被監看的訊息，或這條長連線撐過 STREAM_STABLE_SEC 才斷。
+    後者是因為被監看的聊天室可能好幾天沒訊息，連線本身正常也只會看到一次次斷線。
+    """
     failures = 0
     while True:
+        started = None
         try:
             _catch_up(api, mids)
             _set_state(OK)
+            started = time.monotonic()
             for msg in client.messages(api):
-                failures = 0
                 source = mids.get(msg.get("from"))
                 if source is None:
                     continue
+                failures = 0
                 status = _handle(msg, source)
                 if status is not None:
                     _log(f"新訊息：{status}")
@@ -144,6 +150,8 @@ def _serve(api, mids: dict[str, str]) -> None:
                 _set_state(KICKED, type(e).__name__)
                 _log(f"⚠️ 被 LINE 踢掉（{type(e).__name__}），等重新登入")
                 return
+            if started is not None and time.monotonic() - started >= STREAM_STABLE_SEC:
+                failures = 0
             delay = next_delay(failures)
             _set_state(ERROR, type(e).__name__)
             _log(f"⚠️ {type(e).__name__}，{delay:g} 秒後補讀再重連")

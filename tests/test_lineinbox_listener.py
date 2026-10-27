@@ -194,7 +194,7 @@ class AuthErr(Exception):
 @pytest.fixture
 def serve_env(monkeypatch):
     """_serve 的外部依賴全換掉：DB session、狀態寫入、handle、sleep、auth 判斷。"""
-    env = {"states": [], "handled": [], "sleeps": [], "probe_error": None}
+    env = {"states": [], "handled": [], "sleeps": [], "probe_error": None, "now": 1000.0}
 
     @contextmanager
     def session():
@@ -208,6 +208,7 @@ def serve_env(monkeypatch):
         return "parsed"
     monkeypatch.setattr(process, "handle", handle)
     monkeypatch.setattr(listener.time, "sleep", lambda s: env["sleeps"].append(s))
+    monkeypatch.setattr(listener.time, "monotonic", lambda: env["now"])   # 時鐘只在測試推進時才動
     monkeypatch.setattr(client, "is_auth_error", lambda e: isinstance(e, AuthErr))
 
     def probe(api):
@@ -258,6 +259,64 @@ def test_serve_連續失敗_退避加倍(monkeypatch, serve_env):
 
     assert serve_env["sleeps"] == [5, 10]
     assert serve_env["states"][-1] == ("kicked", "AuthErr")
+
+
+def _rounds_stream(serve_env, rounds):
+    """每輪是一串動作：dict ＝ 收到訊息、數字 ＝ 時鐘往前推幾秒、例外 ＝ 連線中斷。"""
+    rounds = iter(rounds)
+
+    def stream():
+        for item in next(rounds):
+            if isinstance(item, Exception):
+                raise item
+            if isinstance(item, (int, float)):
+                serve_env["now"] += item
+                continue
+            yield item
+    return stream
+
+
+def test_serve_連線撐過穩定秒數才斷_退避歸零(monkeypatch, serve_env):
+    stream = _rounds_stream(serve_env, [[60, ConnectionError()], [60, ConnectionError()], [AuthErr()]])
+    api = _fake_client(monkeypatch, [], stream=stream)
+
+    listener._serve(api, {MID: "ctbc"})
+
+    assert serve_env["sleeps"] == [5, 5]
+    assert serve_env["states"][-1] == ("kicked", "AuthErr")
+
+
+def test_serve_連線馬上就斷_退避加倍(monkeypatch, serve_env):
+    stream = _rounds_stream(serve_env, [[ConnectionError()], [ConnectionError()], [AuthErr()]])
+    api = _fake_client(monkeypatch, [], stream=stream)
+
+    listener._serve(api, {MID: "ctbc"})
+
+    assert serve_env["sleeps"] == [5, 10]
+
+
+def test_serve_連線沒撐到穩定秒數_不歸零(monkeypatch, serve_env):
+    stream = _rounds_stream(serve_env, [[59, ConnectionError()], [59, ConnectionError()], [AuthErr()]])
+    api = _fake_client(monkeypatch, [], stream=stream)
+
+    listener._serve(api, {MID: "ctbc"})
+
+    assert serve_env["sleeps"] == [5, 10]
+
+
+def test_serve_只有被監看的訊息才讓退避歸零(monkeypatch, serve_env):
+    deposit = _fixtures()[4]
+    stream = _rounds_stream(serve_env, [
+        [ConnectionError()],
+        [_other_chat(), ConnectionError()],     # 別的聊天室的訊息不算連線恢復
+        [deposit, ConnectionError()],
+        [AuthErr()],
+    ])
+    api = _fake_client(monkeypatch, [], stream=stream)
+
+    listener._serve(api, {MID: "ctbc"})
+
+    assert serve_env["sleeps"] == [5, 10, 5]
 
 
 def test_serve_一般例外但probe被踢_當成被踢不退避(monkeypatch, serve_env):
