@@ -150,3 +150,130 @@ def test_batch_view_同卡同金額多月_回報訂閱組(monkeypatch):
     gk, items = repo.batch_view(FakeSession(), "b")
     assert gk == "subscription"
     assert [h for _, _, _, h in items] == ["同卡同金額 3 個月都有"] * 2
+
+
+def stmt(amount, n=0, d=D, **kw):
+    return Charge(source="ctbc_statement", card_last4="1234", charge_date=d, amount=amount, line_no=n, **kw)
+
+
+def test_upsert_帳單行配到LINE列_存成merged並補欄位(monkeypatch):
+    cand = _row(7, 500, status="matched", source="ctbc_line", line_no=0, charge_time="12:30", merchant="A店",
+                region=None, matched_key="INV1", batch="2026-09-13-1", merged_into=None)
+    calls = []
+
+    def cands(db, source, charges):
+        calls.append((source, list(charges)))
+        return [(7, repo._to_charge(cand))]
+    monkeypatch.setattr(repo, "_merge_candidates", cands)
+    monkeypatch.setattr(repo, "_by_ids", lambda db, ids: [cand] if 7 in set(ids) else [])
+    db = FakeSession()
+    incoming = [stmt(500, 0, post_date=date(2026, 9, 12), region="TW", merchant="A店OCR"), stmt(300, 1)]
+    n = repo.upsert_charges(db, "<ctbc1>", incoming)
+    assert n == 2 and calls == [("ctbc_line", incoming)]
+    merged, plain = db.added
+    assert (merged.line_no, merged.status, merged.merged_into, merged.message_id) == (0, "merged", 7, "<ctbc1>")
+    assert (plain.line_no, plain.status, plain.merged_into) == (1, "unmatched", None)
+    assert (cand.post_date, cand.region, cand.merchant, cand.charge_time) == (date(2026, 9, 12), "TW", "A店", "12:30")
+    assert (cand.status, cand.matched_key, cand.batch) == ("matched", "INV1", "2026-09-13-1")
+    assert db.commits == 1
+
+
+def test_upsert_LINE列配到帳單列_帳單列改用LINE的店名與時間(monkeypatch):
+    cand = _row(8, 500, status="ignored", source="ctbc_statement", line_no=3, merchant="A店OCR",
+                post_date=date(2026, 9, 12), batch="2026-09-20-2", merged_into=None)
+    monkeypatch.setattr(repo, "_merge_candidates", lambda db, source, charges: [(8, repo._to_charge(cand))])
+    monkeypatch.setattr(repo, "_by_ids", lambda db, ids: [cand])
+    db = FakeSession()
+    c = Charge(source="ctbc_line", card_last4="1234", charge_date=D, amount=500, line_no=0,
+               charge_time="12:30", merchant="A店")
+    assert repo.upsert_charges(db, "line:m1", [c]) == 1
+    assert (db.added[0].status, db.added[0].merged_into) == ("merged", 8)
+    assert (cand.merchant, cand.charge_time, cand.post_date) == ("A店", "12:30", date(2026, 9, 12))
+    assert (cand.status, cand.matched_key, cand.batch) == ("ignored", None, "2026-09-20-2")
+    assert db.commits == 1
+
+
+def test_upsert_同一封帳單第二次_不重插也不再合併(monkeypatch):
+    def boom(*a, **k): raise AssertionError("已存在的列不該再找合併對象")
+    monkeypatch.setattr(repo, "_merge_candidates", boom)
+    monkeypatch.setattr(repo, "_by_ids", boom)
+    db = FakeSession(rows=[(0,), (1,)])
+    assert repo.upsert_charges(db, "<ctbc1>", [stmt(500, 0), stmt(300, 1)]) == 0
+    assert db.added == [] and db.commits == 1
+
+
+def test_upsert_永豐不找合併對象_照舊unmatched(monkeypatch):
+    def boom(*a, **k): raise AssertionError("永豐不參與合併")
+    monkeypatch.setattr(repo, "_merge_candidates", boom)
+    db = FakeSession()
+    assert repo.upsert_charges(db, "<s1>", [ch(100, 0)]) == 1
+    assert (db.added[0].status, db.added[0].merged_into) == ("unmatched", None)
+
+
+def test_upsert_沒配到_照舊unmatched(monkeypatch):
+    monkeypatch.setattr(repo, "_merge_candidates", lambda db, source, charges: [])
+    monkeypatch.setattr(repo, "_by_ids", lambda db, ids: [])
+    db = FakeSession()
+    assert repo.upsert_charges(db, "<ctbc1>", [stmt(500, 0)]) == 1
+    assert (db.added[0].status, db.added[0].merged_into) == ("unmatched", None)
+
+
+class RecordingQuery(FakeQuery):
+    def __init__(self, rows, log, counts=None):
+        super().__init__(rows)
+        self.log, self.counts = log, counts
+    def filter(self, *a, **k):
+        self.log.extend(a)
+        return self
+    def count(self): return self.counts.pop(0)
+
+
+class RecordingSession(FakeSession):
+    def __init__(self, rows=(), counts=None):
+        super().__init__(rows)
+        self.queries, self.counts = [], counts
+    def query(self, *a, **k):
+        log = []
+        self.queries.append(log)
+        return RecordingQuery(self.rows, log, self.counts)
+
+
+def _conds(exprs):
+    """把 filter 收到的 `欄位 op 值` 運算式攤成 (欄位, 運算子名, 值)。"""
+    return {(e.left.key, e.operator.__name__, e.right.value) for e in exprs}
+
+
+def test_all_charges_排除merged():
+    db = RecordingSession([_row(1, 100)])
+    assert [c.amount for c in repo.all_charges(db)] == [100]
+    assert ("status", "ne", "merged") in _conds(db.queries[0])
+
+
+def test_transaction_fields_沒店名用商店類型():
+    f = repo.transaction_fields(Charge(source="ctbc_line", card_last4="1234", charge_date=D, amount=359, line_no=0,
+                                       charge_time="10:05", merchant_type="居家/修繕/3C家電"))
+    assert f["item"] == "信用卡消費（居家/修繕/3C家電）" and f["created_at"] == datetime(2026, 9, 10, 10, 5)
+    assert repo.transaction_fields(ch(80))["item"] == "信用卡消費"
+    assert repo.transaction_fields(ch(80, region="TW", merchant_type="餐飲"))["item"] == "信用卡消費（餐飲）"
+    assert repo.transaction_fields(ch(80, merchant="某店", merchant_type="餐飲"))["item"] == "某店"
+
+
+def test_set_merchant_by_line_補到被指的列_已有店名的不動(monkeypatch):
+    rows = [_row(1, 500, source="ctbc_statement", line_no=0, status="merged", merged_into=7),
+            _row(2, 300, source="ctbc_statement", line_no=1, status="merged", merged_into=8),
+            _row(3, 200, source="ctbc_statement", line_no=2, merged_into=None)]
+    target = {7: _row(7, 500, source="ctbc_line", merchant=None), 8: _row(8, 300, source="ctbc_line", merchant="B店")}
+    monkeypatch.setattr(repo, "_by_ids", lambda db, ids: [target[i] for i in ids if i in target])
+    db = FakeSession(rows)
+    assert repo.set_merchant_by_line(db, "<ctbc1>", {0: "A店OCR", 1: "B店OCR", 2: "C店OCR"}) == 3
+    assert [r.merchant for r in rows] == ["A店OCR", "B店OCR", "C店OCR"]
+    assert (target[7].merchant, target[8].merchant) == ("A店OCR", "B店")
+    assert db.commits == 1
+
+
+def test_weekly_line_stats_本週LINE筆數與合併筆數():
+    since = date(2026, 10, 11)
+    db = RecordingSession(counts=[4, 2])
+    assert repo.weekly_line_stats(db, since) == (4, 2)
+    assert {("source", "eq", "ctbc_line"), ("charge_date", "ge", since)} <= _conds(db.queries[0])
+    assert {("status", "eq", "merged"), ("created_at", "ge", datetime(2026, 10, 11))} <= _conds(db.queries[1])

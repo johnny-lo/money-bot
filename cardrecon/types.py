@@ -61,6 +61,9 @@ class WeeklyResult:
     total: int = 0
     failed_mails: int = 0                       # 解密失敗
     unparsed_mails: int = 0                     # 沒附件或解析 0 筆
+    line_charges: int = 0                       # 近 7 天刷卡的中信 LINE 通知筆數
+    merged: int = 0                             # 近 7 天 LINE↔帳單合併成一筆的筆數
+    line_state: str | None = None               # LINE listener 狀態；沒有 listener 列為 None
 
 
 @dataclass(frozen=True)

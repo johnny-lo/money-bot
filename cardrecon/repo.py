@@ -3,7 +3,7 @@ import re
 from dataclasses import asdict, replace
 from datetime import date, datetime, time, timedelta
 
-from sqlalchemy import or_
+from sqlalchemy import or_, select
 
 from models import CardCharge, MerchantBrand, Transaction
 
@@ -32,16 +32,59 @@ def max_page(db, day: str) -> int:
 
 
 def upsert_charges(db, message_id: str, charges: list[Charge]) -> int:
-    """新的才插；已存在（同信同行）一律跳過，不覆蓋 status（避免把忽略/已補記蓋回 unmatched）。"""
+    """新的才插；已存在（同信同行）一律跳過，不覆蓋 status（避免把忽略/已補記蓋回 unmatched）。
+    MERGE_PAIRS 的來源若在對方來源找到同一筆刷卡，新列存成 merged 並指回對方那列，對方那列補上缺的欄位
+    （status、matched_key、batch 不動），同一筆刷卡就只有一列會進清單、拿去配發票。"""
     existing = {n for (n,) in db.query(CardCharge.line_no).filter(CardCharge.message_id == message_id).all()}
-    new = 0
-    for c in charges:
-        if c.line_no in existing:
-            continue
-        db.add(CardCharge(message_id=message_id, status="unmatched", **asdict(c)))
-        new += 1
+    fresh = [c for c in charges if c.line_no not in existing]
+    into = _pair_merges(db, fresh)
+    for c in fresh:
+        status = "merged" if c.line_no in into else "unmatched"
+        db.add(CardCharge(message_id=message_id, status=status, merged_into=into.get(c.line_no), **asdict(c)))
     db.commit()
-    return new
+    return len(fresh)
+
+
+def _pair_merges(db, fresh: list[Charge]) -> dict[int, int]:
+    """新列的 line_no → 要合併進去的對方列 id；順手把 merge_updates 寫到對方列上（由呼叫端 commit）。"""
+    into: dict[int, int] = {}
+    for source, other in config.MERGE_PAIRS.items():
+        mine = [c for c in fresh if c.source == source]
+        if not mine:
+            continue
+        pairs = matcher.pair_merges([(c.line_no, c) for c in mine], _merge_candidates(db, other, mine),
+                                    config.MERGE_SLACK_DAYS)
+        if not pairs:
+            continue
+        rows = {r.id: r for r in _by_ids(db, set(pairs.values()))}
+        by_line = {c.line_no: c for c in mine}
+        for line_no, cid in pairs.items():
+            row = rows.get(cid)
+            if row is None:
+                continue
+            for k, v in matcher.merge_updates(_to_charge(row), by_line[line_no]).items():
+                setattr(row, k, v)
+            into[line_no] = cid
+    return into
+
+
+def _merge_candidates(db, source: str, charges: list[Charge]) -> list[tuple[int, Charge]]:
+    """source 來源裡可能跟 charges 是同一筆的列：還沒被合併過（自己不是 merged、也沒有別列指著它）、
+    卡號與金額相同、刷卡日在 ±MERGE_SLACK_DAYS 內。"""
+    if not charges:
+        return []
+    slack = timedelta(days=config.MERGE_SLACK_DAYS)
+    taken = select(CardCharge.merged_into).where(CardCharge.merged_into.isnot(None))
+    rows = (db.query(CardCharge)
+            .filter(CardCharge.source == source, CardCharge.status != "merged", CardCharge.id.notin_(taken),
+                    CardCharge.card_last4.in_(sorted({c.card_last4 for c in charges})),
+                    CardCharge.amount.in_(sorted({c.amount for c in charges})),
+                    CardCharge.charge_date >= min(c.charge_date for c in charges) - slack,
+                    CardCharge.charge_date <= max(c.charge_date for c in charges) + slack)
+            .order_by(CardCharge.charge_date, CardCharge.id).all())
+    want = [(c.card_last4, c.amount, c.charge_date) for c in charges]
+    return [(r.id, _to_charge(r)) for r in rows
+            if any(r.card_last4 == k and r.amount == a and abs(r.charge_date - d) <= slack for k, a, d in want)]
 
 
 def _no_merchant():
@@ -65,15 +108,21 @@ def missing_merchant_lines(db, message_id: str) -> set[int]:
 
 
 def set_merchant_by_line(db, message_id: str, mapping: dict[int, str]) -> int:
-    """依 (信, 行號) 補店名；只寫店名還空著的列，已有的不動。回寫了幾筆。"""
+    """依 (信, 行號) 補店名；只寫店名還空著的列，已有的不動。回寫了幾筆。
+    merged 列的店名也補到它指著的那列（店名還空著才補）：帳單店名是 upsert 之後才讀圖讀出來的。"""
     if not mapping:
         return 0
-    n = 0
+    n, forward = 0, {}
     for r in db.query(CardCharge).filter(CardCharge.message_id == message_id, _no_merchant()).all():
         name = mapping.get(r.line_no)
         if name and not r.merchant:
             r.merchant = name
             n += 1
+            if (target := getattr(r, "merged_into", None)) is not None:
+                forward[target] = name
+    for r in _by_ids(db, forward):
+        if not r.merchant:
+            r.merchant = forward[r.id]
     db.commit()
     return n
 
@@ -161,7 +210,16 @@ def load_groups(db, since: date) -> list[TxGroup]:
 
 
 def all_charges(db) -> list[Charge]:
-    return [_to_charge(r) for r in db.query(CardCharge).all()]
+    """線索用的歷史刷卡；merged 列跟它指著的那列是同一筆，不重複算。"""
+    return [_to_charge(r) for r in db.query(CardCharge).filter(CardCharge.status != "merged").all()]
+
+
+def weekly_line_stats(db, since: date) -> tuple[int, int]:
+    """(since 起刷卡的 LINE 通知筆數, since 起新存成 merged 的筆數)。"""
+    line = db.query(CardCharge).filter(CardCharge.source == config.LINE_SOURCE, CardCharge.charge_date >= since).count()
+    merged = (db.query(CardCharge)
+              .filter(CardCharge.status == "merged", CardCharge.created_at >= datetime.combine(since, time())).count())
+    return line, merged
 
 
 def unlist(db) -> int:
@@ -215,7 +273,8 @@ def ignore(db, batch: str, ids: list[int]) -> int:
 def transaction_fields(c: Charge, brands: dict[str, str] | None = None) -> dict:
     hh, mm = (int(x) for x in c.charge_time.split(":")) if c.charge_time else (12, 0)
     name = display_name(c.merchant, brands or {})
-    return {"item": name or f"信用卡消費（{c.region}）", "price": c.amount, "source": "信用卡",
+    kind = c.merchant_type or c.region
+    return {"item": name or (f"信用卡消費（{kind}）" if kind else "信用卡消費"), "price": c.amount, "source": "信用卡",
             "created_at": datetime.combine(c.charge_date, time(hh, mm)),
             "invoice_no": None, "seller": None, "category": None}
 

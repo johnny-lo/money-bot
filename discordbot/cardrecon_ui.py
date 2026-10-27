@@ -12,7 +12,7 @@ from database import SessionLocal
 
 from .bridge import post_sync
 
-_SRC = {"sinopac_daily": "永豐", "ctbc_statement": "中信"}
+_SRC = {"sinopac_daily": "永豐", "ctbc_statement": "中信", "ctbc_line": "中信"}
 _MARK = {"ignored": "已忽略", "matched": "✅ 已有帳", "recorded": "📝 已補記"}
 COLOR = 0xE67E22
 
@@ -36,7 +36,10 @@ _GROUP_LABEL = dict(hints.GROUPS)
 def line(c: Charge, status: str = "unmatched", hint: str | None = None) -> str:
     when = f"{c.charge_date:%m/%d} {c.charge_time}" if c.charge_time else f"{c.charge_date:%m/%d}"
     s = f"{when} {_SRC.get(c.source, c.source)} {c.region or ''} ${c.amount:,}"   # 只寫銀行，不標末四碼
-    s = f"{s} {c.merchant}" if c.merchant else s
+    if c.merchant:
+        s = f"{s} {c.merchant}"
+    elif c.merchant_type:                                 # 中信 LINE 的網路消費只有商店類型
+        s = f"{s} （{c.merchant_type}）"
     s = " ".join(s.split())
     s = f"{s} · {hint}" if hint else s
     if status == "ignored":
@@ -155,6 +158,17 @@ def _chan() -> int | None:
     return int(v) if v.isdigit() else None
 
 
+_LINE_STATE = {"ok": "正常", "kicked": "被登出，要重新掃碼", "error": "錯誤", "starting": "啟動中"}
+
+
+def line_summary(result: WeeklyResult) -> str | None:
+    """週日卡片上的 LINE 中信通知摘要；沒有 listener 狀態（還沒上線）就不顯示。"""
+    if result.line_state is None:
+        return None
+    label = _LINE_STATE.get(result.line_state, result.line_state)
+    return f"📡 LINE 中信通知：本週 {result.line_charges} 筆 · 合併帳單 {result.merged} 筆 · 狀態 {label}"
+
+
 def notify_weekly(result: WeeklyResult) -> None:
     chan = _chan()
     if not chan:
@@ -168,6 +182,9 @@ def notify_weekly(result: WeeklyResult) -> None:
         items = [(i, c, "unmatched", h) for i, c, h in chunk]
         post_sync(chan, [page_embed(batch, items, page=f"{seen[group]}/{total[group]}", group=group)],
                   make_view=lambda b=batch, it=items: page_view(b, it))
+    summary = line_summary(result)
+    if summary:                                           # 沒有清單頁也發：listener 被登出要讓人看得到
+        post_sync(chan, [discord.Embed(description=summary, color=COLOR)])
     bad = result.failed_mails + result.unparsed_mails
     if bad:
         post_sync(chan, [discord.Embed(
