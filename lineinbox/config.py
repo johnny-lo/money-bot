@@ -8,6 +8,7 @@ HEARTBEAT_SEC = 300
 STALE_MIN = 60                      # 心跳超過這麼久沒更新就告警
 BACKOFF_START = 5                   # 斷線重連：5 秒起、每次加倍
 BACKOFF_MAX = 600
+STREAM_STABLE_SEC = 60              # 長連線撐過這麼久才斷，下一次退避從頭算（安靜時段也會穩定斷線）
 KICKED_POLL_SEC = 60                # 被踢或找不到聊天室時，多久看一次 session 檔有沒有換新
 CODEX_FALLBACK_MODEL = "gpt-5.6-sol"  # 容器裡的 codex 0.154.0 用 ChatGPT 帳號時，sol 系列只接受這個
 FALLBACK_DATE_SLACK_DAYS = 1        # codex 抽出的刷卡日離訊息時間超過這麼多天就不信
