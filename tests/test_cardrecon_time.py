@@ -141,7 +141,7 @@ def test_repo已用鍵拆開多鍵():
 
 def test_batch_view_永豐刷卡_時間接近金額不同的發票_不成線索(monkeypatch):
     row = SimpleNamespace(id=1, source="sinopac_daily", card_last4="1234", charge_date=D, amount=500, line_no=0,
-                          charge_time="12:00", post_date=None, region="TW", merchant=None, pay_method=None,
+                          charge_time="12:00", post_date=None, region="TW", merchant=None, pay_method=None, merchant_type=None,
                           status="unmatched", matched_key=None, batch="b")
     monkeypatch.setattr(repo, "_batch_rows", lambda db, b: [row])
     monkeypatch.setattr(repo, "brand_map", lambda db: {})

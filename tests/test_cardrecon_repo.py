@@ -53,7 +53,7 @@ def test_transaction_fields_補記寫入契約():
 
 def _row(i, amount, status="unmatched", **kw):
     base = dict(id=i, source="sinopac_daily", card_last4="1234", charge_date=D, amount=amount, line_no=i,
-                charge_time=None, post_date=None, region="TW", merchant=None, pay_method=None,
+                charge_time=None, post_date=None, region="TW", merchant=None, pay_method=None, merchant_type=None,
                 status=status, matched_key=None, batch="2026-09-20-1")
     base.update(kw)
     return SimpleNamespace(**base)

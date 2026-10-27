@@ -21,3 +21,7 @@ BRAND_BATCH = 40                # 店名換品牌一次問幾個
 TIME_WINDOW_MIN = 10            # 刷卡時間與發票開立時間相差幾分鐘內算同一筆（永豐才有刷卡時間）
 MAX_SPLIT = 4                   # 一筆刷卡最多由幾張發票合計（同一刻分開結帳）
 KEY_SEP = "+"                   # 一筆刷卡配到多張發票時，card_charges.matched_key 用它串起來
+LINE_SOURCE = "ctbc_line"       # 中信 LINE 即時通知寫進 card_charges 的來源
+# 同一筆刷卡會從兩個來源各來一次：後到的那列存成 merged、指回先到的那列（見 repo.upsert_charges）
+MERGE_PAIRS = {"ctbc_line": "ctbc_statement", "ctbc_statement": "ctbc_line"}
+MERGE_SLACK_DAYS = 1            # 同日找不到時，刷卡日最多差幾天還算同一筆

@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Integer, String, DateTime, Date, Float, ForeignKey, JSON, UniqueConstraint, func
+from sqlalchemy import Boolean, Column, Integer, String, Text, DateTime, Date, Float, ForeignKey, JSON, UniqueConstraint, func
 from database import Base
 
 class Transaction(Base):
@@ -182,10 +182,43 @@ class CardCharge(Base):
     region = Column(String, nullable=True)
     merchant = Column(String, nullable=True)
     pay_method = Column(String, nullable=True)
-    status = Column(String, nullable=False, default="unmatched", index=True)  # unmatched/matched/ignored/recorded
+    merchant_type = Column(String, nullable=True)     # 中信 LINE 通知的「商店類型」（網路消費沒有店名時才有）
+    # unmatched/matched/ignored/recorded/merged；merged＝跟另一來源的同一筆刷卡合併，只留著自己的身分
+    status = Column(String, nullable=False, default="unmatched", index=True)
     matched_key = Column(String, nullable=True)
+    merged_into = Column(Integer, nullable=True)      # status=merged 時指向留下來的那一列 card_charges.id
     batch = Column(String, nullable=True, index=True)
     created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class LineMessage(Base):
+    """LINE 收件匣（lineinbox/）：只存被監看官方帳號的訊息，一則一列。message_id 是 LINE 的 id（不含前綴）。"""
+    __tablename__ = "line_messages"
+
+    id = Column(Integer, primary_key=True)
+    message_id = Column(String, nullable=False, unique=True)
+    source = Column(String, nullable=False, index=True)          # lineinbox.config.WATCHED 的值，例如 "ctbc"
+    sent_at = Column(DateTime, nullable=False)                   # LINE createdTime 換成台北時間（naive）
+    alt_text = Column(String, nullable=True)
+    content_type = Column(Integer, nullable=True)
+    texts = Column(Text, nullable=False)                         # 攤平後的文字段落，JSON 陣列
+    kind = Column(String, nullable=False)                        # spend / other
+    status = Column(String, nullable=False, index=True)          # lineinbox.types 的狀態常數
+    error = Column(String, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+
+class LineListenerState(Base):
+    """money-line listener 的狀態（只有 id=1 一列）。heartbeat_at 只在狀態正常時更新，watchdog 靠它判斷停擺。"""
+    __tablename__ = "line_listener_state"
+
+    id = Column(Integer, primary_key=True)
+    state = Column(String, nullable=False)
+    heartbeat_at = Column(DateTime, nullable=True)
+    last_error = Column(String, nullable=True)
+    alerted = Column(String, nullable=True)                      # 已經發過的告警種類；同種不重發
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 

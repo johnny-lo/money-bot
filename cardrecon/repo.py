@@ -14,7 +14,7 @@ from .types import Charge, RecordResult, TxGroup
 def _to_charge(r) -> Charge:
     return Charge(source=r.source, card_last4=r.card_last4, charge_date=r.charge_date, amount=r.amount,
                   line_no=r.line_no, charge_time=r.charge_time, post_date=r.post_date, region=r.region,
-                  merchant=r.merchant, pay_method=r.pay_method)
+                  merchant=r.merchant, pay_method=r.pay_method, merchant_type=r.merchant_type)
 
 
 def has_source(db, source: str) -> bool:

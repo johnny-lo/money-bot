@@ -121,6 +121,9 @@ try:
             ("mail_valued_domains", "card", "ALTER TABLE mail_valued_domains ADD COLUMN card VARCHAR"),
             ("mail_valued_domains", "posted_at", "ALTER TABLE mail_valued_domains ADD COLUMN posted_at TIMESTAMP"),
             ("mail_valued_domains", "decided_at", "ALTER TABLE mail_valued_domains ADD COLUMN decided_at TIMESTAMP"),
+            # card_charges 補 LINE 通知的商店類型、跨來源合併的指向
+            ("card_charges", "merchant_type", "ALTER TABLE card_charges ADD COLUMN merchant_type VARCHAR"),
+            ("card_charges", "merged_into", "ALTER TABLE card_charges ADD COLUMN merged_into INTEGER"),
         ):
             if _inspector.has_table(_tbl) and _col not in [c["name"] for c in _inspector.get_columns(_tbl)]:
                 _conn.execute(_text(_ddl))

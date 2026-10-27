@@ -5,7 +5,7 @@ from datetime import date, time
 
 @dataclass(frozen=True)
 class Charge:
-    source: str                      # "sinopac_daily" | "ctbc_statement"
+    source: str                      # "sinopac_daily" | "ctbc_statement" | "ctbc_line"
     card_last4: str
     charge_date: date
     amount: int                      # 台幣整數，> 0
@@ -14,7 +14,8 @@ class Charge:
     post_date: date | None = None    # 入帳日（中信才有）
     region: str | None = None
     merchant: str | None = None
-    pay_method: str | None = None    # 中信行動支付代碼（"A" 等）
+    pay_method: str | None = None    # 中信帳單的行動支付代碼（"A" 等）；中信 LINE 通知的「交易類型」
+    merchant_type: str | None = None # 中信 LINE 通知的「商店類型」（網路消費沒有店名時才有）
 
 
 @dataclass(frozen=True)
