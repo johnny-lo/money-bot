@@ -104,3 +104,45 @@ def test_page_embed_description不超過4096():
     e = ui.page_embed("b-1", items)
     assert len(e.description) <= 4096
     assert "同卡同金額 12 個月都有" in e.description
+
+
+def test_line_網路消費顯示商店類型():
+    c = Charge(source="ctbc_line", card_last4="1234", charge_date=D, amount=359, line_no=0, charge_time="10:05",
+               merchant_type="居家/修繕/3C家電")
+    assert ui.line(c) == "10/03 10:05 中信 $359 （居家/修繕/3C家電）"
+    named = Charge(source="ctbc_line", card_last4="1234", charge_date=D, amount=1280, line_no=0, charge_time="19:42",
+                   merchant="XX炸雞-測試店", merchant_type="餐飲")
+    assert ui.line(named) == "10/03 19:42 中信 $1,280 XX炸雞-測試店"
+    assert "1234" not in ui.line(c)
+
+
+def test_line_summary():
+    assert ui.line_summary(WeeklyResult(line_charges=3, merged=1)) is None
+    assert ui.line_summary(WeeklyResult(line_charges=12, merged=4, line_state="ok")) == \
+        "📡 LINE 中信通知：本週 12 筆 · 合併帳單 4 筆 · 狀態 正常"
+    assert ui.line_summary(WeeklyResult(line_state="kicked")) == \
+        "📡 LINE 中信通知：本週 0 筆 · 合併帳單 0 筆 · 狀態 被登出，要重新掃碼"
+    assert ui.line_summary(WeeklyResult(line_state="error")).endswith("狀態 錯誤")
+    assert ui.line_summary(WeeklyResult(line_state="starting")).endswith("狀態 啟動中")
+    assert ui.line_summary(WeeklyResult(line_state="weird")).endswith("狀態 weird")
+
+
+def test_notify_weekly_沒有清單頁也發LINE摘要(monkeypatch):
+    sent = []
+    monkeypatch.setenv("DISCORD_INVOICE_CHANNEL_ID", "42")
+    monkeypatch.setattr(ui, "post_sync", lambda cid, embeds, make_view=None: sent.append((cid, embeds, make_view)))
+    r = WeeklyResult(line_charges=5, merged=2, line_state="ok")
+    ui.notify_weekly(r)
+    assert len(sent) == 1 and sent[0][0] == 42 and len(sent[0][1]) == 1
+    assert sent[0][1][0].description == ui.line_summary(r) and sent[0][2] is None
+
+
+def test_notify_weekly_有清單頁也另發LINE摘要(monkeypatch):
+    sent = []
+    monkeypatch.setenv("DISCORD_INVOICE_CHANNEL_ID", "42")
+    monkeypatch.setattr(ui, "post_sync", lambda cid, embeds, make_view=None: sent.append(embeds))
+    r = WeeklyResult(pages=[("x-1", "other", [(1, ch(100), None)])], line_charges=1, line_state="kicked")
+    ui.notify_weekly(r)
+    assert len(sent) == 2
+    assert [e.description for e in sent[1]] == [ui.line_summary(r)]
+    assert ui.line_summary(r) not in (sent[0][0].description or "")

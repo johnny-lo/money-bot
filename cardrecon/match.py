@@ -116,3 +116,45 @@ def group_transactions(rows: list[tuple[int, str | None, datetime, int]]) -> lis
         if inv and acc[key][2] is None and created.time() != time():
             acc[key][2] = created.time()
     return [TxGroup(key=k, tx_date=v[0], amount=v[1], tx_time=v[2]) for k, v in acc.items()]
+
+
+def _order(x: tuple[int, Charge]):
+    return (x[1].charge_date, x[1].charge_time or "", x[0])
+
+
+def pair_merges(incoming: list[tuple[int, Charge]], candidates: list[tuple[int, Charge]],
+                slack_days: int = 1) -> dict[int, int]:
+    """兩個來源的同一筆刷卡（同卡號末四碼、同金額）一對一配對：先把日期差 0 的全部配完，再依序放寬到 slack_days，
+    差一天的才不會搶走同日那筆的對象。同一輪內兩邊都依 (刷卡日, 時間, id) 取第一個還沒用過的。回 incoming key → candidate id。"""
+    inc, cands = sorted(incoming, key=_order), sorted(candidates, key=_order)
+    used, out = set(), {}
+    for gap in range(slack_days + 1):
+        for key, c in inc:
+            if key in out:
+                continue
+            hit = next((cid for cid, k in cands if cid not in used and k.card_last4 == c.card_last4
+                        and k.amount == c.amount and abs((k.charge_date - c.charge_date).days) == gap), None)
+            if hit is not None:
+                out[key] = hit
+                used.add(hit)
+    return out
+
+
+def _first(a, b):
+    # 空字串跟 None 一樣當作沒有（card_charges 的店名兩種都出現過）
+    return a if a not in (None, "") else b
+
+
+def merge_updates(canonical: Charge, incoming: Charge) -> dict[str, object]:
+    """同一筆刷卡的 LINE 通知與中信帳單合併後，canonical 列該改成的欄位（只回跟現值不同的）。
+    店名、時間、商店類型、交易類型以 LINE 為準：帳單店名是讀圖來的，可能讀錯；入帳日與地區只有帳單有。"""
+    line, stmt = (canonical, incoming) if canonical.source == config.LINE_SOURCE else (incoming, canonical)
+    want = {
+        "charge_time": _first(line.charge_time, stmt.charge_time),
+        "merchant": _first(line.merchant, stmt.merchant),
+        "merchant_type": _first(line.merchant_type, stmt.merchant_type),
+        "pay_method": _first(line.pay_method, stmt.pay_method),
+        "post_date": _first(stmt.post_date, line.post_date),
+        "region": _first(stmt.region, line.region),
+    }
+    return {k: v for k, v in want.items() if getattr(canonical, k) != v}

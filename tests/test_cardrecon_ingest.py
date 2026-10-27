@@ -6,6 +6,8 @@ import pytest
 import codex_cli
 from cardrecon import ingest
 from cardrecon.types import Bitmap, Charge, RawMail, Receipt, TxGroup
+from lineinbox import repo as line_repo
+from lineinbox.types import ListenerState
 
 TODAY = date(2026, 10, 18)
 
@@ -93,6 +95,7 @@ class FakeRepo:
     def assign_batch(self, db, ids, batch):
         for i in ids:
             self.rows[i]["batch"] = batch
+    def weekly_line_stats(self, db, since): return (0, 0)
 
 
 def _wire(monkeypatch, fake, mails, texts):
@@ -104,6 +107,8 @@ def _wire(monkeypatch, fake, mails, texts):
     monkeypatch.setattr(ingest.pdf, "ctbc_merchant_cells", lambda data, pw: [])
     monkeypatch.setattr(ingest.merchant_ocr, "read_names", lambda bms: [None] * len(bms))
     monkeypatch.setattr(ingest.brand, "suggest", lambda raws: {})
+    # LINE listener 狀態在 line_listener_state 表：預設當作沒有列，不連 DB
+    monkeypatch.setattr(line_repo, "listener_state", lambda db: None)
 
 
 def mail(mid, pdf=b"x", text=""):
@@ -396,3 +401,37 @@ def test_清單_永豐刷卡有時間接近但金額不同的發票_照原規則
     _wire(monkeypatch, fake, {}, {})
     res = ingest.relist(TODAY)
     assert [(g, h) for _, g, items in res.pages for _, _, h in items] == [("other", None)]
+
+
+def test_run_weekly_填LINE統計(monkeypatch):
+    fake = FakeRepo()
+    fake.groups = []
+    _wire(monkeypatch, fake, {}, {})
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: []})
+    seen = []
+    monkeypatch.setattr(fake, "weekly_line_stats", lambda db, since: seen.append(since) or (4, 2), raising=False)
+    monkeypatch.setattr(line_repo, "listener_state", lambda db: ListenerState("kicked", None, "refresh 被拒", None))
+    res = ingest.run_weekly(TODAY)
+    assert (res.line_charges, res.merged, res.line_state) == (4, 2, "kicked")
+    assert seen == [date(2026, 10, 11)]
+
+
+def test_run_weekly_沒有listener列_line_state為None(monkeypatch):
+    fake = FakeRepo()
+    fake.groups = []
+    _wire(monkeypatch, fake, {}, {})
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: []})
+    monkeypatch.setattr(fake, "weekly_line_stats", lambda db, since: (1, 0), raising=False)
+    res = ingest.run_weekly(TODAY)
+    assert (res.line_charges, res.merged, res.line_state) == (1, 0, None)
+
+
+def test_run_weekly_讀listener狀態失敗_只警告(monkeypatch, capsys):
+    fake = FakeRepo()
+    fake.groups = []
+    _wire(monkeypatch, fake, {}, {})
+    monkeypatch.setattr(ingest.parse, "PARSERS", {"sinopac_daily": lambda t: [], "ctbc_statement": lambda t: []})
+    def boom(db): raise RuntimeError("db down")
+    monkeypatch.setattr(line_repo, "listener_state", boom)
+    res = ingest.run_weekly(TODAY)
+    assert res.line_state is None and "⚠️" in capsys.readouterr().out

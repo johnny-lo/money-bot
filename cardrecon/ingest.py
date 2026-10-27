@@ -3,6 +3,7 @@ from datetime import date, timedelta
 
 from app_secrets import get_secret
 from database import SessionLocal
+from lineinbox import repo as line_repo
 
 from . import brand, config, gmail, hints, merchant_ocr, parse, pdf, repo
 from . import match as matcher
@@ -139,7 +140,16 @@ def _run(db, today: date) -> WeeklyResult:
         repo.mark_matched(db, matcher.match(pend, groups))
 
     _list(db, today, res, repo.max_page(db, today.isoformat()))
+    _line_stats(db, today, res)
     return res
+
+
+def _line_stats(db, today: date, res: WeeklyResult) -> None:
+    """週日卡片上的 LINE 通知摘要。只是附帶資訊：讀不到就留預設值，不擋清單。"""
+    since = today - timedelta(days=7)
+    res.line_charges, res.merged = _soft(db, "LINE 通知統計", lambda: repo.weekly_line_stats(db, since), (0, 0))
+    st = _soft(db, "讀 LINE listener 狀態", lambda: line_repo.listener_state(db))
+    res.line_state = st.state if st is not None else None
 
 
 def backfill_merchants(today: date, db=None) -> dict:
