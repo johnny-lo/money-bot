@@ -102,7 +102,7 @@
 | 排程 | APScheduler (背景排程) |
 | 爬蟲 | Playwright + Chromium (財政部電子發票) |
 | 前端報表 | ECharts 5 (純 HTML/JS) |
-| 部署 | Docker Compose (app + PostgreSQL) + Tailscale Funnel 對外 |
+| 部署 | Docker Compose (app + PostgreSQL + line) + Tailscale Funnel 對外 |
 
 **Discord Bot 韌性**：Discord 是長連線 websocket（自己外連 gateway），啟動走監管迴圈 `run_discord_bot`——暫時性失敗（開機 DNS 未 ready、連線閃斷、gateway 重連耗盡）以指數退避（5s→cap 5 分）自動重試，直到接上；只有 `LoginFailure`（token 無效）才停手。取代舊版無監管的一次性 task（一拋例外就永久離線）。健康訊號 `🐉 Discord Bot 已上線` 與重試訊息都 `flush=True`，`docker logs` 即時可見。
 
@@ -126,6 +126,25 @@
   快取在 `merchant_brands`、每個原名只問一次；清單每行與補記進帳目的品名都顯示品牌，原名留在 `card_charges.merchant`。
   分期保留期數：「富邦EC分期03-03」顯示成「富邦EC（分期 3/3）」。
 - **已列過的不會重列**；舊卡的按鈕一直有效。解密失敗或解析 0 筆的信會另發警告卡（銀行改版或密碼變了的訊號）。
+
+### 中信 LINE 刷卡通知（`money-line` 容器）
+- **做什麼**：讀本人個人 LINE 裡官方帳號「中國信託」推的消費通知，刷卡後約 1 分鐘內寫進刷卡比對（來源 `ctbc_line`），
+  帶刷卡時間（到分鐘）與實體店店名；網路消費沒有店名，清單上顯示商店類型。不用等月帳單，週日清單就有完整的中信刷卡。
+- **怎麼讀**：非官方的 [OkLine](https://github.com/NiceDayZc/OkLine)（模仿 LINE Chrome 擴充功能的協定），固定在審過的 commit，
+  build 時驗 LINE 程式檔的 sha256。**只讀**：不傳訊息、不送已讀、不改設定；其他聊天室的訊息在記憶體裡就丟掉，不存、不 log。
+  自動化個人帳號違反 LINE 條款，帳號有被限制的風險；LINE 公告要停掉 Chrome 版，停了這條就斷，退回只靠月帳單。
+- **獨立容器**：LINE 登入檔（等於整個帳號加解密金鑰）只在 `money-line`，主機路徑 `~/.config/money-bot/line/tokens.json`；
+  容器只拿得到 DB 連線，碰不到 codex、Discord token 與其他機密。同一個 LINE 帳號只能有一個 Chrome 版登入：
+  **Chrome 裡不要再登入 LINE**，一登入就會把 listener 擠掉（LINE 電腦版是另一個位置，不受影響）。
+- **跟月帳單合成一筆**：之後中信月帳單的同一筆（同卡號末四碼、同金額、同日，找不到才放寬一天）會合成一筆，
+  不會在清單出現兩次；LINE 的店名與時間優先，帳單補上入帳日。海外商店的通知（有「外幣金額」）只是台幣約當金額，
+  不建刷卡、等帳單。分期或請款金額跟授權金額不同的刷卡不合併，兩邊各算一筆。
+- **拆不出來時**：通知版型認不得就交給 Codex（sol 模型）抽欄位、嚴格驗證；還是不行就在 `#🧾-發票通知` 發卡給本人看。
+  週日刷卡比對另附一行「📡 LINE 中信通知：本週 N 筆 · 合併帳單 M 筆 · 狀態」。
+- **被登出時**：Discord 會通知。在 repo 目錄跑下面這行、用手機 LINE 掃 QR 並確認 PIN；listener 會自己發現新的登入接著收，不用重啟：
+  ```bash
+  docker compose run --rm line okline login --save /data/tokens.json --wait 240
+  ```
 
 ### 信件整理（Gmail 歷史整理＋每日整理）
 - **信箱**：`.env` 的 `GMAIL_ADDRESS` 那個 Gmail（定位是正式對外聯絡＋求職）。**只讀信頭、不讀內文**；寫入只有三種：
