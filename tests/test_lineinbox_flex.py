@@ -11,7 +11,7 @@ def _fixture(name: str) -> dict:
     return json.loads((FIXTURES / f"{name}.json").read_text())
 
 
-def test_texts_only_collects_text_and_span_nodes():
+def test_只收文字與span節點():
     node = {
         "type": "bubble",
         "header": {"type": "text", "text": "header", "url": "https://example.invalid/header"},
@@ -40,7 +40,7 @@ def test_texts_only_collects_text_and_span_nodes():
     assert texts(node) == ["header", "hero", "body", "span", "footer", "root contents"]
 
 
-def test_message_parts_flex_and_text_message():
+def test_解析flex與文字訊息():
     alt, content_type, flattened = message_parts(_fixture("store"))
 
     assert alt == "🔔LINE Pay聯名卡消費通知🔔"
@@ -64,7 +64,7 @@ def test_message_parts_flex_and_text_message():
     }) == ("alt", 22, [])
 
 
-def test_is_spend_uses_first_flex_text_or_alt_text():
+def test_使用第一段flex文字或替代文字辨認消費():
     store_alt, _, store_texts = message_parts(_fixture("store"))
     deposit_alt, _, deposit_texts = message_parts(_fixture("deposit"))
 

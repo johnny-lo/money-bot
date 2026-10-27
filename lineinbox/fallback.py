@@ -1,4 +1,4 @@
-"""Validation boundary for AI-extracted CTBC LINE charge data."""
+"""驗證 AI 從中信 LINE 通知抽出的刷卡資料。"""
 import json
 import re
 import unicodedata
@@ -30,7 +30,7 @@ _FIELDS = set(SCHEMA["required"])
 
 
 def build_prompt(texts: list[str]) -> str:
-    """Build an extraction prompt that treats notification text as untrusted data."""
+    """建立抽取提示，並將通知文字明確標成不可信資料。"""
     payload = json.dumps(texts, ensure_ascii=False)
     schema = json.dumps(SCHEMA, ensure_ascii=False)
     return (
@@ -43,7 +43,7 @@ def build_prompt(texts: list[str]) -> str:
 
 
 def charge_from_reply(reply: str, sent_at: datetime) -> Charge | None:
-    """Validate an untrusted JSON extraction before constructing a charge."""
+    """驗證不可信的 JSON 抽取結果，通過後才建立刷卡資料。"""
     try:
         value = json.loads(reply)
     except (TypeError, json.JSONDecodeError):

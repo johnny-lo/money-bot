@@ -15,7 +15,7 @@ def _texts(name: str) -> list[str]:
     return message_parts(msg)[2]
 
 
-def test_store_charge():
+def test_實體店刷卡():
     charge = parse_ctbc_line(_texts("store"))
 
     assert charge == Charge(
@@ -31,7 +31,7 @@ def test_store_charge():
     )
 
 
-def test_online_charge_has_transaction_and_merchant_types():
+def test_網路消費帶交易類型與商店類型():
     charge = parse_ctbc_line(_texts("online"))
 
     assert charge is not None
@@ -43,14 +43,14 @@ def test_online_charge_has_transaction_and_merchant_types():
     )
 
 
-def test_foreign_amount_is_rejected_regardless_of_currency_code():
+def test_外幣金額不論幣別都拒絕():
     for name in ("foreign_usd", "foreign_twd"):
         flattened = _texts(name)
         assert foreign_amount(flattened) is True
         assert parse_ctbc_line(flattened) is None
 
 
-def test_missing_amount_or_invalid_time_returns_none():
+def test_缺少金額或時間格式錯誤時回None():
     flattened = _texts("store")
 
     assert parse_ctbc_line([part for part in flattened if part != "NT$1,280"]) is None
@@ -60,7 +60,7 @@ def test_missing_amount_or_invalid_time_returns_none():
     ]) is None
 
 
-def test_single_digit_hour_is_zero_padded():
+def test_單位數小時補零():
     flattened = [
         "2026/9/5  7:05" if part == "2026/09/05  19:42" else part
         for part in _texts("store")
@@ -72,7 +72,16 @@ def test_single_digit_hour_is_zero_padded():
     assert (charge.charge_date, charge.charge_time) == (date(2026, 9, 5), "07:05")
 
 
-def test_card_last_four_must_be_exactly_four_digits():
+def test_卡末四碼必須是四位數字():
     flattened = ["12X4" if part == "1234" else part for part in _texts("store")]
 
     assert parse_ctbc_line(flattened) is None
+
+
+def test_商店名稱只有空白時為None():
+    flattened = ["  " if part == "ＸＸ炸雞－測試店" else part for part in _texts("store")]
+
+    charge = parse_ctbc_line(flattened)
+
+    assert charge is not None
+    assert charge.merchant is None

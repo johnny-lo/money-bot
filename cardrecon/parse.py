@@ -126,12 +126,12 @@ def _ctbc_line_value(texts: list[str], label: str) -> str | None:
 
 
 def foreign_amount(texts: list[str]) -> bool:
-    """Return whether the notification includes a foreign-currency amount field."""
+    """判斷通知是否包含外幣金額欄位。"""
     return "外幣金額：" in texts
 
 
 def parse_ctbc_line(texts: list[str]) -> Charge | None:
-    """Parse one flattened CTBC LINE spending notification."""
+    """解析一則已攤平的中信 LINE 消費通知。"""
     if foreign_amount(texts):
         return None
 
@@ -159,6 +159,7 @@ def parse_ctbc_line(texts: list[str]) -> Charge | None:
 
     merchant_value = _ctbc_line_value(texts, "商店名稱：")
     merchant = unicodedata.normalize("NFKC", merchant_value).strip() if merchant_value else None
+    merchant = merchant or None
     pay_method = _ctbc_line_value(texts, "交易類型：") or None
     merchant_type = _ctbc_line_value(texts, "商店類型：") or None
     return Charge(

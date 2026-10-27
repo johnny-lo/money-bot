@@ -1,4 +1,4 @@
-"""LINE Flex message traversal helpers."""
+"""LINE Flex 訊息的走訪工具。"""
 import json
 
 
@@ -7,7 +7,7 @@ _TEXT_TYPES = {"text", "span"}
 
 
 def texts(node: dict | list) -> list[str]:
-    """Flatten text-bearing Flex nodes while ignoring actions and other metadata."""
+    """依 Flex 顯示順序攤平文字節點，略過動作與其他中繼資料。"""
     if isinstance(node, list):
         out = []
         for child in node:
@@ -29,7 +29,7 @@ def texts(node: dict | list) -> list[str]:
 
 
 def message_parts(msg: dict) -> tuple[str | None, int | None, list[str]]:
-    """Return the alternate text, content type, and flattened message text."""
+    """取出替代文字、內容類型與攤平後的訊息文字。"""
     metadata = msg.get("contentMetadata")
     if not isinstance(metadata, dict):
         metadata = {}
@@ -56,5 +56,5 @@ def message_parts(msg: dict) -> tuple[str | None, int | None, list[str]]:
 
 
 def is_spend(alt: str | None, texts: list[str]) -> bool:
-    """Identify a CTBC spending notification by its alternate or lead text."""
+    """依替代文字或第一段文字辨認中信消費通知。"""
     return (isinstance(alt, str) and "消費通知" in alt) or texts[:1] == ["刷卡通知"]
